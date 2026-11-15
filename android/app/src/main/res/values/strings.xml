@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Kevin AI </string>
+    <string name="title_activity_main">Kevin AI </string>
+    <string name="package_name">com.kevinai.pro</string>
+    <string name="custom_url_scheme">com.kevinai.pro</string>
+</resources>

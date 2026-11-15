@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+@import "katex/dist/katex.min.css";
+@import "highlight.js/styles/vs2015.css";
+
+/* Code and Syntax Highlighting Contrast Enhancements */
+pre {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  overflow-x: hidden !important;
+  tab-size: 2 !important;
+  -moz-tab-size: 2 !important;
+}
+
+pre code.hljs {
+  padding: 0 !important;
+  background: transparent !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  tab-size: 2 !important;
+  -moz-tab-size: 2 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+}
+
+/* Dark Mode KaTeX adjustments for high readability */
+.dark .katex {
+  color: #e9edef !important;
+}
+.dark .katex-display {
+  color: #e9edef !important;
+}
+
+@keyframes wave-hand {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(18deg); }
+  40% { transform: rotate(-10deg); }
+  60% { transform: rotate(18deg); }
+  80% { transform: rotate(-6deg); }
+}
+.animate-wave {
+  display: inline-block;
+  transform-origin: 70% 70%;
+  animation: wave-hand 2s infinite ease-in-out;
+}
+@keyframes float-subtle {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+.animate-float {
+  animation: float-subtle 3.5s infinite ease-in-out;
+}
+
+@keyframes progress {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+.animate-progress {
+  animation: progress 2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}

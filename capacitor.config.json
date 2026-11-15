@@ -1,0 +1,16 @@
+{
+  "appId": "com.kevinai.pro",
+  "appName": "Kevin AI ",
+  "webDir": "dist",
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 700,
+      "launchFadeOutDuration": 250,
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "backgroundColor": "#000000",
+      "showSpinner": false
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Kevin AI",
+  "description": "A friendly, modern WhatsApp-like chat interface for Kevin AI assistant.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
