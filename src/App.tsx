@@ -4,14 +4,16 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User } from 'lucide-react';
+import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, isKevinPhotoRequest, getKevinPhotoUrl, createVoiceRecordingSession, VoiceRecordingSession, runDeviceAction, loadChatHistory, saveChatHistory } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import { downloadAIImage, downloadDocumentFile } from './utils/download';
+
+const THEME_LIGHT_DEFAULT_MIGRATION_KEY = 'kevin_ai_theme_light_default_migrated';
 
 declare global {
   interface Window {
@@ -58,6 +60,98 @@ const createImageAttachment = async (file: File): Promise<AttachmentItem> => {
     size: `${Math.round(file.size / 1024)} KB`,
   };
 };
+
+type VoiceRecordingSession = {
+  mimeType: string;
+  stop: () => Promise<Blob>;
+  cancel: () => void;
+};
+
+const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      throw new Error('Audio recording is not supported on this device.');
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const supportedMimeType = [
+      'audio/mp4',
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/aac',
+    ].find(type => MediaRecorder.isTypeSupported(type)) || '';
+    if (!supportedMimeType) {
+      stream.getTracks().forEach(track => track.stop());
+      throw new Error('This device cannot record audio as WebM.');
+    }
+    const recorder = new MediaRecorder(stream, supportedMimeType ? { mimeType: supportedMimeType } : undefined);
+    const chunks: Blob[] = [];
+    let cancelled = false;
+    let settled = false;
+    let stopRequested = false;
+    let resolveStop: (blob: Blob) => void = () => undefined;
+    let rejectStop: (error: Error) => void = () => undefined;
+    const stopped = new Promise<Blob>((resolve, reject) => {
+      resolveStop = resolve;
+      rejectStop = reject;
+    });
+    const recorderMimeType = (recorder.mimeType || supportedMimeType || 'audio/webm').split(';')[0];
+    const cleanup = () => stream.getTracks().forEach(track => track.stop());
+
+    recorder.ondataavailable = event => {
+      if (event.data.size > 0) chunks.push(event.data);
+    };
+    recorder.onerror = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectStop(new Error('Microphone recording failed.'));
+    };
+    recorder.onstop = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (chunks.length === 0) {
+        console.warn('No audio chunks recorded.');
+      }
+      resolveStop(new Blob(cancelled ? [] : chunks, {
+        type: recorder.mimeType || supportedMimeType || 'audio/webm',
+      }));
+    };
+    recorder.start(200);
+
+    return {
+      mimeType: recorderMimeType,
+      stop: () => {
+        if (recorder.state === 'inactive') {
+          return Promise.resolve(new Blob(chunks, { type: recorderMimeType }));
+        }
+        if (!stopRequested) {
+          stopRequested = true;
+          recorder.stop();
+        }
+        return stopped;
+      },
+      cancel: () => {
+        cancelled = true;
+        if (recorder.state === 'inactive') {
+          cleanup();
+        } else if (!stopRequested) {
+          stopRequested = true;
+          recorder.stop();
+        }
+      },
+    };
+};
+
+const blobToBase64 = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onloadend = () => {
+    const result = typeof reader.result === 'string' ? reader.result.split(',')[1] : '';
+    result ? resolve(result) : reject(new Error('Unable to encode recorded audio.'));
+  };
+  reader.onerror = () => reject(reader.error || new Error('Unable to read recorded audio.'));
+  reader.readAsDataURL(blob);
+});
 
 const CopyButton = ({ text }: { text: string }) => {
   const [copied, setCopied] = useState(false);
@@ -125,6 +219,11 @@ export default function App() {
     return [{ id: Date.now(), title: "New Chat", messages: [], timestamp: Date.now() }];
   });
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (localStorage.getItem(THEME_LIGHT_DEFAULT_MIGRATION_KEY) !== 'true') {
+      localStorage.setItem(THEME_LIGHT_DEFAULT_MIGRATION_KEY, 'true');
+      localStorage.setItem('kevin_ai_theme', 'light');
+      return 'light';
+    }
     return (localStorage.getItem('kevin_ai_theme') as 'light' | 'dark') || 'light';
   });
 
@@ -393,29 +492,13 @@ export default function App() {
     }
   };
 
-  const blobToDataUrl = (blob: Blob) => new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-      } else {
-        reject(new Error('Unable to encode recorded audio.'));
-      }
-    };
-    reader.onerror = () => reject(reader.error || new Error('Unable to read recorded audio.'));
-    reader.readAsDataURL(blob);
-  });
-
   const resetVoiceRecordingState = () => {
     clearInterval(timerRef.current);
     voiceRecordingRef.current = null;
     setIsRecording(false);
   };
 
-  const finishVoiceRecording = async (
-    imageBase64?: string,
-    assistantRequest = false
-  ) => {
+  const finishVoiceRecording = async (imageBase64?: string, assistantRequest = false) => {
     if (voiceStoppingRef.current) return;
     const recording = voiceRecordingRef.current;
     if (!recording) return;
@@ -428,18 +511,15 @@ export default function App() {
         throw new Error('No audio was captured.');
       }
 
-      const audioDataUrl = await blobToDataUrl(audioBlob);
-      const prompt = "Listen to the attached voice note, understand it in Kinyarwanda or English, and answer the user directly.";
-      const audioAttachment: AttachmentItem = {
-        base64: audioDataUrl,
-        mimeType: recording.mimeType,
-        name: `kevin-voice.${recording.mimeType.includes('mp4') ? 'mp4' : 'webm'}`,
-        size: `${Math.max(1, Math.round(audioBlob.size / 1024))} KB`,
-      };
+      const prompt = 'Listen to the attached voice message, understand it in Kinyarwanda or English, transcribe it mentally, and reply naturally to the user.';
+      const audioBase64 = await blobToBase64(audioBlob);
+      if (audioBase64.length <= 100) {
+        throw new Error('The recorded audio is empty or invalid. Please record your message again.');
+      }
 
       if (assistantRequest) {
         const nativeBridge = window.KevinAssistantNative;
-        const attachments: AttachmentItem[] = [audioAttachment];
+        const attachments: Array<Blob | AttachmentItem> = [audioBlob];
         if (imageBase64) {
           attachments.push({
             base64: imageBase64,
@@ -458,7 +538,7 @@ export default function App() {
         return;
       }
 
-      void handleSendMessage(prompt, audioAttachment);
+      void handleSendMessage(prompt, audioBlob, audioBase64, recording.mimeType);
     } catch (error) {
       console.error("Audio processing error:", error);
       const message = error instanceof Error ? error.message : "Unable to process the voice message.";
@@ -559,47 +639,85 @@ export default function App() {
     document.getElementById('universal-file-input')?.click();
   };
 
-  const handleCapacitorPhoto = async (source: CameraSource) => {
+  const handleTakePhoto = async () => {
     try {
+      console.log('Camera button clicked - launching camera directly...');
       const photo = await CapCamera.getPhoto({
-        quality: 90,
+        quality: 70,
+        width: 1024,
+        height: 1024,
         allowEditing: false,
-        correctOrientation: true,
         resultType: CameraResultType.Base64,
-        source,
+        source: CameraSource.Camera,
+        correctOrientation: true,
+        saveToGallery: false,
       });
       const base64 = cleanBase64(photo.base64String || '');
-      if (!base64) throw new Error('The camera returned no image data.');
-      const format = photo.format || 'jpeg';
+      if (!base64) return;
       const attachment: AttachmentItem = {
-        base64: `data:image/${format};base64,${base64}`,
-        mimeType: `image/${format}`,
-        name: source === CameraSource.Camera ? 'camera_photo.jpg' : 'gallery_photo.jpg',
+        base64: `data:image/jpeg;base64,${base64}`,
+        mimeType: 'image/jpeg',
+        name: 'camera_photo.jpg',
         size: 'Image',
       };
       setAttachedImages(prev => [...prev, attachment]);
       setAttachmentPopupOpen(false);
     } catch (error) {
-      console.error('Capacitor photo selection failed:', error);
-      showToastMessage(
-        source === CameraSource.Camera
-          ? 'Unable to open the camera. You can choose a photo instead.'
-          : 'Unable to open the gallery. You can choose an image from this device.'
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('User cancelled') || message.includes('cancelled')) return;
+      console.error('Camera capture error:', error);
+      if (/plugin|not implemented|not available/i.test(message)) {
+        const fileInput = document.getElementById('camera-fallback-input') as HTMLInputElement | null;
+        fileInput?.click();
+      }
     }
   };
 
-  const handleCameraClick = (event?: React.MouseEvent) => {
-    event?.preventDefault();
-    event?.stopPropagation();
-    void handleCapacitorPhoto(CameraSource.Camera);
-  };
+  const handleGalleryClick = async (event?: React.MouseEvent) => {
+  event?.preventDefault();
+  event?.stopPropagation();
 
-  const handleGalleryClick = (event?: React.MouseEvent) => {
-    event?.preventDefault();
-    event?.stopPropagation();
-    document.getElementById('kevin-multi-picker')?.click();
-  };
+  try {
+    const { results } = await CapCamera.chooseFromGallery({
+      allowMultipleSelection: true,
+      quality: 90,
+    });
+
+    if (!results || results.length === 0) return;
+
+    const selectedImages = await Promise.all(
+      results.map(async (item, index) => {
+        const response = await fetch(item.webPath);
+
+        if (!response.ok) {
+          throw new Error('Failed to read selected image');
+        }
+
+        const blob = await response.blob();
+        const mimeType = blob.type || 'image/jpeg';
+
+        const file = new File(
+          [blob],
+          `gallery_image_${Date.now()}_${index + 1}.jpg`,
+          { type: mimeType }
+        );
+
+        return createImageAttachment(file);
+      })
+    );
+
+    setAttachedImages(prev => [...prev, ...selectedImages]);
+    setAttachmentPopupOpen(false);
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (/cancel|cancelled|canceled/i.test(message)) return;
+
+    console.error('Modern Photo Picker error:', error);
+    showToastMessage('Could not select images. Please try again.');
+  }
+};
 
   const stateRef = useRef({
     drawerOpen,
@@ -800,7 +918,12 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (overrideInput?: string, overrideAttachment?: AttachmentItem) => {
+  const handleSendMessage = async (
+    overrideInput?: string,
+    overrideAttachment?: AttachmentItem | Blob,
+    audioBase64?: string,
+    audioMimeType?: string
+  ) => {
     const textToSend = overrideInput !== undefined ? overrideInput : input;
     if (textToSend.trim() === '' && attachedImages.length === 0 && !attachedImage && !overrideAttachment) return;
     
@@ -810,6 +933,9 @@ export default function App() {
       ? [overrideAttachment]
       : [...attachedImages, ...(attachedImage ? [attachedImage] : [])];
     const currentAttachment = selectedAttachments[0];
+    const currentAttachmentMimeType = currentAttachment instanceof Blob
+      ? currentAttachment.type
+      : currentAttachment?.mimeType;
     const screenFrame = screenSharingActive ? latestScreenFrameRef.current : null;
     const attachmentsForSend = screenFrame
       ? [...selectedAttachments, screenFrame]
@@ -823,9 +949,11 @@ export default function App() {
       text: textToSend,
       sender: 'user',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      image: currentAttachment?.mimeType?.startsWith('image/') ? currentAttachment.base64 : undefined,
-      document: currentAttachment && !currentAttachment.mimeType?.startsWith('image/') ? {
-        type: currentAttachment.mimeType === 'application/pdf' ? 'pdf' : 'docx',
+      image: currentAttachmentMimeType?.startsWith('image/') && !(currentAttachment instanceof Blob)
+        ? currentAttachment.base64
+        : undefined,
+      document: currentAttachment && !(currentAttachment instanceof Blob) && !currentAttachmentMimeType?.startsWith('image/') ? {
+        type: currentAttachmentMimeType === 'application/pdf' ? 'pdf' : 'docx',
         name: currentAttachment.name || 'Document',
         size: currentAttachment.size || 'Document',
       } : undefined,
@@ -954,7 +1082,7 @@ export default function App() {
           ));
           return updatedMessages;
         });
-      });
+      }, audioBase64, audioMimeType);
       // Automatically generate and attach professional document if requested or export-oriented
       const lowerText = textToSend.toLowerCase();
       const isImageRequest = isImageGenerationRequest(textToSend);
@@ -1781,6 +1909,14 @@ export default function App() {
           onChange={handleFileSelected}
         />
         <input
+          id="camera-fallback-input"
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: 'none' }}
+          onChange={handleFileSelected}
+        />
+        <input
           id="kevin-multi-picker"
           type="file"
           accept="image/*"
@@ -1916,12 +2052,19 @@ export default function App() {
         )}
         {attachmentPopupOpen && (
           <div ref={attachmentPopupRef} className="absolute bottom-full left-0 right-0 p-4 bg-[#075E54] rounded-t-2xl shadow-xl border-t border-emerald-600/30 flex justify-around z-40">
-            <div className="flex flex-col items-center gap-1 cursor-pointer" onClick={handleCameraClick}>
+            <button
+              type="button"
+              className="flex flex-col items-center gap-1 cursor-pointer relative z-30 touch-manipulation active:scale-95"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleTakePhoto();
+              }}
+            >
               <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center">
-                <Camera className="w-5 h-5 text-[#075E54]" />
+                <CameraIcon className="w-5 h-5 text-[#075E54]" />
               </div>
               <span className="text-white font-medium text-[10px]">Fata Ifoto</span>
-            </div>
+            </button>
             <div className="flex flex-col items-center gap-1 cursor-pointer" onClick={handleGalleryClick}>
               <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center">
                 <ImageIcon className="w-5 h-5 text-[#075E54]" />

@@ -316,96 +316,18 @@ export function cleanBase64(dataUrl: string): string {
   }
 }
 
-export interface VoiceRecordingSession {
-  mimeType: string;
-  stop: () => Promise<Blob>;
-  cancel: () => void;
-}
+const normalizeAudioMimeType = (mimeType: string): string => {
+  const normalized = mimeType.split(';')[0].trim().toLowerCase();
+  if (normalized === 'audio/x-wav' || normalized === 'audio/wave') return 'audio/wav';
+  if (normalized === 'audio/webm' || normalized === 'audio/wav'
+    || normalized === 'audio/mp4' || normalized === 'audio/aac') return normalized;
+  throw new Error(`Unsupported audio format "${normalized || 'unknown'}". Please record audio as WebM or WAV.`);
+};
 
-export async function createVoiceRecordingSession(): Promise<VoiceRecordingSession> {
-  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-    throw new Error('Audio recording is not supported on this device.');
-  }
-
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const supportedMimeType = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4',
-    'audio/ogg;codecs=opus',
-  ].find(type => MediaRecorder.isTypeSupported(type)) || '';
-
-  const recorder = new MediaRecorder(
-    stream,
-    supportedMimeType ? { mimeType: supportedMimeType } : undefined
-  );
-  const recorderMimeType = (recorder.mimeType || supportedMimeType || 'audio/webm').split(';')[0];
-  const chunks: Blob[] = [];
-  let cancelled = false;
-  let settled = false;
-  let stopRequested = false;
-  let resolveStop: (blob: Blob) => void = () => undefined;
-  let rejectStop: (error: Error) => void = () => undefined;
-  const stopped = new Promise<Blob>((resolve, reject) => {
-    resolveStop = resolve;
-    rejectStop = reject;
-  });
-
-  const cleanup = () => {
-    stream.getTracks().forEach(track => track.stop());
-  };
-  const settle = (blob: Blob) => {
-    if (settled) return;
-    settled = true;
-    cleanup();
-    resolveStop(blob);
-  };
-
-  recorder.ondataavailable = event => {
-    if (event.data.size > 0) {
-      chunks.push(event.data);
-    }
-  };
-  recorder.onerror = () => {
-    if (settled) return;
-    settled = true;
-    cleanup();
-    rejectStop(new Error('Microphone recording failed.'));
-  };
-  recorder.onstop = () => {
-    settle(cancelled
-      ? new Blob([], { type: recorder.mimeType || supportedMimeType || 'audio/webm' })
-      : new Blob(chunks, { type: recorder.mimeType || supportedMimeType || 'audio/webm' }));
-  };
-  recorder.start(250);
-
-  return {
-    mimeType: recorderMimeType,
-    stop: () => {
-      if (recorder.state === 'inactive') {
-        return Promise.resolve(new Blob(chunks, {
-          type: recorderMimeType,
-        }));
-      }
-      if (!stopRequested) {
-        stopRequested = true;
-        recorder.stop();
-      }
-      return stopped;
-    },
-    cancel: () => {
-      cancelled = true;
-      if (recorder.state === 'inactive') {
-        cleanup();
-        return;
-      }
-      if (!stopRequested) {
-        stopRequested = true;
-        recorder.stop();
-      }
-    },
-  };
-}
+const isValidAudioBase64 = (data: string): boolean =>
+  data.length > 100
+  && data.length % 4 === 0
+  && /^[A-Za-z0-9+/]+={0,2}$/.test(data);
 
 export async function sendMessageToGemini(
   history: { sender: 'user' | 'kevin'; text: string; image?: string }[],
@@ -413,7 +335,9 @@ export async function sendMessageToGemini(
   onChunk?: (chunk: string) => void,
   attachments?: AttachmentItem | Blob | Array<AttachmentItem | Blob> | null,
   selectedModel?: string,
-  onAction?: (action: DeviceAction) => void
+  onAction?: (action: DeviceAction) => void,
+  audioBase64?: string,
+  audioMimeType?: string
 ): Promise<string> {
   const availableKeys = getAvailableKeys();
   if (availableKeys.length === 0) {
@@ -443,7 +367,7 @@ export async function sendMessageToGemini(
   const attachmentList: Array<AttachmentItem | Blob> = attachments
     ? (Array.isArray(attachments) ? attachments : [attachments])
     : [];
-  const hasAudioAttachment = attachmentList.some(attachment => {
+  const hasAudioAttachment = Boolean(audioBase64) || attachmentList.some(attachment => {
     if (typeof Blob !== 'undefined' && attachment instanceof Blob) {
       return attachment.type.toLowerCase().startsWith('audio/');
     }
@@ -457,14 +381,30 @@ export async function sendMessageToGemini(
   });
   const prompt = latestMessage?.trim() || (
     hasAudioAttachment
-      ? 'Listen to this voice message, understand it in Kinyarwanda or English, and reply naturally.'
+      ? 'The user sent a voice message. Listen to the audio, understand their speech in Kinyarwanda or English, and answer directly, helpfully, and naturally in Kinyarwanda.'
       : hasImageAttachment
         ? 'Please analyze these images.'
         : ''
   );
   const parts: any[] = prompt ? [{ text: prompt }] : [];
+  if (audioBase64 !== undefined) {
+    const validatedAudio = cleanBase64(audioBase64);
+    if (!isValidAudioBase64(validatedAudio)) {
+      throw new Error('The recorded audio is empty or invalid. Please record your message again.');
+    }
+    parts.push({
+      inlineData: {
+        mimeType: normalizeAudioMimeType(audioMimeType || 'audio/mp4'),
+        data: validatedAudio,
+      },
+    });
+  }
   for (const attachment of attachmentList) {
     if (!attachment || typeof attachment !== "object") continue;
+    const attachmentMimeType = typeof Blob !== 'undefined' && attachment instanceof Blob
+      ? attachment.type
+      : (attachment as AttachmentItem).mimeType || '';
+    if (audioBase64 && attachmentMimeType.toLowerCase().startsWith('audio/')) continue;
     let data = "";
     let mimeType = "image/jpeg";
     if (typeof Blob !== 'undefined' && attachment instanceof Blob) {
@@ -477,7 +417,7 @@ export async function sendMessageToGemini(
         reader.readAsDataURL(attachment);
       });
       data = cleanBase64(dataUrl);
-      mimeType = attachment.type || 'audio/webm';
+      mimeType = attachment.type || 'audio/mp4';
     } else {
       const attachmentWithBlob = attachment as AttachmentItem;
       if (attachmentWithBlob.blob) {
@@ -490,15 +430,23 @@ export async function sendMessageToGemini(
           reader.readAsDataURL(attachmentWithBlob.blob as Blob);
         });
         data = cleanBase64(dataUrl);
+        mimeType = attachmentWithBlob.blob.type || attachmentWithBlob.mimeType || 'audio/webm';
       } else {
         data = cleanBase64(attachmentWithBlob.data || attachmentWithBlob.base64 || "");
+        mimeType = attachmentWithBlob.mimeType || mimeType;
       }
-      mimeType = attachmentWithBlob.mimeType || mimeType;
     }
-    if (!data) continue;
+    if (mimeType.toLowerCase().startsWith('audio/')) {
+      mimeType = normalizeAudioMimeType(mimeType);
+      if (!isValidAudioBase64(data)) {
+        throw new Error('The recorded audio is empty or invalid. Please record your message again.');
+      }
+    } else if (!data) {
+      continue;
+    }
     parts.push({
       inlineData: {
-        mimeType: mimeType.split(';')[0],
+        mimeType,
         data,
       },
     });
@@ -525,10 +473,14 @@ export async function sendMessageToGemini(
   const customInstructionsContext = customInstructions
     ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions}\nFollow these instructions in addition to the core Kevin AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
     : '';
+  const audioInstruction = hasAudioAttachment
+    ? 'You are an expert audio transcriber and assistant. When you receive an audio file, your first step is to TRANSCRIBE the audio to text accurately in Kinyarwanda or English. THEN, use that transcribed text to understand the user\'s intent and provide a natural, helpful reply. If the audio is unclear, politely ask the user to speak clearly rather than saying "I didn\'t hear anything".'
+    : '';
   const systemInstruction = [
     KEVIN_SYSTEM_INSTRUCTION,
     usernameContext,
     customInstructionsContext,
+    audioInstruction,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
   /*
