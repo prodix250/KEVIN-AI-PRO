@@ -39,7 +39,6 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "vite": "^6.2.3",
     "ws": "^8.22.2"
   },
   "devDependencies": {
