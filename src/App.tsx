@@ -250,9 +250,9 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [attachmentPopupOpen, setAttachmentPopupOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
-  const [userName, setUserName] = useState<string>(() => localStorage.getItem('kevin_ai_user_name') || '');
-  const [tempUserName, setTempUserName] = useState<string>(() => localStorage.getItem('kevin_ai_user_name') || '');
-  const [showProfileModal, setShowProfileModal] = useState<boolean>(() => !localStorage.getItem('kevin_ai_user_name'));
+  const [userName, setUserName] = useState<string>(() => localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || '');
+  const [tempUserName, setTempUserName] = useState<string>(() => localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || '');
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(() => !localStorage.getItem('kevin_user_name') && !localStorage.getItem('kevin_ai_user_name'));
 
   const handleSaveUserName = () => {
     const trimmed = tempUserName.trim();
@@ -260,23 +260,26 @@ export default function App() {
       showToastMessage("⚠️ Nyamuneka shyiramo izina ryawe kugira ngo ukomeze!");
       return;
     }
+    localStorage.setItem('kevin_user_name', trimmed);
     localStorage.setItem('kevin_ai_user_name', trimmed);
     setUserName(trimmed);
     showToastMessage(`✨ Muraho neza ${trimmed}! Izina ryawe ryabitswe.`);
     setShowProfileModal(false);
   };
 
-  const [customInstructions, setCustomInstructions] = useState<string>(() => localStorage.getItem('kevin_ai_custom_instructions') || '');
-  const [tempCustomInstructions, setTempCustomInstructions] = useState<string>(() => localStorage.getItem('kevin_ai_custom_instructions') || '');
+  const [customInstructions, setCustomInstructions] = useState<string>(() => localStorage.getItem('kevin_custom_instructions') || localStorage.getItem('kevin_ai_custom_instructions') || '');
+  const [tempCustomInstructions, setTempCustomInstructions] = useState<string>(() => localStorage.getItem('kevin_custom_instructions') || localStorage.getItem('kevin_ai_custom_instructions') || '');
   const [showCustomInstructionsModal, setShowCustomInstructionsModal] = useState<boolean>(false);
 
   const handleSaveCustomInstructions = () => {
     const trimmed = tempCustomInstructions.trim();
     if (trimmed) {
+      localStorage.setItem('kevin_custom_instructions', trimmed);
       localStorage.setItem('kevin_ai_custom_instructions', trimmed);
       setCustomInstructions(trimmed);
       showToastMessage("✨ Custom Instructions zabitswe neza!");
     } else {
+      localStorage.removeItem('kevin_custom_instructions');
       localStorage.removeItem('kevin_ai_custom_instructions');
       setCustomInstructions('');
       showToastMessage("✨ Custom Instructions zasibwe.");

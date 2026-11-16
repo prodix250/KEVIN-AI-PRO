@@ -225,25 +225,33 @@ function actionConfirmation(action: DeviceAction): string {
 
 export function getUserCustomApiKey(): string {
   if (typeof window !== 'undefined') {
-    return localStorage.getItem('kevin_ai_custom_api_key')?.trim() || '';
+    return localStorage.getItem('gemini_api_key')?.trim()
+      || localStorage.getItem('kevin_ai_custom_api_key')?.trim()
+      || '';
   }
   return '';
 }
 
 export function setUserCustomApiKey(key: string): void {
   if (typeof window !== 'undefined') {
-    if (key.trim().length > 0) {
-      localStorage.setItem('kevin_ai_custom_api_key', key.trim());
+    const trimmed = key.trim();
+    if (trimmed.length > 0) {
+      localStorage.setItem('gemini_api_key', trimmed);
+      localStorage.setItem('kevin_ai_custom_api_key', trimmed);
     } else {
+      localStorage.removeItem('gemini_api_key');
       localStorage.removeItem('kevin_ai_custom_api_key');
     }
   }
 }
 
 const getAvailableKeys = (): string[] => {
-  const customUserKey = localStorage.getItem('gemini_api_key')
-    || localStorage.getItem('user_api_key')
-    || localStorage.getItem('apiKey');
+  const customUserKey = typeof window !== 'undefined'
+    ? localStorage.getItem('gemini_api_key')
+      || localStorage.getItem('kevin_ai_custom_api_key')
+      || localStorage.getItem('user_api_key')
+      || localStorage.getItem('apiKey')
+    : null;
   const keys = [
     customUserKey,
     import.meta.env.VITE_GEMINI_API_KEY,
@@ -255,6 +263,13 @@ const getAvailableKeys = (): string[] => {
       .map(k => k.trim())
   ));
 };
+
+function getUserCustomInstructions(): string {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('kevin_custom_instructions')?.trim()
+    || localStorage.getItem('kevin_ai_custom_instructions')?.trim()
+    || '';
+}
 
 export function getApiKeysList(): string[] {
   return getAvailableKeys();
@@ -502,7 +517,20 @@ export async function sendMessageToGemini(
     minute: '2-digit',
     timeZone: 'Africa/Kigali',
   })}.]`;
-  const systemInstruction = `${KEVIN_SYSTEM_INSTRUCTION}\n\n${realTimeContext}`;
+  const userName = typeof window !== 'undefined'
+    ? localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || 'Incuti yanjye'
+    : 'Incuti yanjye';
+  const usernameContext = `The person currently chatting with you is named '${userName}'. Always address them politely by their name during the conversation to make it personal and natural.`;
+  const customInstructions = getUserCustomInstructions();
+  const customInstructionsContext = customInstructions
+    ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions}\nFollow these instructions in addition to the core Kevin AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
+    : '';
+  const systemInstruction = [
+    KEVIN_SYSTEM_INSTRUCTION,
+    usernameContext,
+    customInstructionsContext,
+    realTimeContext,
+  ].filter(Boolean).join('\n\n');
   /*
 
 IDENTITY & CREATOR PROFILE:
