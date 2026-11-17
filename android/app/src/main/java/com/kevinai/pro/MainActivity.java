@@ -82,7 +82,7 @@ public class MainActivity extends BridgeActivity {
                 this,
                 screenCaptureReceiver,
                 filter,
-                ContextCompat.RECEIVER_NOTEXPORTED
+                4
         );
     }
 
