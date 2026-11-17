@@ -4,7 +4,9 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 
 import androidx.core.app.ActivityCompat;
@@ -13,12 +15,16 @@ import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
 
+import org.json.JSONObject;
+
 public class MainActivity extends BridgeActivity {
 
     private static final int AUDIO_PERMISSION_REQUEST_CODE = 1001;
     private static final int SCREEN_CAPTURE_REQUEST_CODE = 1002;
     private static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 1003;
     private boolean waitingForNotificationPermission;
+    private KevinAgentBridge agentBridge;
+
     private final android.content.BroadcastReceiver screenCaptureReceiver =
             new android.content.BroadcastReceiver() {
                 @Override
@@ -30,6 +36,12 @@ public class MainActivity extends BridgeActivity {
                         }
                     } else if (ScreenCaptureService.ACTION_STOP.equals(intent.getAction())) {
                         dispatchScreenSharingState(false);
+                    } else if (KevinNotificationListenerService.ACTION_WHATSAPP_REPLIED.equals(intent.getAction())) {
+                        dispatchWhatsAppAutoReply(
+                                intent.getStringExtra(KevinNotificationListenerService.EXTRA_SENDER),
+                                intent.getStringExtra(KevinNotificationListenerService.EXTRA_INCOMING),
+                                intent.getStringExtra(KevinNotificationListenerService.EXTRA_REPLY)
+                        );
                     }
                 }
             };
@@ -39,7 +51,7 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
                     this,
                     new String[] {
@@ -57,15 +69,20 @@ public class MainActivity extends BridgeActivity {
                 request.grant(request.getResources());
             }
         });
+
+        agentBridge = new KevinAgentBridge(this, getBridge().getWebView());
         getBridge().getWebView().addJavascriptInterface(new ScreenCaptureBridge(), "KevinScreenCapture");
+        getBridge().getWebView().addJavascriptInterface(agentBridge, "KevinAgentBridge");
+
         IntentFilter filter = new IntentFilter();
         filter.addAction(ScreenCaptureService.ACTION_SCREEN_FRAME);
         filter.addAction(ScreenCaptureService.ACTION_STOP);
-        androidx.core.content.ContextCompat.registerReceiver(
+        filter.addAction(KevinNotificationListenerService.ACTION_WHATSAPP_REPLIED);
+        ContextCompat.registerReceiver(
                 this,
                 screenCaptureReceiver,
                 filter,
-                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+                ContextCompat.RECEIVER_NOTEXPORTED
         );
     }
 
@@ -84,7 +101,7 @@ public class MainActivity extends BridgeActivity {
                 && ContextCompat.checkSelfPermission(
                         this,
                         Manifest.permission.POST_NOTIFICATIONS
-                ) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                ) != PackageManager.PERMISSION_GRANTED) {
             waitingForNotificationPermission = true;
             ActivityCompat.requestPermissions(
                     this,
@@ -111,6 +128,10 @@ public class MainActivity extends BridgeActivity {
             int[] grantResults
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == KevinAgentBridge.AGENT_PERMISSIONS_REQUEST_CODE && agentBridge != null) {
+            agentBridge.dispatchAgentStatus();
+            return;
+        }
         if (requestCode != NOTIFICATION_PERMISSION_REQUEST_CODE) {
             return;
         }
@@ -118,7 +139,7 @@ public class MainActivity extends BridgeActivity {
         waitingForNotificationPermission = false;
         if (shouldContinue
                 && grantResults.length > 0
-                && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             launchScreenCapturePermission();
         } else if (shouldContinue) {
             dispatchScreenSharingState(false);
@@ -145,15 +166,32 @@ public class MainActivity extends BridgeActivity {
                 .setAction(ScreenCaptureService.ACTION_START)
                 .putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
                 .putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data);
-        androidx.core.content.ContextCompat.startForegroundService(this, serviceIntent);
+        ContextCompat.startForegroundService(this, serviceIntent);
         dispatchScreenSharingState(true);
+    }
+
+    private void dispatchWhatsAppAutoReply(String sender, String incoming, String reply) {
+        if (getBridge() == null || getBridge().getWebView() == null) return;
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("sender", sender != null ? sender : "");
+            payload.put("incoming", incoming != null ? incoming : "");
+            payload.put("reply", reply != null ? reply : "");
+            String quoted = JSONObject.quote(payload.toString());
+            getBridge().getWebView().post(() ->
+                    getBridge().getWebView().evaluateJavascript(
+                            "window.dispatchEvent(new CustomEvent('kevinWhatsAppAutoReplied', { detail: JSON.parse(" + quoted + ") }))",
+                            null
+                    )
+            );
+        } catch (Exception ignored) {}
     }
 
     private void dispatchScreenFrame(String frame) {
         if (getBridge() == null || getBridge().getWebView() == null) {
             return;
         }
-        String safeFrame = org.json.JSONObject.quote(frame);
+        String safeFrame = JSONObject.quote(frame);
         getBridge().getWebView().post(() ->
                 getBridge().getWebView().evaluateJavascript(
                         "window.dispatchEvent(new CustomEvent('screenCaptured', { detail: { base64Image: '"
@@ -178,15 +216,14 @@ public class MainActivity extends BridgeActivity {
     }
 
     private final class ScreenCaptureBridge {
-        @android.webkit.JavascriptInterface
+        @JavascriptInterface
         public void start() {
             runOnUiThread(MainActivity.this::requestScreenCapture);
         }
 
-        @android.webkit.JavascriptInterface
+        @JavascriptInterface
         public void stop() {
             runOnUiThread(MainActivity.this::stopScreenCapture);
         }
     }
-
 }

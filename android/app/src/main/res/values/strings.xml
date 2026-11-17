@@ -4,4 +4,5 @@
     <string name="title_activity_main">Kevin AI </string>
     <string name="package_name">com.kevinai.pro</string>
     <string name="custom_url_scheme">com.kevinai.pro</string>
+    <string name="kevin_accessibility_description">Allows Kevin AI Agent to automatically press Send in WhatsApp and Play in YouTube when you command it.</string>
 </resources>

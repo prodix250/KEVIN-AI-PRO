@@ -1,0 +1,694 @@
+import express from 'express';
+import type { Request, Response } from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { GoogleGenAI, ThinkingLevel, type FunctionDeclaration } from '@google/genai';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const KEVIN_SYSTEM_INSTRUCTION = `You are Kevin AI,
+
+1. IDENTITY & CREATOR PROFILE:
+- Name: Kevin AI
+- Creator & Developer: Uwumukiza Kevin
+- Motto: 'UKORA GAKE BIKAGENDA CYANE'
+- Verified Creator Background:
+  * Full Name: Uwumukiza Kevin
+  * Date of Birth: October 28, 2003
+  * Birthplace: Rwamagana District, Gahengeri Sector, Rwanda
+  * Family: Firstborn (Imfura) of five children. Has a twin sister named Aline; younger twin siblings named Helve and Kelly; and the youngest sibling named Barame.
+  * Educational Journey:
+    - Primary School: Nyina wa Jambo Ruhita
+    - Ordinary Level (S1 - S3): GS Appagie / Musha
+    - Advanced Level (S4 - S6): ES Kabarondo (studied MCE: Mathematics, Computer Science, and Economics)
+    - Higher Education: Currently studying Information Technology (IT) at the University of Rwanda, College of Science and Technology (UR-CST).
+- When asked who created you, who Kevin is, his family, or his background ('Waremwe nande?', 'Kevin ni nde?', 'Who made you?'), answer accurately, proudly, and respectfully using these verified facts.
+
+2. TONE & COMMUNICATION STYLE:
+- Natural WhatsApp Vibe: Communicate naturally, concisely, and warmly like a smart companion on WhatsApp.
+- Natural Emojis: Enrich responses with fitting, expressive emojis (e.g., 💡, 💻, 🚀, 📸, ✨, 😊, 🇷🇼).
+- Concise Greetings Rule:
+  * When greeted ('Hello', 'Muraho', 'Bite', 'Hi'): Keep it short and warm in 1 to 2 sentences (e.g., 'Muraho! 👋 Amakuru ki? Nakufasha iki uyu munsi? 😊').
+  * NEVER dump a list of features or capabilities unprompted. Only explain what you do if explicitly asked.
+
+3. MULTILINGUAL FLUENCY:
+- Native Multilingualism: Understand and respond fluently in the language the user speaks (Kinyarwanda, English, French, Swahili, or natural mixed code-switching).
+- If the user speaks Kinyarwanda, reply in rich, natural Kinyarwanda. If in English, reply in clean, modern English.
+
+4. VOICE NOTE & STT PROCESSING:
+- When the user sends a voice note or recorded audio message, understand their spoken request in Kinyarwanda or English and answer or execute their agent command immediately.
+
+5. MULTIMODAL & DOCUMENT ANALYSIS:
+- Images/Vision: When the user attaches an image or screenshot, analyze what you see thoroughly (diagrams, OCR code reading, objects).
+- Documents: When files (PDF, Word, or text) are attached, summarize, extract key points, or answer questions with high precision.
+
+6. CODE & MATH FORMATTING:
+- Format all code snippets cleanly in standard fenced code blocks with language tags (e.g., \`\`\`python, \`\`\`javascript).
+- Format mathematical equations and tabular data with clear Markdown tables and LaTeX notations.
+
+IMAGE GENERATION RULES:
+When the user explicitly asks to generate, create, or draw an image (e.g., 'Shushanya...', 'Kora ifoto ya...', 'Draw...', 'Generate an image of...'):
+1. Translate the request into English when necessary, then formulate a rich, detailed, visually descriptive English prompt. Never put Kinyarwanda or the raw user request in the image URL.
+2. URL-encode that prompt.
+3. Output the image inside standard Markdown image syntax using Pollinations AI:
+   ![User Request](https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true)
+4. Add a warm, friendly caption in the user's language (e.g., 'Dore ifoto wansabye! 🎨✨').
+5. ONLY generate images when explicitly requested by the user.
+6. Image, photo, drawing, and picture requests must always render the Pollinations AI Markdown image directly and must never call a document generator or produce a PDF.
+
+PDF GENERATION RESTRICTION:
+Only generate a PDF or other written file when the user explicitly asks for a document, PDF, report, CV, dosiye, inyandiko, Word, or text file.
+
+REAL-TIME INFORMATION:
+When asked about current events, breaking news, weather, sports scores, live information, or facts happening after your training cutoff, use Google Search grounding to retrieve verified, up-to-date real-time data.
+
+FULL AUTONOMOUS AGENT & DEVICE ACTIONS:
+You are a full autonomous agent with direct permission-backed control over apps and messaging.
+- YouTube Playback: When the user asks to play a song or video on YouTube (e.g., 'fungura youtube uncurangire...', 'play ... on youtube'), ALWAYS call open_youtube(query) so the exact video starts playing immediately instead of just searching.
+- Direct Calling & Contact Resolution: When the user asks to call someone or a phone number (e.g., 'hamagara 0788...', 'hamagara Aline', 'call Mom', 'terefone Jean'), ALWAYS call make_call(phone_number, contact_name) immediately. If the user gives a phone number, pass phone_number. If the user gives a contact name without a number, check [SAVED CONTACTS] in your context first—if found there, pass both phone_number and contact_name; if NOT in [SAVED CONTACTS], pass contact_name only and leave phone_number empty so the device resolves it from Contacts. NEVER invent or guess a phone number!
+- Direct SMS Sending: When the user asks to send an SMS/text message (e.g., 'ohereza ubutumwa kuri 078...', 'send sms to Aline'), ALWAYS call send_sms(phone_number, message, contact_name) immediately (never tell the user to open their SMS app manually, and never invent a missing number).
+- Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately so the agent dispatches it automatically.
+- WhatsApp Auto-Reply Mode: When the user asks you to automatically reply to incoming WhatsApp messages on their behalf (e.g., 'ujye unsubiriza kuri whatsapp', 'enable whatsapp auto reply'), ALWAYS call configure_whatsapp_autoreply(enabled, reply_style).
+- Calls & Other Apps: Use make_call, open_audiomack, open_lark_player, open_camera, or open_app immediately whenever requested.`;
+
+const deviceActionDeclarations: FunctionDeclaration[] = [
+  {
+    name: "open_youtube",
+    description: "Resolve the exact requested YouTube video/song and immediately start playing it (auto-play, not just search).",
+    parametersJsonSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Song title, artist, or video search query to play immediately." }
+      },
+      required: ["query"]
+    }
+  },
+  {
+    name: "open_audiomack",
+    description: "Immediately open Audiomack and play/search the requested song or artist.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"]
+    }
+  },
+  {
+    name: "open_lark_player",
+    description: "Open Lark Player and play/search the requested song or artist.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: { query: { type: "string" } }
+    }
+  },
+  {
+    name: "make_call",
+    description: "Immediately place a phone call to a phone number or contact name. Supply phone_number if known, or contact_name so the device looks up the contact and dials immediately. Never invent a phone number.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: {
+        phone_number: { type: "string", description: "Phone number to call if known (e.g. 0788123456 or +250788123456)." },
+        contact_name: { type: "string", description: "Contact name to resolve from Contacts and call immediately if phone_number is not explicitly given." }
+      }
+    }
+  },
+  {
+    name: "send_sms",
+    description: "Immediately send an SMS text message to a phone number or contact on behalf of the user without asking them to type/send manually.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: {
+        phone_number: { type: "string", description: "Recipient phone number if known." },
+        contact_name: { type: "string", description: "Recipient contact name to resolve from Contacts if phone_number is omitted." },
+        message: { type: "string", description: "The exact SMS text message content to send." }
+      },
+      required: ["message"]
+    }
+  },
+  {
+    name: "open_whatsapp",
+    description: "Immediately send a WhatsApp message to a phone number or contact using Kevin AI's auto-send agent.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: {
+        phone_number: { type: "string", description: "Recipient phone number with country code or local digits." },
+        message: { type: "string", description: "Message text to send on WhatsApp." },
+        contact_name: { type: "string", description: "Contact display name to resolve from Contacts if needed." }
+      },
+      required: ["message"]
+    }
+  },
+  {
+    name: "configure_whatsapp_autoreply",
+    description: "Enable or disable automatic AI replying to incoming WhatsApp messages, and optionally set reply style instructions.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean", description: "Whether WhatsApp auto-reply should be enabled." },
+        reply_style: { type: "string", description: "Instructions for how Kevin AI should reply on WhatsApp." }
+      },
+      required: ["enabled"]
+    }
+  },
+  {
+    name: "open_camera",
+    description: "Open the device camera.",
+    parametersJsonSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "open_app",
+    description: "Open a common device app such as Instagram, TikTok, Spotify, or Maps.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: { app_name: { type: "string" } },
+      required: ["app_name"]
+    }
+  },
+];
+
+function getServerApiKeys(customKey?: string): string[] {
+  const keys = [
+    customKey,
+    process.env.GEMINI_API_KEY,
+    process.env.GEMINI_API_KEY_BACKUP,
+    process.env.GEMINI_API_KEY_BACKUP_2,
+  ];
+  return Array.from(new Set(
+    keys
+      .filter((k): k is string => typeof k === 'string' && k.trim().length > 0)
+      .map((k) => k.trim())
+  ));
+}
+
+async function resolveYouTubeVideo(query: string): Promise<{
+  videoId: string;
+  title: string;
+  channel: string;
+} | null> {
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(
+      `https://www.youtube.com/results?search_query=${encodeURIComponent(trimmed)}`,
+      {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      }
+    );
+    clearTimeout(timer);
+
+    if (!response.ok) return null;
+    const html = await response.text();
+    const match = html.match(/var ytInitialData = (\{.*?\});<\/script>/);
+    if (match) {
+      const data = JSON.parse(match[1]);
+      const sections = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+      for (const sec of sections) {
+        for (const item of (sec?.itemSectionRenderer?.contents || [])) {
+          const vr = item?.videoRenderer;
+          if (vr?.videoId) {
+            return {
+              videoId: String(vr.videoId),
+              title: (vr.title?.runs?.map((r: any) => r.text).join('') || trimmed).trim(),
+              channel: (vr.ownerText?.runs?.[0]?.text || 'YouTube').trim(),
+            };
+          }
+        }
+      }
+    }
+
+    const fallbackMatch = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+    if (fallbackMatch) {
+      return {
+        videoId: fallbackMatch[1],
+        title: trimmed,
+        channel: 'YouTube',
+      };
+    }
+  } catch (err) {
+    console.warn('YouTube resolution failed:', err);
+  }
+  return null;
+}
+
+function extractReadableError(err: unknown): string {
+  const raw = err instanceof Error
+    ? err.message
+    : typeof err === 'string'
+      ? err
+      : (err as any)?.error?.message || (err as any)?.message || 'Request failed';
+  try {
+    const parsed = JSON.parse(raw);
+    const nested = parsed?.error?.message;
+    if (typeof nested === 'string') {
+      try {
+        const inner = JSON.parse(nested);
+        return inner?.error?.message || nested;
+      } catch {
+        return nested;
+      }
+    }
+  } catch {
+    // Plain text error
+  }
+  return raw;
+}
+
+async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT) || 3000;
+
+  app.use(express.json({ limit: '50mb' }));
+
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({ status: 'ok', hasKey: getServerApiKeys().length > 0 });
+  });
+
+  app.get('/api/youtube/resolve', async (req: Request, res: Response) => {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    if (!q.trim()) {
+      res.status(400).json({ error: 'Missing query parameter q' });
+      return;
+    }
+    const resolved = await resolveYouTubeVideo(q);
+    if (!resolved) {
+      res.status(404).json({ error: 'No video found' });
+      return;
+    }
+    res.json(resolved);
+  });
+
+  app.post('/api/stt', async (req: Request, res: Response) => {
+    try {
+      const { audioBase64, audioMimeType, mimeType: altMimeType, customApiKey } = req.body as {
+        audioBase64?: string;
+        audioMimeType?: string;
+        mimeType?: string;
+        customApiKey?: string;
+      };
+
+      if (!audioBase64 || typeof audioBase64 !== 'string') {
+        res.status(400).json({ error: 'No recorded audio was provided.' });
+        return;
+      }
+
+      const cleanData = audioBase64.replace(/^data:[^;,]+;base64,/is, '').replace(/\s/g, '');
+      if (cleanData.length < 100) {
+        res.status(400).json({ error: 'Recorded audio is empty or too short.' });
+        return;
+      }
+
+      const mimeType = (audioMimeType || altMimeType || 'audio/webm').split(';')[0].trim().toLowerCase();
+      const availableKeys = getServerApiKeys(customApiKey);
+      if (availableKeys.length === 0) {
+        res.status(500).json({ error: 'Nta Gemini API key yabonetse.' });
+        return;
+      }
+
+      const sttModels = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+      let lastErr: unknown = null;
+
+      for (const key of availableKeys) {
+        const ai = new GoogleGenAI({
+          apiKey: key,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' },
+          },
+        });
+
+        for (const model of sttModels) {
+          try {
+            const sttPromise = ai.models.generateContent({
+              model,
+              contents: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType,
+                      data: cleanData,
+                    },
+                  },
+                  {
+                    text: 'Transcribe the spoken words in this audio verbatim in the language spoken (Kinyarwanda, English, French, or Swahili). Output ONLY the exact spoken words. CRITICAL: If the audio contains only silence, static, or no clear human speech, output strictly an empty string "" and do NOT invent or guess any text.',
+                  },
+                ],
+              },
+            });
+            sttPromise.catch(() => {});
+
+            const response = await Promise.race([
+              sttPromise,
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('503 STT timed out')), 10000)
+              ),
+            ]);
+
+            const rawTranscript = (response.text || '').trim();
+            const transcript = rawTranscript === '""' || rawTranscript === "''" ? '' : rawTranscript;
+            res.json({ transcript, model });
+            return;
+          } catch (err: any) {
+            lastErr = err;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn(`STT model ${model} failed:`, msg);
+            if (err?.status === 429 || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
+              break; // rotate key
+            }
+          }
+        }
+      }
+
+      res.status(500).json({ error: extractReadableError(lastErr) });
+    } catch (error: any) {
+      console.error('Server /api/stt error:', error);
+      res.status(500).json({ error: extractReadableError(error) });
+    }
+  });
+
+  app.post('/api/whatsapp-reply', async (req: Request, res: Response) => {
+    try {
+      const { sender, incomingMessage, replyStyle, userName, customApiKey } = req.body as {
+        sender?: string;
+        incomingMessage?: string;
+        replyStyle?: string;
+        userName?: string;
+        customApiKey?: string;
+      };
+
+      if (!incomingMessage || !incomingMessage.trim()) {
+        res.status(400).json({ error: 'Missing incomingMessage' });
+        return;
+      }
+
+      const availableKeys = getServerApiKeys(customApiKey);
+      if (availableKeys.length === 0) {
+        res.status(500).json({ error: 'Nta Gemini API key yabonetse.' });
+        return;
+      }
+
+      const ownerName = userName?.trim() || 'Kevin';
+      const systemInstruction = [
+        `You are Kevin AI acting as ${ownerName}'s WhatsApp Auto-Reply Assistant.`,
+        `Reply directly and naturally to the incoming WhatsApp message from "${sender || 'Contact'}".`,
+        `Match the sender's language (Kinyarwanda, English, French, or Swahili).`,
+        `Keep the reply concise, polite, helpful, and natural for WhatsApp (1-3 sentences max).`,
+        `Do not say "As an AI..." — reply seamlessly on behalf of ${ownerName}.`,
+        replyStyle?.trim() ? `Owner's Auto-Reply Instructions: ${replyStyle.trim()}` : '',
+      ].filter(Boolean).join('\n');
+
+      let lastErr: unknown = null;
+      for (const key of availableKeys) {
+        const ai = new GoogleGenAI({
+          apiKey: key,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' },
+          },
+        });
+        for (const model of ['gemini-3.1-flash-lite', 'gemini-4-hydrogen']) {
+          try {
+            const response = await ai.models.generateContent({
+              model,
+              contents: incomingMessage.trim(),
+              config: {
+                systemInstruction,
+                ...(model === 'gemini-4-hydrogen'
+                  ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                  : {}),
+              },
+            });
+            const reply = (response.text || '').trim();
+            if (reply) {
+              res.json({ reply, model });
+              return;
+            }
+          } catch (err: any) {
+            lastErr = err;
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err?.status === 429 || msg.includes('429')) break;
+          }
+        }
+      }
+
+      res.status(500).json({ error: extractReadableError(lastErr) });
+    } catch (error: any) {
+      console.error('Server /api/whatsapp-reply error:', error);
+      res.status(500).json({ error: extractReadableError(error) });
+    }
+  });
+
+  app.post('/api/chat', async (req: Request, res: Response) => {
+    try {
+      const {
+        contents,
+        userName,
+        customInstructions,
+        hasAudioAttachment,
+        selectedModel,
+        customApiKey,
+        agentPermissions,
+        savedContacts,
+      } = req.body as {
+        contents?: unknown[];
+        userName?: string;
+        customInstructions?: string;
+        hasAudioAttachment?: boolean;
+        selectedModel?: string;
+        customApiKey?: string;
+        agentPermissions?: {
+          autoSend?: boolean;
+          autoCall?: boolean;
+          autoPlayYouTube?: boolean;
+          whatsappAutoReply?: boolean;
+        };
+        savedContacts?: Array<{ name?: string; phone?: string }>;
+      };
+
+      if (!Array.isArray(contents) || contents.length === 0) {
+        res.status(400).json({ error: 'Invalid chat contents.' });
+        return;
+      }
+
+      const availableKeys = getServerApiKeys(customApiKey);
+      if (availableKeys.length === 0) {
+        res.status(500).json({
+          error: 'Nta Gemini API key yabonetse. Nyamuneka yishyireho muri Settings > Secrets panel.',
+        });
+        return;
+      }
+
+      const now = new Date();
+      const realTimeContext = `[REAL-TIME CONTEXT: Today is ${now.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        timeZone: 'Africa/Kigali',
+      })}, and the current time in Rwanda is ${now.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Africa/Kigali',
+      })}.]`;
+
+      const safeUserName = typeof userName === 'string' && userName.trim() ? userName.trim() : 'Incuti yanjye';
+      const usernameContext = `The person currently chatting with you is named '${safeUserName}'. Always address them politely by their name during the conversation to make it personal and natural.`;
+      const customInstructionsContext = typeof customInstructions === 'string' && customInstructions.trim()
+        ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions.trim()}\nFollow these instructions in addition to the core Kevin AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
+        : '';
+      const audioInstruction = hasAudioAttachment
+        ? 'You are an expert audio transcriber and assistant. Understand the attached voice message in Kinyarwanda or English, respond naturally, and immediately trigger any requested device action functions (e.g. open_youtube, make_call, send_sms, open_whatsapp).'
+        : '';
+      const contactsList = Array.isArray(savedContacts)
+        ? savedContacts
+            .filter((c) => c && typeof c.name === 'string' && typeof c.phone === 'string' && c.name.trim() && c.phone.trim())
+            .slice(0, 40)
+            .map((c) => `${c.name!.trim()}: ${c.phone!.trim()}`)
+        : [];
+      const contactsContext = contactsList.length > 0
+        ? `[SAVED CONTACTS: ${contactsList.join(' | ')}]`
+        : '';
+      const agentContext = `[AGENT PERMISSIONS: autoSend=${Boolean(agentPermissions?.autoSend)}, autoCall=${agentPermissions?.autoCall !== false}, autoPlayYouTube=${agentPermissions?.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(agentPermissions?.whatsappAutoReply)}. Always execute requested actions immediately using tool calls.]`;
+
+      const systemInstruction = [
+        KEVIN_SYSTEM_INSTRUCTION,
+        usernameContext,
+        customInstructionsContext,
+        audioInstruction,
+        contactsContext,
+        agentContext,
+        realTimeContext,
+      ].filter(Boolean).join('\n\n');
+
+      let lastErr: unknown = null;
+      let streamStarted = false;
+      const primaryModel = selectedModel === 'Kevin 1.3 Lite' ? 'gemini-3.1-flash-lite' : 'gemini-4-hydrogen';
+      const modelsToTry = primaryModel === 'gemini-4-hydrogen'
+        ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']
+        : ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+
+      const thinkingLevelForModel = selectedModel === 'Prodix pro'
+        ? ThinkingLevel.MEDIUM
+        : ThinkingLevel.LOW;
+
+      const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      for (const key of availableKeys) {
+        const ai = new GoogleGenAI({
+          apiKey: key,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        });
+
+        let shouldRotateKey = false;
+
+        for (const modelName of modelsToTry) {
+          const hasFallbackModel = modelName !== modelsToTry[modelsToTry.length - 1];
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              const streamPromise = ai.models.generateContentStream({
+                model: modelName,
+                contents: contents as any,
+                config: {
+                  systemInstruction,
+                  ...(modelName === 'gemini-4-hydrogen'
+                    ? { thinkingConfig: { thinkingLevel: thinkingLevelForModel } }
+                    : {}),
+                  tools: [{ functionDeclarations: deviceActionDeclarations }],
+                },
+              });
+              streamPromise.catch(() => {});
+
+              const responseStream = hasFallbackModel
+                ? await Promise.race([
+                    streamPromise,
+                    new Promise<never>((_, reject) =>
+                      setTimeout(() => reject(new Error('503 Model response timed out during high demand')), 8000)
+                    ),
+                  ])
+                : await streamPromise;
+
+              res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+              streamStarted = true;
+
+              for await (const chunk of responseStream) {
+                const functionCalls = (chunk as any).functionCalls || [];
+                for (const functionCall of functionCalls) {
+                  const args = { ...(functionCall.args || {}) };
+                  if (functionCall.name === 'open_youtube' && typeof args.query === 'string' && args.query.trim()) {
+                    const resolved = await resolveYouTubeVideo(args.query);
+                    if (resolved) {
+                      args.videoId = resolved.videoId;
+                      args.videoTitle = resolved.title;
+                      args.channel = resolved.channel;
+                    }
+                  }
+                  res.write(JSON.stringify({
+                    type: 'action',
+                    name: functionCall.name,
+                    args,
+                  }) + '\n');
+                }
+                if (chunk.text) {
+                  res.write(JSON.stringify({
+                    type: 'text',
+                    text: chunk.text,
+                  }) + '\n');
+                }
+              }
+
+              res.write(JSON.stringify({ type: 'done' }) + '\n');
+              res.end();
+              return;
+            } catch (error: any) {
+              lastErr = error;
+              const errorText = error instanceof Error ? error.message : String(error);
+              const isQuotaError = error?.status === 429
+                || errorText.includes('429')
+                || errorText.includes('RESOURCE_EXHAUSTED')
+                || errorText.toLowerCase().includes('quota')
+                || errorText.toLowerCase().includes('rate limit');
+              const isUnavailableError = error?.status === 503
+                || errorText.includes('503')
+                || errorText.includes('UNAVAILABLE')
+                || errorText.toLowerCase().includes('high demand');
+
+              if (streamStarted) {
+                res.write(JSON.stringify({ type: 'error', error: errorText }) + '\n');
+                res.end();
+                return;
+              }
+
+              if (isQuotaError) {
+                console.warn('Gemini key failed due to rate limit (429). Rotating to next available key...');
+                shouldRotateKey = true;
+                break;
+              }
+
+              if (isUnavailableError) {
+                console.warn(`Model ${modelName} unavailable/timed out (attempt ${attempt + 1}).`);
+                if (hasFallbackModel) {
+                  break;
+                }
+                if (attempt === 0) {
+                  await sleep(400);
+                  continue;
+                }
+                break;
+              }
+
+              throw error;
+            }
+          }
+          if (shouldRotateKey) break;
+        }
+      }
+
+      if (!res.headersSent) {
+        res.status(500).json({ error: extractReadableError(lastErr) });
+      }
+    } catch (error: any) {
+      console.error('Server /api/chat error:', error);
+      const message = extractReadableError(error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: message });
+      } else {
+        res.write(JSON.stringify({ type: 'error', error: message }) + '\n');
+        res.end();
+      }
+    }
+  });
+
+  if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distDir = path.resolve(__dirname, 'dist');
+    app.use(express.static(distDir));
+    app.use((_req: Request, res: Response) => {
+      res.sendFile(path.join(distDir, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Kevin AI server listening on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

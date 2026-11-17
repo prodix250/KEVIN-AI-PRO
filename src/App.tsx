@@ -4,13 +4,14 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User } from 'lucide-react';
+import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
+import AssistantOverlay from './components/AssistantOverlay';
 import { downloadAIImage, downloadDocumentFile } from './utils/download';
 
 const THEME_LIGHT_DEFAULT_MIGRATION_KEY = 'kevin_ai_theme_light_default_migrated';
@@ -74,14 +75,16 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const supportedMimeType = [
-      'audio/mp4',
       'audio/webm;codecs=opus',
       'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
       'audio/aac',
     ].find(type => MediaRecorder.isTypeSupported(type)) || '';
     if (!supportedMimeType) {
       stream.getTracks().forEach(track => track.stop());
-      throw new Error('This device cannot record audio as WebM.');
+      throw new Error('This device cannot record audio.');
     }
     const recorder = new MediaRecorder(stream, supportedMimeType ? { mimeType: supportedMimeType } : undefined);
     const chunks: Blob[] = [];
@@ -175,6 +178,7 @@ type Message = {
   sender: 'user' | 'kevin';
   timestamp: string;
   image?: string;
+  audioUrl?: string;
   document?: {
     type: 'pdf' | 'docx' | 'pptx' | 'txt' | 'image' | 'doc';
     name: string;
@@ -264,7 +268,7 @@ export default function App() {
             prompt,
             undefined,
             attachment,
-            'gemini-2.5-flash'
+            'gemini-4-hydrogen'
           );
           nativeBridge.onGeminiResponse?.(response);
         } catch (error) {
@@ -286,10 +290,26 @@ export default function App() {
     };
   }, []);
 
+  const isDedicatedAssistantOverlay = typeof window !== 'undefined' && (
+    new URLSearchParams(window.location.search).get('assistant') === '1' ||
+    Boolean((window as any).KevinOverlayBridge?.isOverlay?.())
+  );
+
   const toggleTheme = () => setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(() => !isDedicatedAssistantOverlay);
   const [splashFadeOut, setSplashFadeOut] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [showAssistantOverlay, setShowAssistantOverlay] = useState(false);
+
+  useEffect(() => {
+    if (!isDedicatedAssistantOverlay) return;
+    document.documentElement.style.backgroundColor = 'transparent';
+    document.body.style.backgroundColor = 'transparent';
+    return () => {
+      document.documentElement.style.backgroundColor = '';
+      document.body.style.backgroundColor = '';
+    };
+  }, [isDedicatedAssistantOverlay]);
 
   useEffect(() => {
     const startTime = Date.now();
@@ -469,6 +489,174 @@ export default function App() {
     }, 1200);
   };
 
+  // Full Agent Permissions, WhatsApp Auto-Reply & STT State
+  const [agentPermissions, setAgentPermissions] = useState<AgentPermissions>(() => getAgentPermissions());
+  const [nativeAgentStatus, setNativeAgentStatus] = useState<NativeAgentStatus>(() => getNativeAgentStatus());
+  const [agentOutbox, setAgentOutbox] = useState<AgentOutboxItem[]>(() => getAgentOutbox());
+  const [savedContacts, setSavedContacts] = useState<SavedContact[]>(() => getSavedContacts());
+  const [newContactName, setNewContactName] = useState('');
+  const [newContactPhone, setNewContactPhone] = useState('');
+  const [quickPhoneInputs, setQuickPhoneInputs] = useState<Record<string, string>>({});
+  const [showAgentModal, setShowAgentModal] = useState(false);
+  const [waTestSender, setWaTestSender] = useState('Aline');
+  const [waTestMessage, setWaTestMessage] = useState('');
+  const [isTestingWaReply, setIsTestingWaReply] = useState(false);
+  const [isTranscribingSTT, setIsTranscribingSTT] = useState(false);
+  const vcfInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    saveAgentPermissions(agentPermissions);
+  }, []);
+
+  useEffect(() => {
+    const handlePerms = (e: Event) => {
+      const detail = (e as CustomEvent<AgentPermissions>).detail;
+      if (detail) setAgentPermissions(detail);
+    };
+    const handleNativeStatus = (e: Event) => {
+      const detail = (e as CustomEvent<NativeAgentStatus>).detail;
+      if (detail) setNativeAgentStatus(detail);
+    };
+    const handleOutbox = (e: Event) => {
+      const detail = (e as CustomEvent<AgentOutboxItem[]>).detail;
+      if (detail) setAgentOutbox(detail);
+    };
+    const handleContacts = (e: Event) => {
+      const detail = (e as CustomEvent<SavedContact[]>).detail;
+      if (detail) setSavedContacts(detail);
+    };
+    const handleWaReplied = (e: Event) => {
+      const detail = (e as CustomEvent<{ sender: string; incoming: string; reply: string }>).detail;
+      if (!detail) return;
+      appendAgentOutbox({
+        channel: 'whatsapp-autoreply',
+        recipient: detail.sender || 'WhatsApp Contact',
+        incoming: detail.incoming,
+        message: detail.reply,
+        status: 'sent',
+      });
+      showToastMessage(`💬 Kevin AI yasubije ${detail.sender} kuri WhatsApp!`);
+    };
+
+    window.addEventListener('kevinAgentPermissionsUpdated', handlePerms);
+    window.addEventListener('kevinAgentStatus', handleNativeStatus);
+    window.addEventListener('kevinAgentOutboxUpdated', handleOutbox);
+    window.addEventListener('kevinContactsUpdated', handleContacts);
+    window.addEventListener('kevinWhatsAppAutoReplied', handleWaReplied);
+    return () => {
+      window.removeEventListener('kevinAgentPermissionsUpdated', handlePerms);
+      window.removeEventListener('kevinAgentStatus', handleNativeStatus);
+      window.removeEventListener('kevinAgentOutboxUpdated', handleOutbox);
+      window.removeEventListener('kevinContactsUpdated', handleContacts);
+      window.removeEventListener('kevinWhatsAppAutoReplied', handleWaReplied);
+    };
+  }, []);
+
+  const updateAgentPerms = (patch: Partial<AgentPermissions>) => {
+    const next = { ...agentPermissions, ...patch };
+    setAgentPermissions(next);
+    saveAgentPermissions(next);
+    setNativeAgentStatus(getNativeAgentStatus());
+  };
+
+  const handleAddContact = () => {
+    const cleanName = newContactName.trim();
+    const cleanPhone = sanitizePhoneNumber(newContactPhone);
+    if (!cleanName || !isLikelyPhoneNumber(cleanPhone)) {
+      showToastMessage('Shyiramo izina na nimero ya telefoni yuzuye.');
+      return;
+    }
+    const updated = saveContact(cleanName, cleanPhone);
+    setSavedContacts(updated);
+    setNewContactName('');
+    setNewContactPhone('');
+    showToastMessage(`📇 ${cleanName} yabitswe muri Contacts!`);
+  };
+
+  const handleImportContacts = async () => {
+    try {
+      const res = await importContactsFromDevice();
+      setSavedContacts(res.contacts);
+      if (res.source === 'needs_permission') {
+        showToastMessage('Emera permission ya READ_CONTACTS kuri Android maze wongere ukande Import.');
+      } else if (res.source === 'unsupported') {
+        vcfInputRef.current?.click();
+      } else {
+        showToastMessage(`✅ Contacts ${res.added} zongerewe muri Kevin AI!`);
+      }
+    } catch (err) {
+      showToastMessage(err instanceof Error ? err.message : 'Byanze kuvana contacts kuri telefone.');
+    }
+  };
+
+  const handleVcfSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = importContactsFromVcfText(text);
+      setSavedContacts(res.contacts);
+      showToastMessage(`📇 Contacts ${res.added} zavuye muri ${file.name} zabitswe!`);
+    } catch {
+      showToastMessage('Ntibyashobotse gusoma dosiye ya .vcf.');
+    }
+  };
+
+  const executeResolvedContactAction = (messageId: string, action: DeviceAction, name: string, phone: string) => {
+    const cleanPhone = sanitizePhoneNumber(phone);
+    if (!isLikelyPhoneNumber(cleanPhone)) {
+      showToastMessage('Shyiramo nimero ya telefoni yemewe.');
+      return;
+    }
+    const updatedAction: DeviceAction = {
+      ...action,
+      phoneNumber: cleanPhone,
+      contactName: name || action.contactName,
+      args: { ...action.args, phone_number: cleanPhone, contact_name: name || action.contactName },
+      label: action.name === 'make_call'
+        ? `Hamagara ${name ? `${name} (${cleanPhone})` : cleanPhone}`
+        : action.name === 'send_sms'
+          ? `SMS → ${name ? `${name} (${cleanPhone})` : cleanPhone}`
+          : `WhatsApp → ${name || cleanPhone}`,
+      url: action.name === 'make_call'
+        ? `tel:${cleanPhone}`
+        : action.name === 'send_sms'
+          ? `sms:${cleanPhone}?body=${encodeURIComponent(action.messageText || '')}`
+          : `https://wa.me/${cleanPhone.replace(/[^\d]/g, '')}?text=${encodeURIComponent(action.messageText || '')}`,
+      fallbackUrl: action.name === 'make_call' ? `tel:${cleanPhone}` : action.fallbackUrl,
+      contactMatches: undefined,
+      status: 'executed',
+    };
+    runDeviceAction(updatedAction, true);
+    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, action: updatedAction } : m));
+  };
+
+  const handleTestWhatsAppReply = async () => {
+    if (!waTestMessage.trim() || isTestingWaReply) return;
+    setIsTestingWaReply(true);
+    try {
+      const reply = await generateWhatsAppAutoReply(
+        waTestSender.trim() || 'Contact',
+        waTestMessage.trim(),
+        agentPermissions.whatsappReplyStyle
+      );
+      appendAgentOutbox({
+        channel: 'whatsapp-autoreply',
+        recipient: waTestSender.trim() || 'Contact',
+        incoming: waTestMessage.trim(),
+        message: reply,
+        status: 'sent',
+      });
+      setWaTestMessage('');
+      showToastMessage(`✅ Igisubizo cya WhatsApp cyoherejwe kuri ${waTestSender.trim() || 'Contact'}!`);
+    } catch (err) {
+      showToastMessage(err instanceof Error ? err.message : 'Byanze kohereza igisubizo.');
+    } finally {
+      setIsTestingWaReply(false);
+    }
+  };
+
   // Speech Recognition State
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -492,10 +680,48 @@ export default function App() {
     }
   };
 
+  const cancelRecording = () => {
+    if (voiceRecordingRef.current) {
+      voiceRecordingRef.current.cancel();
+      resetVoiceRecordingState();
+      showToastMessage('Amajwi yasibwe.');
+    }
+  };
+
   const resetVoiceRecordingState = () => {
     clearInterval(timerRef.current);
     voiceRecordingRef.current = null;
     setIsRecording(false);
+  };
+
+  const transcribeRecordingToInput = async () => {
+    if (voiceStoppingRef.current) return;
+    const recording = voiceRecordingRef.current;
+    if (!recording) return;
+
+    voiceStoppingRef.current = true;
+    setIsTranscribingSTT(true);
+    try {
+      const audioBlob = await recording.stop();
+      resetVoiceRecordingState();
+      if (!audioBlob.size) {
+        throw new Error('No audio was captured.');
+      }
+      const audioBase64 = await blobToBase64(audioBlob);
+      const transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
+      if (transcript) {
+        setInput(prev => (prev ? `${prev.trim()} ${transcript}` : transcript));
+        showToastMessage('🎙️ Amajwi yahinduwe inyandiko (STT)!');
+      } else {
+        showToastMessage('Ntacyo ijwi ryabashije kumvikana. Ongera ugerageze.');
+      }
+    } catch (error) {
+      showToastMessage(error instanceof Error ? error.message : 'STT transcription failed.');
+    } finally {
+      setIsTranscribingSTT(false);
+      voiceStoppingRef.current = false;
+      resetVoiceRecordingState();
+    }
   };
 
   const finishVoiceRecording = async (imageBase64?: string, assistantRequest = false) => {
@@ -511,11 +737,24 @@ export default function App() {
         throw new Error('No audio was captured.');
       }
 
-      const prompt = 'Listen to the attached voice message, understand it in Kinyarwanda or English, transcribe it mentally, and reply naturally to the user.';
       const audioBase64 = await blobToBase64(audioBlob);
       if (audioBase64.length <= 100) {
         throw new Error('The recorded audio is empty or invalid. Please record your message again.');
       }
+
+      let transcript = '';
+      if (!assistantRequest) {
+        setIsTranscribingSTT(true);
+        try {
+          transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
+        } catch (sttErr) {
+          console.warn('STT fallback to multimodal audio:', sttErr);
+        } finally {
+          setIsTranscribingSTT(false);
+        }
+      }
+
+      const prompt = transcript || 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action.';
 
       if (assistantRequest) {
         const nativeBridge = window.KevinAssistantNative;
@@ -532,13 +771,14 @@ export default function App() {
           prompt,
           undefined,
           attachments,
-          'gemini-2.5-flash'
+          'gemini-4-hydrogen'
         );
         nativeBridge?.onGeminiResponse?.(response);
         return;
       }
 
-      void handleSendMessage(prompt, audioBlob, audioBase64, recording.mimeType);
+      const audioUrl = URL.createObjectURL(audioBlob);
+      void handleSendMessage(transcript || '🎤 Voice Note', audioBlob, audioBase64, recording.mimeType, audioUrl);
     } catch (error) {
       console.error("Audio processing error:", error);
       const message = error instanceof Error ? error.message : "Unable to process the voice message.";
@@ -548,6 +788,7 @@ export default function App() {
         showToastMessage(message);
       }
     } finally {
+      setIsTranscribingSTT(false);
       voiceStoppingRef.current = false;
       resetVoiceRecordingState();
     }
@@ -922,7 +1163,8 @@ export default function App() {
     overrideInput?: string,
     overrideAttachment?: AttachmentItem | Blob,
     audioBase64?: string,
-    audioMimeType?: string
+    audioMimeType?: string,
+    audioUrl?: string
   ) => {
     const textToSend = overrideInput !== undefined ? overrideInput : input;
     if (textToSend.trim() === '' && attachedImages.length === 0 && !attachedImage && !overrideAttachment) return;
@@ -952,7 +1194,10 @@ export default function App() {
       image: currentAttachmentMimeType?.startsWith('image/') && !(currentAttachment instanceof Blob)
         ? currentAttachment.base64
         : undefined,
-      document: currentAttachment && !(currentAttachment instanceof Blob) && !currentAttachmentMimeType?.startsWith('image/') ? {
+      audioUrl: audioUrl || (currentAttachmentMimeType?.startsWith('audio/') && currentAttachment instanceof Blob
+        ? URL.createObjectURL(currentAttachment)
+        : undefined),
+      document: currentAttachment && !(currentAttachment instanceof Blob) && !currentAttachmentMimeType?.startsWith('image/') && !currentAttachmentMimeType?.startsWith('audio/') ? {
         type: currentAttachmentMimeType === 'application/pdf' ? 'pdf' : 'docx',
         name: currentAttachment.name || 'Document',
         size: currentAttachment.size || 'Document',
@@ -1227,6 +1472,19 @@ export default function App() {
     }
   };
 
+  if (isDedicatedAssistantOverlay) {
+    return (
+      <div className="min-h-screen w-screen bg-transparent font-sans">
+        <AssistantOverlay
+          isOpen
+          isDedicatedOverlay
+          selectedModel={selectedModel}
+          onClose={() => undefined}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen min-h-screen w-screen overflow-hidden bg-[#ECE5DD] dark:bg-[#111b21] font-sans text-gray-900 dark:text-[#e9edef] relative">
       {/* Animated Splash Screen */}
@@ -1290,11 +1548,22 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2.5 relative">
+            <button
+              onClick={() => { setNativeAgentStatus(getNativeAgentStatus()); setShowAgentModal(true); }}
+              className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors relative ${
+                agentPermissions.autoSend || agentPermissions.whatsappAutoReply
+                  ? 'bg-[#00FF88]/20 text-[#00FF88]'
+                  : 'bg-white/10 hover:bg-white/25 text-white'
+              }`}
+              title="Full Agent & WhatsApp Auto-Reply"
+            >
+              <Bot className="w-4.5 h-4.5" />
+              {(agentPermissions.autoSend || agentPermissions.whatsappAutoReply) && (
+                <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-[#00FF88]" />
+              )}
+            </button>
             <button onClick={startNewChat} className="w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 text-white transition-colors" title="New Chat">
               <Plus className="w-5 h-5 text-[#00FF88]" />
-            </button>
-            <button onClick={toggleTheme} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors">
-              {theme === 'dark' ? <Sun className="w-5 h-5 text-gray-200" /> : <Moon className="w-5 h-5" />}
             </button>
             <MoreVertical className="w-5 h-5 cursor-pointer" onClick={() => setMenuOpen(!menuOpen)} />
             
@@ -1644,6 +1913,36 @@ export default function App() {
                   </span>
                 </div>
 
+                <div 
+                  onClick={() => { setNativeAgentStatus(getNativeAgentStatus()); setShowAgentModal(true); setDrawerOpen(false); }}
+                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Bot size={15} className="text-[#00a884]" />
+                    <span>Full Agent & WhatsApp</span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                    agentPermissions.autoSend || agentPermissions.whatsappAutoReply
+                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                      : 'text-gray-400 dark:text-gray-500'
+                  }`}>
+                    {agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? 'ACTIVE' : 'SETUP'}
+                  </span>
+                </div>
+
+                <div
+                  onClick={() => { setShowAssistantOverlay(true); setDrawerOpen(false); }}
+                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={15} className="text-[#00FF88]" />
+                    <span>Assistant Box (Home)</span>
+                  </div>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#00a884]/15 text-[#075E54] dark:text-[#00FF88]">
+                    PREVIEW
+                  </span>
+                </div>
+
 
                 <div 
                   onClick={() => { setShowAbout(true); setDrawerOpen(false); }}
@@ -1848,26 +2147,199 @@ export default function App() {
                         </button>
                       </div>
                     )}
+                    {message.audioUrl && (
+                      <div className="mb-2.5 flex items-center gap-2 rounded-xl bg-black/5 dark:bg-black/25 p-2 border border-black/10 dark:border-white/10">
+                        <Volume2 size={16} className="text-[#075E54] dark:text-[#00FF88] shrink-0" />
+                        <audio controls src={message.audioUrl} className="h-8 w-full max-w-[240px]" />
+                      </div>
+                    )}
                     {message.action && (
-                      <div className="my-2.5 rounded-xl border border-[#25D366]/30 bg-[#f0fdf4] dark:bg-[#182229] p-3 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[#075E54] text-white flex items-center justify-center text-lg">
-                          {message.action.name === 'open_youtube' || message.action.name === 'open_audiomack' ? '▶️' :
-                            message.action.name === 'make_call' ? '📞' :
-                            message.action.name === 'open_whatsapp' ? '💬' :
-                            message.action.name === 'open_camera' ? '📸' : '🚀'}
+                      <div className="my-2.5 rounded-xl border border-[#25D366]/30 bg-[#f0fdf4] dark:bg-[#182229] p-3 space-y-2.5">
+                        {message.action.name === 'open_youtube' && message.action.embedUrl && agentPermissions.autoPlayYouTube && (
+                          <div className="rounded-xl overflow-hidden bg-black aspect-video w-full shadow-md border border-black/20">
+                            <iframe
+                              src={message.action.embedUrl}
+                              title={message.action.videoTitle || message.action.label}
+                              className="w-full h-full"
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                            />
+                          </div>
+                        )}
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-[#075E54] text-white flex items-center justify-center text-lg shrink-0">
+                            {message.action.name === 'open_youtube' || message.action.name === 'open_audiomack' ? '▶️' :
+                              message.action.name === 'make_call' ? '📞' :
+                              message.action.name === 'send_sms' ? '📩' :
+                              message.action.name === 'open_whatsapp' || message.action.name === 'configure_whatsapp_autoreply' ? '💬' :
+                              message.action.name === 'open_camera' ? '📸' : '🚀'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-gray-800 dark:text-[#e9edef] truncate">{message.action.label}</p>
+                            <p className="text-xs text-gray-500 dark:text-[#8696a0] truncate">
+                              {message.action.name === 'open_youtube' && message.action.channel
+                                ? `${message.action.channel} • Playing Now`
+                                : message.action.status === 'choose_contact'
+                                  ? 'Hitamo contact imwe hasi'
+                                  : message.action.status === 'contact_not_found'
+                                    ? 'Contact ntirabikwa — shyiramo nimero cyangwa import'
+                                    : message.action.status === 'dialed_needs_permission'
+                                      ? 'Dialer yafunguwe — emera Direct Call permission'
+                                      : message.action.status === 'needs_permission'
+                                        ? 'Permission ikenewe kugira ngo ikore ako kanya'
+                                        : message.action.status === 'executed'
+                                          ? 'Byakozwe ako kanya (Full Agent)'
+                                          : 'Kevin AI Device Action'}
+                            </p>
+                          </div>
+                          {message.action.status === 'needs_permission' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (message.action!.name === 'make_call') {
+                                  updateAgentPerms({ autoCall: true });
+                                } else {
+                                  updateAgentPerms({ autoSend: true });
+                                }
+                                const updatedAction: DeviceAction = { ...message.action!, status: 'executed' };
+                                runDeviceAction(updatedAction, true);
+                                setMessages(prev => prev.map(m => m.id === message.id ? { ...m, action: updatedAction } : m));
+                                showToastMessage(
+                                  message.action!.name === 'make_call'
+                                    ? '📞 Permission yemejwe! Ariko arahoza guhamagara...'
+                                    : '✅ Permission yemejwe! Ubutumwa bwoherejwe ako kanya.'
+                                );
+                              }}
+                              className="shrink-0 rounded-full bg-[#25D366] hover:bg-[#1ebe5b] px-3 py-1.5 text-xs font-bold text-white cursor-pointer shadow-sm"
+                            >
+                              {message.action.name === 'make_call' ? 'Emerera & Hamagara' : 'Emerera & Ohereza'}
+                            </button>
+                          ) : message.action.status === 'dialed_needs_permission' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                (window as any).KevinAgentBridge?.requestAgentPermissions?.();
+                                showToastMessage('Emera CALL_PHONE & READ_CONTACTS kugira ngo ubutaha ihite ihamagara.');
+                              }}
+                              className="shrink-0 rounded-full bg-amber-500 hover:bg-amber-600 px-3 py-1.5 text-xs font-bold text-white cursor-pointer shadow-sm"
+                            >
+                              Emerera Direct Call
+                            </button>
+                          ) : message.action.url && message.action.status !== 'choose_contact' && message.action.status !== 'contact_not_found' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (message.action!.name === 'make_call') {
+                                  const updated = { ...message.action! };
+                                  runDeviceAction(updated, true);
+                                  return;
+                                }
+                                const target = message.action!.fallbackUrl || message.action!.url!;
+                                const link = document.createElement('a');
+                                link.href = target;
+                                link.target = '_blank';
+                                link.rel = 'noopener noreferrer';
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                              className="shrink-0 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] px-3 py-1.5 text-xs font-semibold text-white cursor-pointer"
+                            >
+                              {message.action.name === 'open_youtube'
+                                ? 'YouTube App'
+                                : message.action.name === 'make_call'
+                                  ? 'Hamagara Nanone'
+                                  : 'Fungura'}
+                            </button>
+                          ) : null}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-gray-800 dark:text-[#e9edef] truncate">{message.action.label}</p>
-                          <p className="text-xs text-gray-500 dark:text-[#8696a0]">Kevin AI Device Action</p>
-                        </div>
-                        {message.action.url && (
-                          <button
-                            type="button"
-                            onClick={() => runDeviceAction(message.action!)}
-                            className="shrink-0 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] px-3 py-1.5 text-xs font-semibold text-white cursor-pointer"
-                          >
-                            Fungura {message.action.label.split(':')[0]}
-                          </button>
+
+                        {message.action.status === 'choose_contact' && message.action.contactMatches && (
+                          <div className="space-y-1.5 pt-1">
+                            {message.action.contactMatches.map((contact) => (
+                              <div
+                                key={contact.id}
+                                className="flex items-center justify-between gap-2 rounded-lg bg-white dark:bg-[#111b21] px-3 py-2 border border-gray-200 dark:border-[#2f3b43]"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-gray-800 dark:text-[#e9edef] truncate">{contact.name}</p>
+                                  <p className="text-[11px] text-gray-500 dark:text-[#8696a0] font-mono">{contact.phone}</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => executeResolvedContactAction(message.id, message.action!, contact.name, contact.phone)}
+                                  className="shrink-0 rounded-full bg-[#00a884] hover:bg-[#075E54] px-3 py-1 text-[11px] font-bold text-white cursor-pointer"
+                                >
+                                  {message.action!.name === 'make_call' ? '📞 Hamagara' : 'Ohereza'}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {message.action.status === 'contact_not_found' && (
+                          <div className="space-y-2 rounded-lg bg-white/90 dark:bg-[#111b21]/80 p-2.5 border border-gray-200 dark:border-[#2f3b43]">
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <input
+                                type="tel"
+                                value={quickPhoneInputs[message.id] || ''}
+                                onChange={(e) => setQuickPhoneInputs(prev => ({ ...prev, [message.id]: e.target.value }))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const phoneVal = quickPhoneInputs[message.id] || '';
+                                    if (isLikelyPhoneNumber(phoneVal)) {
+                                      const contactLabel = message.action!.contactName || 'Contact';
+                                      setSavedContacts(saveContact(contactLabel, phoneVal));
+                                      executeResolvedContactAction(message.id, message.action!, contactLabel, phoneVal);
+                                    }
+                                  }
+                                }}
+                                placeholder={`Shyiramo nimero ya ${message.action.contactName || 'contact'} (ex: 0788...)`}
+                                className="flex-1 bg-gray-50 dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const phoneVal = quickPhoneInputs[message.id] || '';
+                                  if (!isLikelyPhoneNumber(phoneVal)) {
+                                    showToastMessage('Andika nimero ya telefoni yuzuye.');
+                                    return;
+                                  }
+                                  const contactLabel = message.action!.contactName || 'Contact';
+                                  setSavedContacts(saveContact(contactLabel, phoneVal));
+                                  executeResolvedContactAction(message.id, message.action!, contactLabel, phoneVal);
+                                  showToastMessage(`📇 ${contactLabel} yabitswe!`);
+                                }}
+                                className="rounded-lg bg-[#00a884] hover:bg-[#075E54] px-3 py-1.5 text-xs font-bold text-white cursor-pointer shrink-0"
+                              >
+                                {message.action.name === 'make_call' ? 'Bika & Hamagara' : 'Bika & Ohereza'}
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void handleImportContacts()}
+                                className="text-[11px] font-semibold text-[#075E54] dark:text-[#00FF88] hover:underline cursor-pointer"
+                              >
+                                📇 Import Contacts (Phone / .vcf)
+                              </button>
+                              {nativeAgentStatus.isAndroid && !nativeAgentStatus.hasContactsPermission && (
+                                <button
+                                  type="button"
+                                  onClick={() => (window as any).KevinAgentBridge?.requestAgentPermissions?.()}
+                                  className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                                >
+                                  🔐 Emerera Android Contacts
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {(message.action.name === 'send_sms' || message.action.name === 'open_whatsapp') && message.action.messageText && (
+                          <div className="rounded-lg bg-white/80 dark:bg-[#111b21]/70 px-3 py-2 text-xs text-gray-700 dark:text-gray-300 border border-gray-200/70 dark:border-[#2f3b43]">
+                            <span className="font-semibold">Ubutumwa:</span> "{message.action.messageText}"
+                          </div>
                         )}
                       </div>
                     )}
@@ -1977,19 +2449,37 @@ export default function App() {
           )}
           
           {isRecording ? (
-            <div className="flex-1 p-2.5 rounded-full bg-white dark:bg-[#2a3942] text-sm sm:text-base flex items-center justify-between shadow-inner">
-              <div className="flex items-center gap-2 text-red-500">
-                <div className="flex items-end gap-0.5 h-4">
+            <div className="flex-1 px-3 py-2 rounded-full bg-white dark:bg-[#2a3942] text-sm sm:text-base flex items-center justify-between gap-2 shadow-inner">
+              <div className="flex items-center gap-2 text-red-500 min-w-0">
+                <button
+                  type="button"
+                  onClick={cancelRecording}
+                  className="p-1 rounded-full hover:bg-red-50 dark:hover:bg-red-950/40 text-gray-500 hover:text-red-500 cursor-pointer shrink-0"
+                  title="Siba amajwi"
+                >
+                  <X size={16} />
+                </button>
+                <div className="flex items-end gap-0.5 h-4 shrink-0">
                   <motion.div animate={{height: ["20%", "100%", "20%"]}} transition={{repeat: Infinity, duration: 0.8}} className="w-1 bg-red-500 rounded-t-sm"></motion.div>
                   <motion.div animate={{height: ["40%", "100%", "40%"]}} transition={{repeat: Infinity, duration: 1, delay: 0.2}} className="w-1 bg-red-500 rounded-t-sm"></motion.div>
                   <motion.div animate={{height: ["60%", "100%", "60%"]}} transition={{repeat: Infinity, duration: 0.9, delay: 0.4}} className="w-1 bg-red-500 rounded-t-sm"></motion.div>
                 </div>
-                <span className="font-medium animate-pulse">Recording audio... [■ Stop]</span>
+                <span className="font-medium animate-pulse truncate text-xs sm:text-sm">Recording...</span>
               </div>
-              <span className="text-gray-500 dark:text-[#8696a0] font-mono text-xs">
-                {Math.floor(recordingTime / 60).toString().padStart(2, '0')}:
-                {(recordingTime % 60).toString().padStart(2, '0')}
-              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => void transcribeRecordingToInput()}
+                  className="px-2.5 py-1 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] text-white text-[11px] font-bold cursor-pointer"
+                  title="Hindura amajwi mu nyandiko (STT)"
+                >
+                  STT → Text
+                </button>
+                <span className="text-gray-500 dark:text-[#8696a0] font-mono text-xs">
+                  {Math.floor(recordingTime / 60).toString().padStart(2, '0')}:
+                  {(recordingTime % 60).toString().padStart(2, '0')}
+                </span>
+              </div>
             </div>
           ) : (
             <input
@@ -1997,7 +2487,7 @@ export default function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="Type a message..."
+              placeholder={isTranscribingSTT ? "Guhindura amajwi mu nyandiko (STT)..." : "Type a message..."}
               className="flex-1 px-4 py-2.5 rounded-full bg-white dark:bg-[#2a3942] text-[15px] sm:text-base font-bold focus:outline-none text-gray-900 dark:text-[#e9edef] placeholder:text-gray-400 dark:placeholder:text-[#8696a0] placeholder:font-normal"
             />
           )}
@@ -2075,11 +2565,28 @@ export default function App() {
               <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center">
                 <FileText className="w-5 h-5 text-[#075E54]" />
               </div>
-              <span className="text-white font-medium text-[10px]">Docs</span>
-              <input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.csv,.md,.json,.ts,.js,.py,.html,.css" className="hidden" onChange={async (e) => { 
+              <span className="text-white font-medium text-[10px]">Docs/Audio</span>
+              <input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.csv,.md,.json,.ts,.js,.py,.html,.css,.mp3,.wav,.m4a,.ogg,.webm,.aac,audio/*" className="hidden" onChange={async (e) => { 
                 const f = e.target.files?.[0]; 
                 if(f) { 
                   const isPdf = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+                  const isAudio = f.type.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|webm|aac)$/i.test(f.name);
+                  if (isAudio) {
+                    setAttachmentPopupOpen(false);
+                    setIsTranscribingSTT(true);
+                    try {
+                      const audioBase64 = await blobToBase64(f);
+                      const mimeType = f.type || 'audio/mpeg';
+                      const transcript = await transcribeAudioWithSTT(audioBase64, mimeType);
+                      const audioUrl = URL.createObjectURL(f);
+                      void handleSendMessage(transcript || `🎤 ${f.name}`, f, audioBase64, mimeType, audioUrl);
+                    } catch (err) {
+                      showToastMessage(err instanceof Error ? err.message : 'Byanze gusoma amajwi (STT).');
+                    } finally {
+                      setIsTranscribingSTT(false);
+                    }
+                    return;
+                  }
                   if (isPdf) {
                     const reader = new FileReader(); 
                     reader.onload = () => setAttachedImage({ 
@@ -2385,6 +2892,415 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Full Agent Permissions, WhatsApp Auto-Reply & Outbox Modal */}
+      <AnimatePresence>
+        {showAgentModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setShowAgentModal(false)}>
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-2xl p-5 sm:p-6 w-full max-w-lg max-h-[90vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#00a884]/15 text-[#00a884] flex items-center justify-center">
+                    <Bot size={22} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white">Kevin Full Agent & Permissions</h3>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">YouTube Auto-Play, Auto-Send SMS/WhatsApp & Auto-Reply</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAgentModal(false)}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto space-y-4 pr-1 flex-1">
+                {/* Assistant Overlay Preview & Home-Button Setup */}
+                <div className="p-3 rounded-xl bg-gradient-to-r from-[#075E54]/10 via-[#00a884]/10 to-[#00FF88]/10 border border-[#00a884]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-[#075E54] dark:text-[#00FF88] flex items-center gap-1.5">
+                      <Sparkles size={14} /> Floating Assistant Box (Home Long-Press)
+                    </p>
+                    <p className="text-[11px] text-gray-600 dark:text-[#8696a0]">
+                      Hafunguka ka box gato hasi udafunguye app yose, nko gukanda Home button cyane.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAgentModal(false);
+                      setShowAssistantOverlay(true);
+                    }}
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] text-white text-xs font-bold cursor-pointer shadow-xs"
+                  >
+                    ✨ Gerageza Overlay
+                  </button>
+                </div>
+
+                {/* Permission Toggles */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">▶️ YouTube Auto-Play</p>
+                      <p className="text-xs text-gray-500 dark:text-[#8696a0]">
+                        Iyo usabye indirimbo, ihita ikinwa ako kanya aho guhagararira muri search.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={agentPermissions.autoPlayYouTube}
+                      onClick={() => updateAgentPerms({ autoPlayYouTube: !agentPermissions.autoPlayYouTube })}
+                      className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${
+                        agentPermissions.autoPlayYouTube ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-gray-700'
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.autoPlayYouTube ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">📞 Direct Auto-Call & Contacts</p>
+                      <p className="text-xs text-gray-500 dark:text-[#8696a0]">
+                        Iyo usabye guhamagara umuntu cyangwa nimero, ahita ahamagara ako kanya akoresheje Contacts.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={agentPermissions.autoCall}
+                      onClick={() => updateAgentPerms({ autoCall: !agentPermissions.autoCall })}
+                      className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${
+                        agentPermissions.autoCall ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-gray-700'
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.autoCall ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">📩 Auto-Send Messages (SMS & WhatsApp)</p>
+                      <p className="text-xs text-gray-500 dark:text-[#8696a0]">
+                        Yemerera Kevin AI kohereza ubutumwa ako kanya ku nimero uyihaye nta guhagarara.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={agentPermissions.autoSend}
+                      onClick={() => updateAgentPerms({ autoSend: !agentPermissions.autoSend })}
+                      className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${
+                        agentPermissions.autoSend ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-gray-700'
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.autoSend ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">💬 WhatsApp Auto-Reply Agent</p>
+                      <p className="text-xs text-gray-500 dark:text-[#8696a0]">
+                        Kevin AI ajya agusubiriza ubutumwa bwinjiye kuri WhatsApp mu izina ryawe.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={agentPermissions.whatsappAutoReply}
+                      onClick={() => updateAgentPerms({ whatsappAutoReply: !agentPermissions.whatsappAutoReply })}
+                      className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${
+                        agentPermissions.whatsappAutoReply ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-gray-700'
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.whatsappAutoReply ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* WhatsApp Auto-Reply Style */}
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2">
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">
+                    Uburyo Kevin AI asubiza kuri WhatsApp (Reply Style):
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={agentPermissions.whatsappReplyStyle}
+                    onChange={(e) => updateAgentPerms({ whatsappReplyStyle: e.target.value })}
+                    placeholder="Urugero: Subiza mu Kinyarwanda cyiza kandi gitonze nk'umuntu wiyubashye..."
+                    className="w-full bg-white dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] px-3 py-2 rounded-lg border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs resize-none"
+                  />
+                </div>
+
+                {/* Android Native Bridge Permissions */}
+                {nativeAgentStatus.isAndroid && (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-[#11241f] border border-emerald-200 dark:border-emerald-900/50 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                        <ShieldCheck size={15} /> Android Native Agent Status
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setNativeAgentStatus(getNativeAgentStatus())}
+                        className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 underline cursor-pointer"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+                      <div className={`px-2.5 py-1.5 rounded-lg font-semibold ${nativeAgentStatus.hasSmsPermission ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200' : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}>
+                        SMS: {nativeAgentStatus.hasSmsPermission ? 'Yemewe' : 'Ntiraboneka'}
+                      </div>
+                      <div className={`px-2.5 py-1.5 rounded-lg font-semibold ${nativeAgentStatus.hasCallPermission ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200' : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}>
+                        Direct Call: {nativeAgentStatus.hasCallPermission ? 'Yemewe' : 'Ntiraboneka'}
+                      </div>
+                      <div className={`px-2.5 py-1.5 rounded-lg font-semibold ${nativeAgentStatus.hasContactsPermission ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200' : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}>
+                        Contacts: {nativeAgentStatus.hasContactsPermission ? 'Yemewe' : 'Ntiraboneka'}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => (window as any).KevinAgentBridge?.openAccessibilitySettings?.()}
+                        className={`px-2.5 py-1.5 rounded-lg font-semibold text-left cursor-pointer ${nativeAgentStatus.hasAccessibility ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200' : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}
+                      >
+                        Accessibility: {nativeAgentStatus.hasAccessibility ? 'Active' : 'Fungura'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => (window as any).KevinAgentBridge?.openNotificationListenerSettings?.()}
+                        className={`px-2.5 py-1.5 rounded-lg font-semibold text-left cursor-pointer ${nativeAgentStatus.hasNotificationAccess ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200' : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}
+                      >
+                        WA Notif: {nativeAgentStatus.hasNotificationAccess ? 'Active' : 'Fungura'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => (window as any).KevinAgentBridge?.openAssistantSettings?.()}
+                        className={`px-2.5 py-1.5 rounded-lg font-semibold text-left cursor-pointer ${nativeAgentStatus.isDefaultAssistant ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200' : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}
+                      >
+                        Home Assist: {nativeAgentStatus.isDefaultAssistant ? 'Active' : 'Shyiraho'}
+                      </button>
+                    </div>
+                    {(!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission) && (
+                      <button
+                        type="button"
+                        onClick={() => (window as any).KevinAgentBridge?.requestAgentPermissions?.()}
+                        className="w-full py-2 rounded-lg bg-[#00a884] hover:bg-[#075E54] text-white text-xs font-bold cursor-pointer"
+                      >
+                        Saba Permissions (SMS, Direct Call & Contacts)
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Saved Contacts Book & Import */}
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-bold text-gray-800 dark:text-[#e9edef] flex items-center gap-1.5">
+                      <Phone size={13} className="text-[#00a884]" /> Contacts zawe ({savedContacts.length})
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleImportContacts()}
+                        className="px-2.5 py-1 rounded-lg bg-[#00a884]/15 text-[#075E54] dark:text-[#00FF88] hover:bg-[#00a884]/25 text-[11px] font-bold cursor-pointer flex items-center gap-1"
+                      >
+                        <Upload size={11} /> Import Phone
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => vcfInputRef.current?.click()}
+                        className="px-2.5 py-1 rounded-lg bg-gray-200 dark:bg-[#2a3942] text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-[#374248] text-[11px] font-bold cursor-pointer"
+                      >
+                        .VCF File
+                      </button>
+                      <input
+                        ref={vcfInputRef}
+                        type="file"
+                        accept=".vcf,text/vcard,text/x-vcard"
+                        className="hidden"
+                        onChange={(e) => void handleVcfSelected(e)}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                    <input
+                      type="text"
+                      value={newContactName}
+                      onChange={(e) => setNewContactName(e.target.value)}
+                      placeholder="Izina (ex: Aline)"
+                      className="sm:col-span-2 bg-white dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] px-3 py-1.5 rounded-lg border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs"
+                    />
+                    <input
+                      type="tel"
+                      value={newContactPhone}
+                      onChange={(e) => setNewContactPhone(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddContact(); }}
+                      placeholder="Nimero (0788...)"
+                      className="sm:col-span-2 bg-white dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] px-3 py-1.5 rounded-lg border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddContact}
+                      className="bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] text-white rounded-lg px-3 py-1.5 text-xs font-bold cursor-pointer flex items-center justify-center gap-1"
+                    >
+                      <UserPlus size={12} /> Bika
+                    </button>
+                  </div>
+                  {savedContacts.length > 0 && (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {savedContacts.map((c) => (
+                        <div key={c.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#2a3942] text-xs">
+                          <div className="min-w-0">
+                            <span className="font-bold text-gray-800 dark:text-[#e9edef]">{c.name}</span>
+                            <span className="text-gray-500 dark:text-[#8696a0] ml-2 font-mono text-[11px]">{c.phone}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                runDeviceAction({
+                                  name: 'make_call',
+                                  args: { phone_number: c.phone, contact_name: c.name },
+                                  label: `Hamagara ${c.name}`,
+                                  url: `tel:${c.phone}`,
+                                  fallbackUrl: `tel:${c.phone}`,
+                                  phoneNumber: c.phone,
+                                  contactName: c.name,
+                                }, true);
+                                showToastMessage(`📞 Ariko arahamagara ${c.name}...`);
+                              }}
+                              className="p-1.5 rounded-lg bg-[#00a884]/15 text-[#075E54] dark:text-[#00FF88] hover:bg-[#00a884]/25 cursor-pointer"
+                              title={`Hamagara ${c.name}`}
+                            >
+                              <Phone size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSavedContacts(deleteSavedContact(c.id))}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 cursor-pointer"
+                              title="Siba"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* WhatsApp Auto-Reply Live Tester */}
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2.5">
+                  <p className="text-xs font-bold text-gray-800 dark:text-[#e9edef]">
+                    🧪 Gerageza WhatsApp Auto-Reply (Live AI Reply)
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      value={waTestSender}
+                      onChange={(e) => setWaTestSender(e.target.value)}
+                      placeholder="Uwohereje (ex: Aline)"
+                      className="bg-white dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] px-3 py-2 rounded-lg border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs"
+                    />
+                    <input
+                      type="text"
+                      value={waTestMessage}
+                      onChange={(e) => setWaTestMessage(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleTestWhatsAppReply(); }}
+                      placeholder="Ubutumwa bwinjiye kuri WhatsApp..."
+                      className="sm:col-span-2 bg-white dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] px-3 py-2 rounded-lg border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleTestWhatsAppReply()}
+                    disabled={isTestingWaReply || !waTestMessage.trim()}
+                    className={`w-full py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 ${
+                      isTestingWaReply || !waTestMessage.trim()
+                        ? 'bg-gray-200 dark:bg-[#2a3942] text-gray-400 cursor-not-allowed'
+                        : 'bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] text-white cursor-pointer'
+                    }`}
+                  >
+                    <Send size={13} />
+                    <span>{isTestingWaReply ? 'Ariko arategura igisubizo...' : 'Gerageza Gusubiza kuri WhatsApp'}</span>
+                  </button>
+                </div>
+
+                {/* Agent Outbox / Sent Log */}
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold text-gray-800 dark:text-[#e9edef]">
+                      📤 Agent Outbox ({agentOutbox.length})
+                    </p>
+                    {agentOutbox.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          localStorage.removeItem('kevin_ai_agent_outbox');
+                          setAgentOutbox([]);
+                        }}
+                        className="text-[11px] font-semibold text-red-500 hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <Trash2 size={12} /> Siba Log
+                      </button>
+                    )}
+                  </div>
+                  {agentOutbox.length === 0 ? (
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">
+                      Nta butumwa cyangwa call byoherejwe na Full Agent birabikwa hano.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                      {agentOutbox.map((item) => (
+                        <div key={item.id} className="p-2.5 rounded-lg bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#2a3942] text-xs space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-[#075E54] dark:text-[#00FF88] uppercase text-[10px]">
+                              {item.channel === 'whatsapp-autoreply'
+                                ? 'WA Auto-Reply'
+                                : item.channel === 'call'
+                                  ? '📞 CALL'
+                                  : item.channel.toUpperCase()} • {item.recipient}
+                            </span>
+                            <span className="text-[10px] text-gray-400">
+                              {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          {item.incoming && (
+                            <p className="text-[11px] text-gray-500 dark:text-[#8696a0] italic">
+                              In: "{item.incoming}"
+                            </p>
+                          )}
+                          <p className="text-gray-800 dark:text-[#e9edef]">{item.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-3 mt-3 border-t border-gray-100 dark:border-[#282828] flex justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowAgentModal(false)}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-[#00a884] hover:bg-[#075E54] text-white shadow-sm cursor-pointer"
+                >
+                  Funga
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
 
         {/* Fullscreen Image Preview Lightbox */}
@@ -2435,6 +3351,37 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      <AssistantOverlay
+        isOpen={showAssistantOverlay}
+        selectedModel={selectedModel}
+        onClose={() => setShowAssistantOverlay(false)}
+        onExpandToFullApp={(prompt, reply, action) => {
+          setShowAssistantOverlay(false);
+          if (prompt && reply) {
+            const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const newMsgs: Message[] = [
+              ...messages,
+              {
+                id: Date.now().toString(),
+                text: prompt,
+                sender: 'user',
+                timestamp: nowStr,
+                status: 'read',
+              },
+              {
+                id: (Date.now() + 1).toString(),
+                text: reply,
+                sender: 'kevin',
+                timestamp: nowStr,
+                status: 'read',
+                action: action || undefined,
+              },
+            ];
+            updateSessionMessages(newMsgs);
+          }
+        }}
+      />
     </div>
   );
 }

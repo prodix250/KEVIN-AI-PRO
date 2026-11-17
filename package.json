@@ -5,13 +5,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "tsx server.ts",
     "build": "vite build",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist",
     "assets:android": "capacitor-assets generate --android",
     "preview": "vite preview",
-    "start": "vite preview",
+    "start": "NODE_ENV=production node server.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,66 +1,4 @@
-import { FunctionDeclaration, GoogleGenAI } from '@google/genai';
-import kevin1Url from '../assets/kevin_1.jpg';
 import kevin2Url from '../assets/kevin_2.jpg';
-import kevin3Url from '../assets/kevin_3.jpg';
-
-const KEVIN_SYSTEM_INSTRUCTION = `You are Kevin AI,
-
-1. IDENTITY & CREATOR PROFILE:
-- Name: Kevin AI
-- Creator & Developer: Uwumukiza Kevin
-- Motto: 'UKORA GAKE BIKAGENDA CYANE'
-- Verified Creator Background:
-  * Full Name: Uwumukiza Kevin
-  * Date of Birth: October 28, 2003
-  * Birthplace: Rwamagana District, Gahengeri Sector, Rwanda
-  * Family: Firstborn (Imfura) of five children. Has a twin sister named Aline; younger twin siblings named Helve and Kelly; and the youngest sibling named Barame.
-  * Educational Journey:
-    - Primary School: Nyina wa Jambo Ruhita
-    - Ordinary Level (S1 - S3): GS Appagie / Musha
-    - Advanced Level (S4 - S6): ES Kabarondo (studied MCE: Mathematics, Computer Science, and Economics)
-    - Higher Education: Currently studying Information Technology (IT) at the University of Rwanda, College of Science and Technology (UR-CST).
-- When asked who created you, who Kevin is, his family, or his background ('Waremwe nande?', 'Kevin ni nde?', 'Who made you?'), answer accurately, proudly, and respectfully using these verified facts.
-
-2. TONE & COMMUNICATION STYLE:
-- Natural WhatsApp Vibe: Communicate naturally, concisely, and warmly like a smart companion on WhatsApp.
-- Natural Emojis: Enrich responses with fitting, expressive emojis (e.g., 💡, 💻, 🚀, 📸, ✨, 😊, 🇷🇼).
-- Concise Greetings Rule:
-  * When greeted ('Hello', 'Muraho', 'Bite', 'Hi'): Keep it short and warm in 1 to 2 sentences (e.g., 'Muraho! 👋 Amakuru ki? Nakufasha iki uyu munsi? 😊').
-  * NEVER dump a list of features or capabilities unprompted. Only explain what you do if explicitly asked.
-
-3. MULTILINGUAL FLUENCY:
-- Native Multilingualism: Understand and respond fluently in the language the user speaks (Kinyarwanda, English, French, Swahili, or natural mixed code-switching).
-- If the user speaks Kinyarwanda, reply in rich, natural Kinyarwanda. If in English, reply in clean, modern English.
-
-4. VOICE NOTE PROCESSING:
-- When the user sends a voice note/audio message, listen to it, understand what they said in Kinyarwanda or English, and answer them directly in the chat.
-
-5. MULTIMODAL & DOCUMENT ANALYSIS:
-- Images/Vision: When the user attaches an image or screenshot, analyze what you see thoroughly (diagrams, OCR code reading, objects).
-- Documents: When files (PDF, Word, or text) are attached, summarize, extract key points, or answer questions with high precision.
-
-6. CODE & MATH FORMATTING:
-- Format all code snippets cleanly in standard fenced code blocks with language tags (e.g., \`\`\`python, \`\`\`javascript).
-- Format mathematical equations and tabular data with clear Markdown tables and LaTeX notations.
-
-IMAGE GENERATION RULES:
-When the user explicitly asks to generate, create, or draw an image (e.g., 'Shushanya...', 'Kora ifoto ya...', 'Draw...', 'Generate an image of...'):
-1. Translate the request into English when necessary, then formulate a rich, detailed, visually descriptive English prompt. Never put Kinyarwanda or the raw user request in the image URL.
-2. URL-encode that prompt.
-3. Output the image inside standard Markdown image syntax using Pollinations AI:
-   ![User Request](https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true)
-4. Add a warm, friendly caption in the user's language (e.g., 'Dore ifoto wansabye! 🎨✨').
-5. ONLY generate images when explicitly requested by the user.
-6. Image, photo, drawing, and picture requests must always render the Pollinations AI Markdown image directly and must never call a document generator or produce a PDF.
-
-PDF GENERATION RESTRICTION:
-Only generate a PDF or other written file when the user explicitly asks for a document, PDF, report, CV, dosiye, inyandiko, Word, or text file.
-
-REAL-TIME INFORMATION:
-When asked about current events, breaking news, weather, sports scores, live information, or facts happening after your training cutoff, use Google Search grounding to retrieve verified, up-to-date real-time data.
-
-DEVICE ACTIONS:
-You have direct control over device apps. When the user asks you to open YouTube, play music, open Audiomack, Lark Player, WhatsApp, camera, or make a call in Kinyarwanda or English (e.g. 'fungura youtube uncurangire...', 'fungura audiomack', 'hamagara...', 'fungura lark player'), ALWAYS trigger the corresponding action function to immediately execute it on the user's device, while confirming warmly in your response.`;
 
 export interface AttachmentItem {
   data?: string;
@@ -72,7 +10,370 @@ export interface AttachmentItem {
   textContent?: string;
 }
 
+export interface AgentPermissions {
+  autoSend: boolean;
+  autoCall: boolean;
+  autoPlayYouTube: boolean;
+  whatsappAutoReply: boolean;
+  whatsappReplyStyle: string;
+}
+
+export interface NativeAgentStatus {
+  isAndroid: boolean;
+  hasSmsPermission?: boolean;
+  hasCallPermission?: boolean;
+  hasContactsPermission?: boolean;
+  hasAccessibility?: boolean;
+  hasNotificationAccess?: boolean;
+  isDefaultAssistant?: boolean;
+  autoSendEnabled?: boolean;
+  whatsappAutoReplyEnabled?: boolean;
+}
+
+export interface AgentOutboxItem {
+  id: string;
+  channel: 'sms' | 'whatsapp' | 'whatsapp-autoreply' | 'call';
+  recipient: string;
+  incoming?: string;
+  message: string;
+  timestamp: string;
+  status: 'sent' | 'queued';
+}
+
+export interface SavedContact {
+  id: string;
+  name: string;
+  phone: string;
+}
+
 export const CHAT_HISTORY_STORAGE_KEY = 'kevin_ai_chat_history';
+export const AGENT_PERMISSIONS_STORAGE_KEY = 'kevin_ai_agent_permissions';
+export const AGENT_OUTBOX_STORAGE_KEY = 'kevin_ai_agent_outbox';
+export const CONTACTS_STORAGE_KEY = 'kevin_ai_contacts';
+
+const DEFAULT_AGENT_PERMISSIONS: AgentPermissions = {
+  autoSend: false,
+  autoCall: true,
+  autoPlayYouTube: true,
+  whatsappAutoReply: false,
+  whatsappReplyStyle: '',
+};
+
+export function getAgentPermissions(): AgentPermissions {
+  if (typeof window === 'undefined') return DEFAULT_AGENT_PERMISSIONS;
+  try {
+    const raw = window.localStorage.getItem(AGENT_PERMISSIONS_STORAGE_KEY);
+    if (!raw) return DEFAULT_AGENT_PERMISSIONS;
+    return { ...DEFAULT_AGENT_PERMISSIONS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_AGENT_PERMISSIONS;
+  }
+}
+
+export function saveAgentPermissions(perms: AgentPermissions): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(AGENT_PERMISSIONS_STORAGE_KEY, JSON.stringify(perms));
+    const userName = window.localStorage.getItem('kevin_user_name')
+      || window.localStorage.getItem('kevin_ai_user_name')
+      || 'Kevin';
+    const backendBaseUrl = window.location.origin;
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.setAgentConfig) {
+      bridge.setAgentConfig(
+        Boolean(perms.autoSend),
+        Boolean(perms.whatsappAutoReply),
+        perms.whatsappReplyStyle || '',
+        userName,
+        backendBaseUrl
+      );
+    }
+    window.dispatchEvent(new CustomEvent('kevinAgentPermissionsUpdated', { detail: perms }));
+  } catch (error) {
+    console.error('Unable to save Kevin AI agent permissions.', error);
+  }
+}
+
+export function getNativeAgentStatus(): NativeAgentStatus {
+  if (typeof window === 'undefined') return { isAndroid: false };
+  try {
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.getStatusJson) {
+      return JSON.parse(bridge.getStatusJson()) as NativeAgentStatus;
+    }
+  } catch {
+    // Not on Android
+  }
+  return { isAndroid: false };
+}
+
+export function getAgentOutbox(): AgentOutboxItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(AGENT_OUTBOX_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as AgentOutboxItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function appendAgentOutbox(item: Omit<AgentOutboxItem, 'id' | 'timestamp'>): AgentOutboxItem {
+  const entry: AgentOutboxItem = {
+    ...item,
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: new Date().toISOString(),
+  };
+  if (typeof window !== 'undefined') {
+    try {
+      const prev = getAgentOutbox();
+      const updated = [entry, ...prev].slice(0, 50);
+      window.localStorage.setItem(AGENT_OUTBOX_STORAGE_KEY, JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('kevinAgentOutboxUpdated', { detail: updated }));
+    } catch {
+      // Ignore storage failures
+    }
+  }
+  return entry;
+}
+
+export function sanitizePhoneNumber(raw: string): string {
+  return String(raw || '').trim().replace(/[^\d+*#]/g, '');
+}
+
+export function isLikelyPhoneNumber(raw: string): boolean {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed || /[a-zA-Z]/.test(trimmed)) return false;
+  const digits = sanitizePhoneNumber(trimmed).replace(/[^\d]/g, '');
+  return digits.length >= 3;
+}
+
+function normalizePhoneKey(phone: string): string {
+  const digits = String(phone || '').replace(/[^\d]/g, '');
+  return digits.length >= 9 ? digits.slice(-9) : digits;
+}
+
+export function getSavedContacts(): SavedContact[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(CONTACTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistContacts(contacts: SavedContact[]): SavedContact[] {
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts));
+      window.dispatchEvent(new CustomEvent('kevinContactsUpdated', { detail: contacts }));
+    } catch {
+      // Ignore storage errors
+    }
+  }
+  return contacts;
+}
+
+export function saveContact(name: string, phone: string): SavedContact[] {
+  const cleanName = name.trim();
+  const cleanPhone = sanitizePhoneNumber(phone);
+  if (!cleanName || !isLikelyPhoneNumber(cleanPhone)) {
+    return getSavedContacts();
+  }
+  const existing = getSavedContacts();
+  const phoneKey = normalizePhoneKey(cleanPhone);
+  const filtered = existing.filter(
+    (c) => normalizePhoneKey(c.phone) !== phoneKey && c.name.toLowerCase() !== cleanName.toLowerCase()
+  );
+  const next: SavedContact[] = [
+    { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: cleanName, phone: cleanPhone },
+    ...filtered,
+  ].slice(0, 300);
+  return persistContacts(next);
+}
+
+export function deleteSavedContact(id: string): SavedContact[] {
+  const next = getSavedContacts().filter((c) => c.id !== id);
+  return persistContacts(next);
+}
+
+export function mergeContactsBatch(entries: Array<{ name: string; phone: string }>): { added: number; contacts: SavedContact[] } {
+  const current = getSavedContacts();
+  const seen = new Set(current.map((c) => `${c.name.toLowerCase()}|${normalizePhoneKey(c.phone)}`));
+  let added = 0;
+  const merged = [...current];
+
+  for (const item of entries) {
+    const cleanName = (item.name || '').trim();
+    const cleanPhone = sanitizePhoneNumber(item.phone || '');
+    if (!cleanName || !isLikelyPhoneNumber(cleanPhone)) continue;
+    const key = `${cleanName.toLowerCase()}|${normalizePhoneKey(cleanPhone)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: cleanName,
+      phone: cleanPhone,
+    });
+    added++;
+  }
+
+  merged.sort((a, b) => a.name.localeCompare(b.name));
+  return { added, contacts: persistContacts(merged.slice(0, 300)) };
+}
+
+export function importContactsFromVcfText(vcfText: string): { added: number; contacts: SavedContact[] } {
+  const unfolded = vcfText.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
+  const cards = unfolded.split(/BEGIN:VCARD/i);
+  const extracted: Array<{ name: string; phone: string }> = [];
+
+  for (const card of cards) {
+    if (!card.trim()) continue;
+    const lines = card.split(/\r?\n/);
+    let fullName = '';
+    const phones: string[] = [];
+
+    for (const line of lines) {
+      if (/^FN[;:]/i.test(line)) {
+        fullName = line.split(':').slice(1).join(':').trim();
+      } else if (!fullName && /^N[;:]/i.test(line)) {
+        const parts = line.split(':').slice(1).join(':').split(';').filter(Boolean);
+        if (parts.length >= 2) fullName = `${parts[1]} ${parts[0]}`.trim();
+        else if (parts.length === 1) fullName = parts[0].trim();
+      } else if (/^TEL[;:]/i.test(line)) {
+        const num = line.split(':').slice(1).join(':').replace(/^tel:/i, '').trim();
+        if (num) phones.push(num);
+      }
+    }
+
+    if (fullName && phones.length > 0) {
+      extracted.push({ name: fullName, phone: phones[0] });
+    }
+  }
+
+  return mergeContactsBatch(extracted);
+}
+
+export async function importContactsFromDevice(): Promise<{
+  added: number;
+  source: 'android' | 'web-picker' | 'needs_permission' | 'unsupported';
+  contacts: SavedContact[];
+}> {
+  if (typeof window === 'undefined') {
+    return { added: 0, source: 'unsupported', contacts: [] };
+  }
+  const bridge = (window as any).KevinAgentBridge;
+  if (bridge?.lookupContactsJson) {
+    const status = getNativeAgentStatus();
+    if (!status.hasContactsPermission) {
+      bridge.requestAgentPermissions?.();
+      return { added: 0, source: 'needs_permission', contacts: getSavedContacts() };
+    }
+    try {
+      const list = JSON.parse(bridge.lookupContactsJson('')) as Array<{ name: string; phone: string }>;
+      const res = mergeContactsBatch(Array.isArray(list) ? list : []);
+      return { ...res, source: 'android' };
+    } catch {
+      return { added: 0, source: 'android', contacts: getSavedContacts() };
+    }
+  }
+
+  const navContacts = (navigator as any).contacts;
+  if (navContacts?.select) {
+    const picked = await navContacts.select(['name', 'tel'], { multiple: true }) as Array<{
+      name?: string[];
+      tel?: string[];
+    }>;
+    const entries: Array<{ name: string; phone: string }> = [];
+    for (const person of picked || []) {
+      const name = person.name?.[0]?.trim() || '';
+      const tel = person.tel?.[0]?.trim() || '';
+      if (name && tel) entries.push({ name, phone: tel });
+    }
+    const res = mergeContactsBatch(entries);
+    return { ...res, source: 'web-picker' };
+  }
+
+  return { added: 0, source: 'unsupported', contacts: getSavedContacts() };
+}
+
+export function resolveContactMatches(query: string): SavedContact[] {
+  const cleanQuery = query.trim().toLowerCase();
+  if (!cleanQuery) return [];
+  const tokens = cleanQuery.split(/\s+/).filter(Boolean);
+
+  const combined: SavedContact[] = [...getSavedContacts()];
+  if (typeof window !== 'undefined') {
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.lookupContactsJson) {
+      try {
+        const nativeMatches = JSON.parse(bridge.lookupContactsJson(query)) as Array<{ name: string; phone: string }>;
+        for (const item of nativeMatches || []) {
+          if (item?.name && item?.phone) {
+            combined.push({
+              id: `native-${normalizePhoneKey(item.phone)}`,
+              name: item.name,
+              phone: sanitizePhoneNumber(item.phone),
+            });
+          }
+        }
+      } catch {
+        // Ignore bridge errors
+      }
+    }
+  }
+
+  const deduped = new Map<string, SavedContact>();
+  for (const c of combined) {
+    const lowerName = c.name.toLowerCase();
+    const matchesAll = tokens.every((t) => lowerName.includes(t) || c.phone.includes(t));
+    if (!matchesAll) continue;
+    const key = `${lowerName}|${normalizePhoneKey(c.phone)}`;
+    if (!deduped.has(key)) deduped.set(key, c);
+  }
+
+  const allMatches = Array.from(deduped.values());
+  const exactMatches = allMatches.filter((c) => c.name.toLowerCase() === cleanQuery);
+  if (exactMatches.length === 1) return exactMatches;
+  return allMatches.slice(0, 8);
+}
+
+function getRelevantContactsForPrompt(promptText: string): Array<{ name: string; phone: string }> {
+  const saved = getSavedContacts().map((c) => ({ name: c.name, phone: c.phone }));
+  if (typeof window === 'undefined') return saved.slice(0, 40);
+
+  const bridge = (window as any).KevinAgentBridge;
+  if (!bridge?.lookupContactsJson) return saved.slice(0, 40);
+
+  const words = promptText
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 2)
+    .slice(0, 8);
+
+  const merged = new Map<string, { name: string; phone: string }>();
+  for (const c of saved) {
+    merged.set(`${c.name.toLowerCase()}|${normalizePhoneKey(c.phone)}`, c);
+  }
+  for (const word of words) {
+    try {
+      const nativeHits = JSON.parse(bridge.lookupContactsJson(word)) as Array<{ name: string; phone: string }>;
+      for (const hit of nativeHits || []) {
+        if (hit?.name && hit?.phone) {
+          merged.set(`${hit.name.toLowerCase()}|${normalizePhoneKey(hit.phone)}`, {
+            name: hit.name,
+            phone: sanitizePhoneNumber(hit.phone),
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return Array.from(merged.values()).slice(0, 40);
+}
 
 export function loadChatHistory<T>(fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -96,39 +397,140 @@ export function saveChatHistory(history: unknown): void {
 
 export interface DeviceAction {
   name: string;
-  args: Record<string, string>;
+  args: Record<string, any>;
   label: string;
   url?: string;
   intentUrl?: string;
   fallbackUrl?: string;
+  embedUrl?: string;
+  videoId?: string;
+  videoTitle?: string;
+  channel?: string;
+  phoneNumber?: string;
+  messageText?: string;
+  contactName?: string;
+  contactMatches?: SavedContact[];
+  status?: 'executed' | 'needs_permission' | 'dialed_needs_permission' | 'choose_contact' | 'contact_not_found' | 'pending';
 }
 
-const deviceActionDeclarations: FunctionDeclaration[] = [
-  { name: "open_youtube", description: "Immediately open and autoplay the requested song or video on YouTube.", parametersJsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
-  { name: "open_audiomack", description: "Immediately open Audiomack and search for the requested song or artist.", parametersJsonSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
-  { name: "open_lark_player", description: "Open Lark Player and optionally search for the requested song or artist.", parametersJsonSchema: { type: "object", properties: { query: { type: "string" } } } },
-  { name: "make_call", description: "Immediately open the native phone dialer for the supplied phone number or contact name.", parametersJsonSchema: { type: "object", properties: { phone_number: { type: "string" } }, required: ["phone_number"] } },
-  { name: "open_whatsapp", description: "Open WhatsApp with a prefilled message.", parametersJsonSchema: { type: "object", properties: { phone_number: { type: "string" }, message: { type: "string" } }, required: ["phone_number", "message"] } },
-  { name: "open_camera", description: "Open the device camera.", parametersJsonSchema: { type: "object", properties: {} } },
-  { name: "open_app", description: "Open a common device app such as Instagram, TikTok, Spotify, or Maps.", parametersJsonSchema: { type: "object", properties: { app_name: { type: "string" } }, required: ["app_name"] } },
-];
-
-export function runDeviceAction(action: DeviceAction): boolean {
-  const intentUrl = action.intentUrl;
-  const fallbackUrl = action.fallbackUrl || action.url;
+export function runDeviceAction(action: DeviceAction, forceExecute = false): boolean {
+  const bridge = (window as any).KevinAgentBridge;
+  const perms = getAgentPermissions();
 
   if (action.name === 'open_camera') {
     window.dispatchEvent(new CustomEvent("open-device-camera"));
     return true;
   }
-  if (!intentUrl && !fallbackUrl) return false;
 
-  if (action.name === 'make_call' && fallbackUrl) {
-    window.location.assign(fallbackUrl);
+  if (action.name === 'open_youtube') {
+    const videoId = action.videoId || action.args?.videoId;
+    const query = action.args?.query || '';
+    if (bridge?.playYouTube) {
+      bridge.playYouTube(videoId || '', query);
+      return true;
+    }
+    if (action.embedUrl) {
+      return true; // Embedded autoplay iframe handles immediate playback on web
+    }
+    const target = action.fallbackUrl || action.url;
+    if (target) {
+      const link = document.createElement('a');
+      link.href = target;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return true;
+    }
+    return false;
+  }
+
+  if (action.name === 'send_sms') {
+    if (!perms.autoSend && !forceExecute) {
+      action.status = 'needs_permission';
+      return false;
+    }
+    const phone = sanitizePhoneNumber(action.phoneNumber || action.args?.phone_number || '');
+    const msg = action.messageText || action.args?.message || '';
+    if (!isLikelyPhoneNumber(phone)) return false;
+    if (bridge?.sendSms) {
+      const sent = bridge.sendSms(phone, msg);
+      if (!sent) {
+        bridge.requestAgentPermissions?.();
+        action.status = 'needs_permission';
+        return false;
+      }
+    }
+    action.status = 'executed';
+    appendAgentOutbox({
+      channel: 'sms',
+      recipient: action.contactName ? `${action.contactName} (${phone})` : phone,
+      message: msg,
+      status: 'sent',
+    });
     return true;
   }
 
-  if (intentUrl) {
+  if (action.name === 'open_whatsapp') {
+    if (!perms.autoSend && !forceExecute) {
+      action.status = 'needs_permission';
+      return false;
+    }
+    const phone = sanitizePhoneNumber(action.phoneNumber || action.args?.phone_number || '');
+    const msg = action.messageText || action.args?.message || '';
+    if (!isLikelyPhoneNumber(phone)) return false;
+    if (bridge?.sendWhatsApp) {
+      bridge.sendWhatsApp(phone, msg);
+    }
+    action.status = 'executed';
+    appendAgentOutbox({
+      channel: 'whatsapp',
+      recipient: action.contactName ? `${action.contactName} (${phone})` : phone,
+      message: msg,
+      status: 'sent',
+    });
+    return true;
+  }
+
+  if (action.name === 'make_call') {
+    if (!perms.autoCall && !forceExecute) {
+      action.status = 'needs_permission';
+      return false;
+    }
+    const phone = sanitizePhoneNumber(action.phoneNumber || action.args?.phone_number || '');
+    if (!isLikelyPhoneNumber(phone)) return false;
+    if (bridge?.placeCall) {
+      const result = bridge.placeCall(phone);
+      if (result === 'invalid_number') return false;
+      action.status = result === 'dialed_needs_permission' ? 'dialed_needs_permission' : 'executed';
+    } else {
+      const telUrl = `tel:${phone}`;
+      const link = document.createElement('a');
+      link.href = telUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      action.status = 'executed';
+    }
+    appendAgentOutbox({
+      channel: 'call',
+      recipient: action.contactName ? `${action.contactName} (${phone})` : phone,
+      message: 'Outgoing Phone Call',
+      status: 'sent',
+    });
+    return true;
+  }
+
+  if (action.name === 'configure_whatsapp_autoreply') {
+    return true;
+  }
+
+  const intentUrl = action.intentUrl;
+  const fallbackUrl = action.fallbackUrl || action.url;
+  if (!intentUrl && !fallbackUrl) return false;
+
+  if (intentUrl && bridge) {
     window.location.assign(intentUrl);
     if (fallbackUrl && fallbackUrl !== intentUrl) {
       window.setTimeout(() => {
@@ -141,30 +543,144 @@ export function runDeviceAction(action: DeviceAction): boolean {
   }
 
   if (fallbackUrl) {
-    const openedWindow = window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
-    if (!openedWindow) {
-      window.location.assign(fallbackUrl);
-    }
+    const link = document.createElement('a');
+    link.href = fallbackUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     return true;
   }
   return false;
 }
 
-function executeDeviceAction(name: string, args: Record<string, string>): DeviceAction | null {
-  const query = args.query || "";
-  const phoneNumber = args.phone_number || "";
-  const appName = (args.app_name || "").toLowerCase();
+function executeDeviceAction(name: string, args: Record<string, any>): DeviceAction | null {
+  const query = String(args.query || "");
+  const rawPhoneNumber = String(args.phone_number || "");
+  const messageText = String(args.message || "");
+  const rawContactName = args.contact_name ? String(args.contact_name) : undefined;
+  const appName = String(args.app_name || "").toLowerCase();
+  const perms = getAgentPermissions();
+
   let url: string | undefined;
   let intentUrl: string | undefined;
   let fallbackUrl: string | undefined;
+  let embedUrl: string | undefined;
+  let videoId: string | undefined;
+  let videoTitle: string | undefined;
+  let channel: string | undefined;
   let label = name;
 
+  if (name === "make_call" || name === "send_sms" || name === "open_whatsapp") {
+    let resolvedPhone = isLikelyPhoneNumber(rawPhoneNumber) ? sanitizePhoneNumber(rawPhoneNumber) : "";
+    let resolvedName = rawContactName?.trim() || (!resolvedPhone && rawPhoneNumber.trim() ? rawPhoneNumber.trim() : undefined);
+
+    if (!resolvedPhone && resolvedName) {
+      const matches = resolveContactMatches(resolvedName);
+      if (matches.length === 1) {
+        resolvedPhone = sanitizePhoneNumber(matches[0].phone);
+        resolvedName = matches[0].name;
+      } else if (matches.length > 1) {
+        return {
+          name,
+          args,
+          label: name === "make_call"
+            ? `Hitamo uwo uhamagara (${resolvedName})`
+            : `${name === "send_sms" ? "SMS" : "WhatsApp"} → ${resolvedName}`,
+          contactName: resolvedName,
+          messageText,
+          contactMatches: matches,
+          status: 'choose_contact',
+        };
+      } else {
+        return {
+          name,
+          args,
+          label: name === "make_call"
+            ? `Hamagara ${resolvedName}`
+            : `${name === "send_sms" ? "SMS" : "WhatsApp"} → ${resolvedName}`,
+          contactName: resolvedName,
+          messageText,
+          status: 'contact_not_found',
+        };
+      }
+    }
+
+    if (!resolvedPhone) return null;
+
+    if (name === "make_call") {
+      url = `tel:${resolvedPhone}`;
+      fallbackUrl = url;
+      label = resolvedName ? `Hamagara ${resolvedName} (${resolvedPhone})` : `Hamagara ${resolvedPhone}`;
+      const action: DeviceAction = {
+        name,
+        args: { ...args, phone_number: resolvedPhone, contact_name: resolvedName },
+        label,
+        url,
+        fallbackUrl,
+        phoneNumber: resolvedPhone,
+        contactName: resolvedName,
+        status: perms.autoCall ? 'executed' : 'needs_permission',
+      };
+      runDeviceAction(action);
+      return action;
+    }
+
+    if (name === "send_sms") {
+      url = `sms:${resolvedPhone}?body=${encodeURIComponent(messageText)}`;
+      fallbackUrl = url;
+      label = resolvedName ? `SMS → ${resolvedName} (${resolvedPhone})` : `SMS → ${resolvedPhone}`;
+      const action: DeviceAction = {
+        name,
+        args: { ...args, phone_number: resolvedPhone, contact_name: resolvedName },
+        label,
+        url,
+        fallbackUrl,
+        phoneNumber: resolvedPhone,
+        messageText,
+        contactName: resolvedName,
+        status: perms.autoSend ? 'executed' : 'needs_permission',
+      };
+      runDeviceAction(action);
+      return action;
+    }
+
+    const digits = resolvedPhone.replace(/[^\d]/g, "");
+    url = `https://wa.me/${digits}?text=${encodeURIComponent(messageText)}`;
+    fallbackUrl = url;
+    label = `WhatsApp → ${resolvedName || resolvedPhone}`;
+    const waAction: DeviceAction = {
+      name,
+      args: { ...args, phone_number: resolvedPhone, contact_name: resolvedName },
+      label,
+      url,
+      fallbackUrl,
+      phoneNumber: resolvedPhone,
+      messageText,
+      contactName: resolvedName,
+      status: perms.autoSend ? 'executed' : 'needs_permission',
+    };
+    runDeviceAction(waAction);
+    return waAction;
+  }
+
   if (name === "open_youtube") {
-    const encodedQuery = encodeURIComponent(query);
-    intentUrl = `vnd.youtube://results?search_query=${encodedQuery}&autoplay=1`;
-    fallbackUrl = `https://www.youtube.com/results?search_query=${encodedQuery}&autoplay=1`;
+    videoId = args.videoId ? String(args.videoId) : undefined;
+    videoTitle = args.videoTitle ? String(args.videoTitle) : (query || "YouTube Video");
+    channel = args.channel ? String(args.channel) : "YouTube";
+
+    if (videoId) {
+      embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0`;
+      intentUrl = `vnd.youtube://${videoId}`;
+      fallbackUrl = `https://www.youtube.com/watch?v=${videoId}&autoplay=1`;
+    } else {
+      const encodedQuery = encodeURIComponent(query);
+      intentUrl = `vnd.youtube://results?search_query=${encodedQuery}&autoplay=1`;
+      fallbackUrl = `https://www.youtube.com/results?search_query=${encodedQuery}`;
+    }
     url = fallbackUrl;
-    label = `YouTube: ${query}`;
+    label = videoTitle;
   } else if (name === "open_audiomack") {
     const encodedQuery = encodeURIComponent(query);
     intentUrl = `audiomack://search/${encodedQuery}`;
@@ -179,15 +695,26 @@ function executeDeviceAction(name: string, args: Record<string, string>): Device
       : "https://play.google.com/store/apps/details?id=com.starcloudd.larkplayer";
     url = fallbackUrl;
     label = "Lark Player";
-  } else if (name === "make_call") {
-    url = `tel:${phoneNumber}`;
-    label = `Hamagara ${phoneNumber}`;
-  } else if (name === "open_whatsapp") {
-    url = `https://wa.me/${phoneNumber.replace(/[^\d]/g, "")}?text=${encodeURIComponent(args.message || "")}`;
-    label = `WhatsApp: ${phoneNumber}`;
+  } else if (name === "configure_whatsapp_autoreply") {
+    const enabled = Boolean(args.enabled);
+    const nextPerms: AgentPermissions = {
+      ...perms,
+      whatsappAutoReply: enabled,
+      whatsappReplyStyle: typeof args.reply_style === 'string' && args.reply_style.trim()
+        ? args.reply_style.trim()
+        : perms.whatsappReplyStyle,
+    };
+    saveAgentPermissions(nextPerms);
+    label = enabled ? "WhatsApp Auto-Reply: ON" : "WhatsApp Auto-Reply: OFF";
+    return {
+      name,
+      args,
+      label,
+      status: 'executed',
+    };
   } else if (name === "open_camera") {
     label = "Camera";
-    const action = { name, args, label };
+    const action: DeviceAction = { name, args, label, status: 'executed' };
     runDeviceAction(action);
     return action;
   } else if (name === "open_app") {
@@ -198,6 +725,7 @@ function executeDeviceAction(name: string, args: Record<string, string>): Device
       maps: "https://maps.google.com/",
     };
     url = appUrls[appName];
+    fallbackUrl = url;
     label = appName ? appName.charAt(0).toUpperCase() + appName.slice(1) : "App";
   }
 
@@ -209,16 +737,63 @@ function executeDeviceAction(name: string, args: Record<string, string>): Device
     url,
     intentUrl,
     fallbackUrl,
+    embedUrl,
+    videoId,
+    videoTitle,
+    channel,
+    phoneNumber: rawPhoneNumber || undefined,
+    messageText,
+    contactName: rawContactName,
+    status: 'executed',
   };
   runDeviceAction(action);
   return action;
 }
 
 function actionConfirmation(action: DeviceAction): string {
-  if (action.name === "make_call") return `Ndaguhamagariye ${action.args.phone_number}! 📞🚀`;
-  if (action.name === "open_whatsapp") return "Nfunguriye WhatsApp ubutumwa bwawe! 💬🚀";
+  const targetDisplay = action.contactName
+    ? `${action.contactName}${action.phoneNumber ? ` (${action.phoneNumber})` : ''}`
+    : (action.phoneNumber || action.args?.phone_number || '');
+
+  if (action.status === 'choose_contact') {
+    return `Nabonye abantu benshi bitwa **${action.contactName}**. Hitamo uwo ushaka hasi 👇`;
+  }
+  if (action.status === 'contact_not_found') {
+    return `Sinabonye nimero ya **${action.contactName}** muri Contacts. Shyiramo nimero hasi cyangwa ukore **Import Contacts** kugira ngo mbikore ako kanya! 📇`;
+  }
+
+  if (action.name === "make_call") {
+    if (action.status === 'needs_permission') {
+      return `Guhamagara **${targetDisplay}** biteguye. Kanda **"Emerera & Hamagara"** hasi kugira ngo mpitemo mpite mpamagara! 🔐📞`;
+    }
+    if (action.status === 'dialed_needs_permission') {
+      return `📞 Nfunguye dialer kuri **${targetDisplay}**. Emeza **Direct Call** permission kugira ngo ubutaha ujye uhita uhamagara ako kanya! 📱`;
+    }
+    return `📞 Ndahamagaye **${targetDisplay}** ako kanya! 🚀`;
+  }
+  if (action.name === "send_sms") {
+    if (action.status === 'needs_permission') {
+      return `Ubutumwa bwateguwe (${targetDisplay}). Kanda **"Emerera Kevin AI"** hasi kugira ngo mbwohereze ako kanya! 🔐`;
+    }
+    return `✅ Ubutumwa (SMS) bwoherejwe kuri **${targetDisplay}** ako kanya! 📩🚀`;
+  }
+  if (action.name === "open_whatsapp") {
+    if (action.status === 'needs_permission') {
+      return `Ubutumwa bwa WhatsApp bwateguwe (${targetDisplay}). Kanda **"Emerera Kevin AI"** hasi kugira ngo mbwohereze ako kanya! 🔐`;
+    }
+    return `✅ Ubutumwa bwa WhatsApp bwoherejwe kuri **${targetDisplay}** ako kanya! 💬🚀`;
+  }
+  if (action.name === "configure_whatsapp_autoreply") {
+    return Boolean(action.args?.enabled)
+      ? "✅ WhatsApp Auto-Reply yashyizwe ku murongo! Kevin AI izajya ihita isubiza ubutumwa bwa WhatsApp bwinjiye."
+      : "⏸️ WhatsApp Auto-Reply yahagaritswe.";
+  }
   if (action.name === "open_camera") return "Nfunguriye camera yawe! 📸🚀";
-  if (action.name === "open_youtube") return "Ndasize nshakiye kuri YouTube kandi ndayifunguye ngo icurangwe!";
+  if (action.name === "open_youtube") {
+    return action.videoId
+      ? `▶️ Ndahise ncuranga **${action.videoTitle || action.args.query}** kuri YouTube! 🎵🚀`
+      : `▶️ Nfunguye YouTube kuri **${action.args.query}**! 🎵🚀`;
+  }
   if (action.name === "open_audiomack") return `Nfunguriye Audiomack ngushakirire ${action.args.query}! 🎵🚀`;
   return `Nfunguriye ${action.label}! 🚀`;
 }
@@ -245,25 +820,6 @@ export function setUserCustomApiKey(key: string): void {
   }
 }
 
-const getAvailableKeys = (): string[] => {
-  const customUserKey = typeof window !== 'undefined'
-    ? localStorage.getItem('gemini_api_key')
-      || localStorage.getItem('kevin_ai_custom_api_key')
-      || localStorage.getItem('user_api_key')
-      || localStorage.getItem('apiKey')
-    : null;
-  const keys = [
-    customUserKey,
-    import.meta.env.VITE_GEMINI_API_KEY,
-    import.meta.env.VITE_GEMINI_API_KEY_BACKUP,
-    import.meta.env.VITE_GEMINI_API_KEY_BACKUP_2,
-  ];
-  return Array.from(new Set(
-    keys.filter((k): k is string => typeof k === 'string' && k.trim().length > 0)
-      .map(k => k.trim())
-  ));
-};
-
 function getUserCustomInstructions(): string {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('kevin_custom_instructions')?.trim()
@@ -272,17 +828,8 @@ function getUserCustomInstructions(): string {
 }
 
 export function getApiKeysList(): string[] {
-  return getAvailableKeys();
-}
-
-function getClientForApiKey(apiKey: string): GoogleGenAI {
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      apiVersion: "v1beta",
-      headers: { "User-Agent": "aistudio-build" },
-    },
-  });
+  const custom = getUserCustomApiKey();
+  return custom ? [custom] : [];
 }
 
 export function isKevinPhotoRequest(text: string): boolean {
@@ -319,15 +866,91 @@ export function cleanBase64(dataUrl: string): string {
 const normalizeAudioMimeType = (mimeType: string): string => {
   const normalized = mimeType.split(';')[0].trim().toLowerCase();
   if (normalized === 'audio/x-wav' || normalized === 'audio/wave') return 'audio/wav';
+  if (normalized === 'audio/mp3') return 'audio/mpeg';
   if (normalized === 'audio/webm' || normalized === 'audio/wav'
-    || normalized === 'audio/mp4' || normalized === 'audio/aac') return normalized;
-  throw new Error(`Unsupported audio format "${normalized || 'unknown'}". Please record audio as WebM or WAV.`);
+    || normalized === 'audio/mp4' || normalized === 'audio/aac'
+    || normalized === 'audio/ogg' || normalized === 'audio/mpeg'
+    || normalized === 'audio/m4a') return normalized;
+  throw new Error(`Unsupported audio format "${normalized || 'unknown'}". Please record audio as WebM, MP4, OGG, or WAV.`);
 };
 
 const isValidAudioBase64 = (data: string): boolean =>
   data.length > 100
   && data.length % 4 === 0
   && /^[A-Za-z0-9+/]+={0,2}$/.test(data);
+
+export async function transcribeAudioWithSTT(
+  audioBase64: string,
+  audioMimeType = 'audio/webm'
+): Promise<string> {
+  const cleanAudio = cleanBase64(audioBase64);
+  if (!isValidAudioBase64(cleanAudio)) {
+    throw new Error('The recorded audio is empty or invalid.');
+  }
+  const normalizedMime = normalizeAudioMimeType(audioMimeType);
+  const customApiKey = getUserCustomApiKey();
+
+  const response = await fetch('/api/stt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      audioBase64: cleanAudio,
+      audioMimeType: normalizedMime,
+      customApiKey: customApiKey || undefined,
+    }),
+  });
+
+  if (!response.ok) {
+    let errMsg = 'Speech-to-Text failed';
+    try {
+      const data = await response.json();
+      if (data?.error) errMsg = data.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(errMsg);
+  }
+
+  const data = await response.json() as { transcript?: string };
+  return (data.transcript || '').trim();
+}
+
+export async function generateWhatsAppAutoReply(
+  sender: string,
+  incomingMessage: string,
+  replyStyle?: string
+): Promise<string> {
+  const userName = typeof window !== 'undefined'
+    ? localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || 'Kevin'
+    : 'Kevin';
+  const customApiKey = getUserCustomApiKey();
+
+  const response = await fetch('/api/whatsapp-reply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sender,
+      incomingMessage,
+      replyStyle,
+      userName,
+      customApiKey: customApiKey || undefined,
+    }),
+  });
+
+  if (!response.ok) {
+    let errMsg = 'WhatsApp auto-reply generation failed';
+    try {
+      const data = await response.json();
+      if (data?.error) errMsg = data.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(errMsg);
+  }
+
+  const data = await response.json() as { reply?: string };
+  return (data.reply || '').trim();
+}
 
 export async function sendMessageToGemini(
   history: { sender: 'user' | 'kevin'; text: string; image?: string }[],
@@ -339,11 +962,6 @@ export async function sendMessageToGemini(
   audioBase64?: string,
   audioMimeType?: string
 ): Promise<string> {
-  const availableKeys = getAvailableKeys();
-  if (availableKeys.length === 0) {
-    throw new Error("Nta Gemini API key yabonetse. Nyamuneka yishyireho muri Settings > Secrets panel.");
-  }
-
   const contents: any[] = history.map((msg: any) => {
     const historyParts: any[] = [{ text: msg.text || "..." }];
     if (typeof msg.image === "string" && msg.image && !/^https?:\/\//i.test(msg.image)) {
@@ -381,7 +999,7 @@ export async function sendMessageToGemini(
   });
   const prompt = latestMessage?.trim() || (
     hasAudioAttachment
-      ? 'The user sent a voice message. Listen to the audio, understand their speech in Kinyarwanda or English, and answer directly, helpfully, and naturally in Kinyarwanda.'
+      ? 'The user sent a voice message. Listen to the audio, understand their speech in Kinyarwanda or English, and answer directly, helpfully, and naturally.'
       : hasImageAttachment
         ? 'Please analyze these images.'
         : ''
@@ -405,6 +1023,17 @@ export async function sendMessageToGemini(
       ? attachment.type
       : (attachment as AttachmentItem).mimeType || '';
     if (audioBase64 && attachmentMimeType.toLowerCase().startsWith('audio/')) continue;
+
+    if (!(typeof Blob !== 'undefined' && attachment instanceof Blob)) {
+      const attItem = attachment as AttachmentItem;
+      if (attItem.textContent) {
+        parts.push({
+          text: `[Attached file: ${attItem.name || 'Document'}]\n${attItem.textContent}`,
+        });
+        continue;
+      }
+    }
+
     let data = "";
     let mimeType = "image/jpeg";
     if (typeof Blob !== 'undefined' && attachment instanceof Blob) {
@@ -453,134 +1082,87 @@ export async function sendMessageToGemini(
   }
   contents.push({ role: "user", parts });
 
-  const now = new Date();
-  const realTimeContext = `[REAL-TIME CONTEXT: Today is ${now.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    timeZone: 'Africa/Kigali',
-  })}, and the current time in Rwanda is ${now.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'Africa/Kigali',
-  })}.]`;
   const userName = typeof window !== 'undefined'
     ? localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || 'Incuti yanjye'
     : 'Incuti yanjye';
-  const usernameContext = `The person currently chatting with you is named '${userName}'. Always address them politely by their name during the conversation to make it personal and natural.`;
   const customInstructions = getUserCustomInstructions();
-  const customInstructionsContext = customInstructions
-    ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions}\nFollow these instructions in addition to the core Kevin AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
-    : '';
-  const audioInstruction = hasAudioAttachment
-    ? 'You are an expert audio transcriber and assistant. When you receive an audio file, your first step is to TRANSCRIBE the audio to text accurately in Kinyarwanda or English. THEN, use that transcribed text to understand the user\'s intent and provide a natural, helpful reply. If the audio is unclear, politely ask the user to speak clearly rather than saying "I didn\'t hear anything".'
-    : '';
-  const systemInstruction = [
-    KEVIN_SYSTEM_INSTRUCTION,
-    usernameContext,
-    customInstructionsContext,
-    audioInstruction,
-    realTimeContext,
-  ].filter(Boolean).join('\n\n');
-  /*
+  const customApiKey = getUserCustomApiKey();
+  const agentPermissions = getAgentPermissions();
+  const savedContacts = getRelevantContactsForPrompt(prompt);
 
-IDENTITY & CREATOR PROFILE:
-- Name: Kevin AI.
-- Creator and developer: Uwumukiza Kevin.
-- Motto: "UKORA GAKE BIKAGENDA CYANE".
-- Verified creator background:
-  - Full name: Uwumukiza Kevin.
-  - Date of birth: October 28, 2003.
-  - Birthplace: Rwamagana District, Gahengeri Sector, Rwanda.
-  - He is the firstborn (Imfura) of five children. He has a twin sister named Aline, younger twin siblings named Helve and Kelly, and the youngest sibling named Barame.
-  - Primary school: Nyina wa Jambo Ruhita.
-  - Ordinary Level (S1-S3): GS Appagie / Musha.
-  - Advanced Level (S4-S6): ES Kabarondo, where he studied MCE (Mathematics, Computer Science, and Economics).
-  - Higher education: Currently studying Information Technology at the University of Rwanda, College of Science and Technology (UR-CST).
-- When asked who created you, who Kevin is, or about his family or background ("Waremwe nande?", "Kevin ni nde?", "Who made you?"), answer accurately, proudly, and respectfully using these verified facts.
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents,
+      userName,
+      customInstructions,
+      hasAudioAttachment,
+      selectedModel,
+      customApiKey: customApiKey || undefined,
+      agentPermissions,
+      savedContacts,
+    }),
+  });
 
-TONE & COMMUNICATION STYLE:
-- Communicate naturally, concisely, and warmly like a smart companion on WhatsApp.
-- Enrich responses with fitting, expressive emojis such as 💡, 💻, 🚀, 📸, ✨, 😊, and 🇷🇼.
-- When greeted with "Hello", "Muraho", "Bite", or "Hi", reply in only 1-2 short, warm sentences.
-- Never dump a list of features or capabilities unless explicitly asked.
-
-MULTILINGUAL FLUENCY:
-- Understand and respond fluently in Kinyarwanda, English, French, Swahili, and natural mixed code-switching.
-- If the user speaks Kinyarwanda, reply in rich, natural Kinyarwanda. If the user speaks English, reply in clean, modern English.
-
-MULTIMODAL & DOCUMENT ANALYSIS:
-- When an image, screenshot, or camera capture is attached, thoroughly analyze what you see, including diagrams, code screenshots, and recognizable objects.
-- When a live screen capture frame is provided, describe what you see, analyze content, read text/code (OCR), and explain Instagram posts, products, or errors visible on the user's screen in clear Kinyarwanda or English.
-- When PDF, Word, or text files are attached, read and summarize them, extract key points, or answer specific questions precisely.
-
-CODE & MATH FORMATTING:
-- Format all code snippets in standard fenced code blocks with a language tag, such as \`\`\`python or \`\`\`javascript.
-- Format mathematical equations and tabular data with clear, structured Markdown tables and LaTeX notation without clutter.
-
-Always reply directly, politely, and concisely. When spoken to in Kinyarwanda, use natural, authentic Kinyarwanda and never mix it with Turkish or Swahili.`;
-  */
-  let fullResponse = "";
-  let lastErr: any = null;
-
-  for (const key of availableKeys) {
+  if (!response.ok) {
+    let errorMessage = 'Failed to generate AI response';
     try {
-      const ai = getClientForApiKey(key);
-      const responseStream = await ai.models.generateContentStream({
-        model: "gemini-2.5-flash",
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-          tools: [{ functionDeclarations: deviceActionDeclarations }],
-        },
-      });
+      const errData = await response.json();
+      if (errData?.error) errorMessage = errData.error;
+    } catch {
+      const text = await response.text();
+      if (text) errorMessage = text;
+    }
+    throw new Error(errorMessage);
+  }
 
-      const actions: DeviceAction[] = [];
-      for await (const chunk of responseStream) {
-        const functionCalls = (chunk as any).functionCalls || [];
-        for (const functionCall of functionCalls) {
-          const action = executeDeviceAction(functionCall.name, functionCall.args || {});
-          if (action) actions.push(action);
-        }
-        if (chunk.text) {
-          fullResponse += chunk.text;
-          onChunk?.(chunk.text);
-        }
+  if (!response.body) {
+    throw new Error('No response stream received from server.');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullResponse = '';
+  const actions: DeviceAction[] = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let event: any;
+      try {
+        event = JSON.parse(trimmed);
+      } catch {
+        continue;
       }
-      for (const action of actions) {
-        onAction?.(action);
-        const confirmation = actionConfirmation(action);
-        fullResponse += `\n\n${confirmation}`;
-        onChunk?.(`\n\n${confirmation}`);
+      if (event.type === 'text' && event.text) {
+        fullResponse += event.text;
+        onChunk?.(event.text);
+      } else if (event.type === 'action' && event.name) {
+        const action = executeDeviceAction(event.name, event.args || {});
+        if (action) actions.push(action);
+      } else if (event.type === 'error') {
+        throw new Error(event.error || 'Failed to generate AI response');
       }
-      return fullResponse;
-    } catch (error: any) {
-      lastErr = error;
-      const errorText = error instanceof Error ? error.message : String(error);
-      const isQuotaError = error?.status === 429
-        || errorText.includes("429")
-        || errorText.includes("RESOURCE_EXHAUSTED")
-        || errorText.toLowerCase().includes("quota")
-        || errorText.toLowerCase().includes("rate limit");
-      if (isQuotaError) {
-        console.warn(`Gemini key failed due to rate limit (429). Rotating to next available key...`);
-      } else {
-        console.warn("Direct key failed:", errorText);
-      }
-      if (isQuotaError) continue;
-      throw error;
     }
   }
 
-  const errorMessage = lastErr instanceof Error
-    ? lastErr.message
-    : typeof lastErr === 'string'
-      ? lastErr
-      : lastErr?.error?.message || lastErr?.message;
+  for (const action of actions) {
+    onAction?.(action);
+    const confirmation = actionConfirmation(action);
+    fullResponse += `\n\n${confirmation}`;
+    onChunk?.(`\n\n${confirmation}`);
+  }
 
-  throw new Error(errorMessage || "Failed to generate AI response");
+  return fullResponse;
 }
 
 export function connectGeminiLiveSession(callbacks: any) {
@@ -641,5 +1223,5 @@ function createEnglishImagePrompt(text: string): string {
   return `${translatedPrompt}, cinematic composition, photorealistic, ultra-detailed, 8k photography`;
 }
 
-export function compressImage(file: any): Promise<any> { return Promise.resolve({ base64: "", mimeType: "" }); }
+export function compressImage(_file: any): Promise<any> { return Promise.resolve({ base64: "", mimeType: "" }); }
 export function generateImagePrompt(text: string): Promise<string> { return Promise.resolve(createEnglishImagePrompt(text)); }
