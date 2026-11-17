@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, type FunctionDeclaration } from '@google/genai';
@@ -25,19 +26,53 @@ const KEVIN_SYSTEM_INSTRUCTION = `You are Kevin AI,
     - Higher Education: Currently studying Information Technology (IT) at the University of Rwanda, College of Science and Technology (UR-CST).
 - When asked who created you, who Kevin is, his family, or his background ('Waremwe nande?', 'Kevin ni nde?', 'Who made you?'), answer accurately, proudly, and respectfully using these verified facts.
 
-2. TONE & COMMUNICATION STYLE:
-- Natural WhatsApp Vibe: Communicate naturally, concisely, and warmly like a smart companion on WhatsApp.
-- Natural Emojis: Enrich responses with fitting, expressive emojis (e.g., 💡, 💻, 🚀, 📸, ✨, 😊, 🇷🇼).
-- Concise Greetings Rule:
-  * When greeted ('Hello', 'Muraho', 'Bite', 'Hi'): Keep it short and warm in 1 to 2 sentences (e.g., 'Muraho! 👋 Amakuru ki? Nakufasha iki uyu munsi? 😊').
-  * NEVER dump a list of features or capabilities unprompted. Only explain what you do if explicitly asked.
+2. IKINYARWANDA CY'UMWIMERERE (NATIVE KINYARWANDA MASTERY & WRITING):
+- You are a native Rwandan AI created in Rwanda by Uwumukiza Kevin.
+- You have flawless, native, idiomatic mastery of Kinyarwanda (Ikinyarwanda cy'umwimerere kandi gitunganye cy'i Rwanda).
+- GRAMMATICAL EXCELLENCE & ORTHOGRAPHY:
+  * Write natural, grammatically sound Kinyarwanda as spoken and written by educated native Rwandans.
+  * Correct noun classes (indangahantu: umuntu/abantu, igiti/ibiti, ahantu, etc.) and proper verb agreements.
+  * Correct phonetic spelling using standard Kinyarwanda phonemes (cy, by, ry, ny, bw, tw, rw, mw, sh, pf, ts, mp, mb, nd, ng).
+- NATURAL RWANDAN CONVERSATIONAL FLOW (WHATSAPP STYLE):
+  * When greeted ('Bite', 'Muraho', 'Amakuru', 'Hello', 'Hi', 'Mwaramutse', 'Mwiriwe'):
+    Keep it warm, respectful, concise, and natural (1 to 2 sentences max).
+    Examples:
+    - 'Muraho! 👋 Amakuru ki? Meze neza cyane, niteguye kugufasha uyu munsi! 😊'
+    - 'Bite se! 👋 Umeze ute? Nakufasha iki uyu munsi? 🚀'
+    - 'Amakuru ni meza rwose! Wowe amakuru yawe? Nakugirira akahe kamaro? ✨'
+  * AVOID LITERAL TRANSLATIONS FROM ENGLISH:
+    - NEVER say awkward literal translations like 'Ndi umufasha w'ubwenge bukorano', 'ndaho neza', 'icyo nakufasha', or 'mu buryo bwa WhatsApp'.
+    - ALWAYS use natural authentic Rwandan expressions:
+      'Ndi Kevin AI, niteguye kugufasha mu buryo bwose! 💻✨'
+      'Meze neza rwose!'
+      'Ndagufasha iki uyu munsi?'
+      'Biroroshye cyane, dore uko bikorwa:'
+      'Nta kibazo na gato, reka mbisobanure neza:'
+- AUTHENTIC RWANDAN VOCABULARY:
+  * Ubwenge bukorano (AI / Artificial Intelligence)
+  * Ikoranabuhanga (Technology)
+  * Porogaramu (Application / Software / App)
+  * Inyandiko cyangwa dosiye (Document / File / PDF / Report)
+  * Ubutumwa (Messages / SMS)
+  * Amajwi cyangwa ubutumwa bw'amajwi (Voice notes / Audio)
+  * Amashusho cyangwa amafoto (Videos / Photos / Images)
+  * Guhamagara cyangwa terefone (Phone calls)
+- CODE-SWITCHING & RWANDAN SLANG:
+  * Seamlessly understand Rwandan conversational code-switching (Kinyarwanda naturally mixed with French or English words like 'bro', 'courage', 'bon', 'merci', 'please', 'app', 'link', 'call', 'stage', 'pro').
+  * Understand colloquial phrasing and modern Rwandan youth expressions effortlessly and reply with warmth, intelligence, and modern emojis (💡, 🚀, 💻, ✨, 🇷🇼, 😊).
 
 3. MULTILINGUAL FLUENCY:
-- Native Multilingualism: Understand and respond fluently in the language the user speaks (Kinyarwanda, English, French, Swahili, or natural mixed code-switching).
-- If the user speaks Kinyarwanda, reply in rich, natural Kinyarwanda. If in English, reply in clean, modern English.
+- If the user writes or speaks Kinyarwanda, reply in rich, natural, authentic Kinyarwanda.
+- If the user writes or speaks English, reply in clean, modern English.
+- If the user writes or speaks French or Swahili, reply fluently in that language.
+- Seamlessly mirror the user's language, mood, and tone.
 
-4. VOICE NOTE & STT PROCESSING:
-- When the user sends a voice note or recorded audio message, understand their spoken request in Kinyarwanda or English and answer or execute their agent command immediately.
+4. VOICE NOTE & AUDIO PROCESSING (IKINYARWANDA VOICE UNDERSTANDING):
+- When the user sends a voice note or recorded audio message:
+  * Listen attentively to the audio in Kinyarwanda or English.
+  * Understand natural Rwandan pronunciation, fast speech, local accents, and conversational phrasing.
+  * Understand names of Rwandan people (Kevin, Aline, Helve, Kelly, Barame, Jean, Patrick, etc.), Rwandan places (Kigali, Rwamagana, Gahengeri, Huye, Musanze, Rubavu, etc.), and Rwandan musicians/artists (Meddy, Bruce Melodie, The Ben, Element, Juno Kizigenza, Chriss Eazy, etc.).
+  * Respond directly, helpfully, and naturally in Kinyarwanda (or English), and immediately execute any requested device actions (open_youtube, make_call, send_sms, open_whatsapp).
 
 5. MULTIMODAL & DOCUMENT ANALYSIS:
 - Images/Vision: When the user attaches an image or screenshot, analyze what you see thoroughly (diagrams, OCR code reading, objects).
@@ -264,6 +299,7 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
+  app.use(cors());
   app.use(express.json({ limit: '50mb' }));
 
   app.get('/api/health', (_req: Request, res: Response) => {
@@ -311,13 +347,14 @@ async function startServer() {
         return;
       }
 
-      const sttModels = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+      const sttModels = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen', 'gemini-3.5-transcribe'];
       let lastErr: unknown = null;
 
       for (const key of availableKeys) {
         const ai = new GoogleGenAI({
           apiKey: key,
           httpOptions: {
+            apiVersion: 'v1beta',
             headers: { 'User-Agent': 'aistudio-build' },
           },
         });
@@ -335,7 +372,13 @@ async function startServer() {
                     },
                   },
                   {
-                    text: 'Transcribe the spoken words in this audio verbatim in the language spoken (Kinyarwanda, English, French, or Swahili). Output ONLY the exact spoken words. CRITICAL: If the audio contains only silence, static, or no clear human speech, output strictly an empty string "" and do NOT invent or guess any text.',
+                    text: `You are an expert native Rwandan speech recognition and transcription assistant specializing in Kinyarwanda, English, French, and Swahili.
+Listen very carefully to this audio recording:
+1. If the speaker is speaking in Kinyarwanda, transcribe verbatim in standard, authentic Kinyarwanda orthography (intego y'imyandikire y'Ikinyarwanda).
+   - Accurately recognize Rwandan words, phonemes, and phrasing (e.g., 'Amakuru', 'Bite', 'Muraho', 'Umeze ute', 'Curanga indirimbo...', 'Hamagara...', 'Ohereza ubutumwa...', 'Kora...', 'Shushanya...', 'Mbwira...').
+2. If the speaker is speaking English, French, or Swahili, transcribe verbatim in that language.
+3. Output ONLY the exact transcribed spoken words. Do NOT add preamble, quotes, explanations, or timestamps.
+4. If there is only background silence, static, or no intelligible human speech, return strictly an empty string "".`,
                   },
                 ],
               },
@@ -407,6 +450,7 @@ async function startServer() {
         const ai = new GoogleGenAI({
           apiKey: key,
           httpOptions: {
+            apiVersion: 'v1beta',
             headers: { 'User-Agent': 'aistudio-build' },
           },
         });
@@ -417,9 +461,6 @@ async function startServer() {
               contents: incomingMessage.trim(),
               config: {
                 systemInstruction,
-                ...(model === 'gemini-4-hydrogen'
-                  ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-                  : {}),
               },
             });
             const reply = (response.text || '').trim();
@@ -501,7 +542,12 @@ async function startServer() {
         ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions.trim()}\nFollow these instructions in addition to the core Kevin AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
         : '';
       const audioInstruction = hasAudioAttachment
-        ? 'You are an expert audio transcriber and assistant. Understand the attached voice message in Kinyarwanda or English, respond naturally, and immediately trigger any requested device action functions (e.g. open_youtube, make_call, send_sms, open_whatsapp).'
+        ? `[VOICE NOTE & AUDIO PROCESSING CONTEXT]:
+- The user has sent a recorded voice note or voice message in audio format.
+- You are an expert at listening to spoken Kinyarwanda, English, French, and Swahili with complete native comprehension.
+- Listen attentively to their spoken words, Rwandan pronunciation, fast conversational speech, and intent.
+- Respond directly, helpfully, and naturally in their spoken language (if spoken in Kinyarwanda, reply in authentic, fluent Kinyarwanda).
+- If the user gave an action command (like playing a song on YouTube, calling someone, sending an SMS or WhatsApp message), immediately execute the corresponding tool function (open_youtube, make_call, send_sms, open_whatsapp).`
         : '';
       const contactsList = Array.isArray(savedContacts)
         ? savedContacts
@@ -526,14 +572,9 @@ async function startServer() {
 
       let lastErr: unknown = null;
       let streamStarted = false;
-      const primaryModel = selectedModel === 'Kevin 1.3 Lite' ? 'gemini-3.1-flash-lite' : 'gemini-4-hydrogen';
-      const modelsToTry = primaryModel === 'gemini-4-hydrogen'
-        ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']
+      const modelsToTry = selectedModel === 'Kevin 1.3 Lite'
+        ? ['gemini-3.1-flash-lite', 'gemini-4-hydrogen']
         : ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
-
-      const thinkingLevelForModel = selectedModel === 'Prodix pro'
-        ? ThinkingLevel.MEDIUM
-        : ThinkingLevel.LOW;
 
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -541,6 +582,7 @@ async function startServer() {
         const ai = new GoogleGenAI({
           apiKey: key,
           httpOptions: {
+            apiVersion: 'v1beta',
             headers: {
               'User-Agent': 'aistudio-build',
             },
@@ -558,9 +600,6 @@ async function startServer() {
                 contents: contents as any,
                 config: {
                   systemInstruction,
-                  ...(modelName === 'gemini-4-hydrogen'
-                    ? { thinkingConfig: { thinkingLevel: thinkingLevelForModel } }
-                    : {}),
                   tools: [{ functionDeclarations: deviceActionDeclarations }],
                 },
               });
@@ -685,6 +724,25 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Kevin AI server listening on http://0.0.0.0:${PORT}`);
+
+    // Self-ping interval (every 9 minutes / 540,000 ms) to prevent Render free instance from sleeping
+    const PING_INTERVAL_MS = 9 * 60 * 1000;
+    const pingTargetUrl = process.env.RENDER_EXTERNAL_URL
+      ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')}/api/health`
+      : `http://localhost:${PORT}/api/health`;
+
+    setInterval(async () => {
+      try {
+        const pingRes = await fetch(pingTargetUrl);
+        if (pingRes.ok) {
+          console.log(`[Self-Ping] Keeping server awake... (${pingTargetUrl})`);
+        } else {
+          console.warn(`[Self-Ping] Ping status: ${pingRes.status}`);
+        }
+      } catch (pingErr) {
+        console.warn('[Self-Ping] Error:', pingErr instanceof Error ? pingErr.message : String(pingErr));
+      }
+    }, PING_INTERVAL_MS);
   });
 }
 

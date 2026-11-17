@@ -730,6 +730,13 @@ const isValidAudioBase64 = (data: string): boolean =>
   && data.length % 4 === 0
   && /^[A-Za-z0-9+/]+={0,2}$/.test(data);
 
+const getEndpoint = (path: string): string => {
+  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.includes('ais-dev') || window.location.hostname.includes('ais-pre'))) {
+    return path;
+  }
+  return `https://kevin-ai-pro.onrender.com${path}`;
+};
+
 export async function transcribeAudioWithSTT(
   audioBase64: string,
   audioMimeType = 'audio/webm'
@@ -742,7 +749,7 @@ export async function transcribeAudioWithSTT(
   const customApiKey = getUserCustomApiKey();
 
   try {
-    const res = await fetch('/api/stt', {
+    const res = await fetch(getEndpoint('/api/stt'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -765,7 +772,7 @@ export async function transcribeAudioWithSTT(
     return typeof data.transcript === 'string' ? data.transcript : '';
   } catch (err: any) {
     console.warn('STT failed:', err);
-    return 'Voice command';
+    return '';
   }
 }
 
@@ -780,7 +787,7 @@ export async function generateWhatsAppAutoReply(
   const customApiKey = getUserCustomApiKey();
 
   try {
-    const res = await fetch('/api/whatsapp-reply', {
+    const res = await fetch(getEndpoint('/api/whatsapp-reply'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -847,13 +854,16 @@ export async function sendMessageToGemini(
     return (attachment as AttachmentItem).mimeType?.toLowerCase().startsWith('image/');
   });
 
-  const prompt = latestMessage?.trim() || (
-    hasAudioAttachment
-      ? 'The user sent a voice message. Listen to the audio, understand their speech in Kinyarwanda or English, and answer directly, helpfully, and naturally.'
-      : hasImageAttachment
-        ? 'Please analyze these images.'
-        : ''
-  );
+  const isGenericAudioPlaceholder = !latestMessage?.trim() || latestMessage.trim() === '🎤 Voice Note' || latestMessage.trim() === 'Voice command';
+  const prompt = isGenericAudioPlaceholder && hasAudioAttachment
+    ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umenye icyo asabye, hanyuma umusubize neza kandi mu buryo bunoze mu Kinyarwanda cy'umwimerere (cyangwa Icyongereza niba aricyo yakoresheje), cyangwa ukore igikorwa asabye ako kanya."
+    : latestMessage?.trim() || (
+        hasAudioAttachment
+          ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi. Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umusubize neza kandi bunoze."
+          : hasImageAttachment
+            ? 'Please analyze these images.'
+            : ''
+      );
 
   const parts: any[] = prompt ? [{ text: prompt }] : [];
   if (audioBase64 !== undefined) {
@@ -908,7 +918,7 @@ export async function sendMessageToGemini(
   const perms = getAgentPermissions();
   const savedContacts = getSavedContacts();
 
-  const res = await fetch('/api/chat', {
+  const res = await fetch(getEndpoint('/api/chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
