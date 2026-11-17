@@ -39,6 +39,8 @@ public class ScreenCaptureService extends Service {
     private static final String NOTIFICATION_TITLE =
             "🟢 Kevin AI: Live Screen Vision is Active";
 
+    public static volatile boolean isCaptureRunning = false;
+
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
     private ImageReader imageReader;
@@ -112,6 +114,7 @@ public class ScreenCaptureService extends Service {
                 null,
                 null
         );
+        isCaptureRunning = true;
     }
 
     private void captureLatestFrame(ImageReader reader) {
@@ -210,6 +213,7 @@ public class ScreenCaptureService extends Service {
     }
 
     private void stopCapture() {
+        isCaptureRunning = false;
         stopCaptureResources();
         stopForeground(true);
         stopSelf();
@@ -220,6 +224,7 @@ public class ScreenCaptureService extends Service {
 
     @Override
     public void onDestroy() {
+        isCaptureRunning = false;
         stopCaptureResources();
         super.onDestroy();
     }

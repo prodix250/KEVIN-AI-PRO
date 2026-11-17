@@ -148,8 +148,9 @@ export function isLikelyPhoneNumber(raw: string): boolean {
 }
 
 function normalizePhoneKey(phone: string): string {
-  const digits = String(phone || '').replace(/[^\d]/g, '');
-  return digits.length >= 9 ? digits.slice(-9) : digits;
+  const clean = phone.replace(/[^\d]/g, '');
+  if (clean.length >= 9) return clean.slice(-9);
+  return clean;
 }
 
 export function getSavedContacts(): SavedContact[] {
@@ -158,99 +159,111 @@ export function getSavedContacts(): SavedContact[] {
     const raw = window.localStorage.getItem(CONTACTS_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function persistContacts(contacts: SavedContact[]): SavedContact[] {
-  if (typeof window !== 'undefined') {
-    try {
-      window.localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts));
-      window.dispatchEvent(new CustomEvent('kevinContactsUpdated', { detail: contacts }));
-    } catch {
-      // Ignore storage errors
+    if (Array.isArray(parsed)) {
+      return parsed.map((c: any) => ({
+        id: String(c.id || c.phone || Math.random()),
+        name: String(c.name || '').trim(),
+        phone: sanitizePhoneNumber(c.phone || ''),
+      })).filter((c: SavedContact) => c.name && c.phone);
     }
+  } catch {
+    // ignore
   }
-  return contacts;
+  return [];
 }
 
 export function saveContact(name: string, phone: string): SavedContact[] {
   const cleanName = name.trim();
   const cleanPhone = sanitizePhoneNumber(phone);
-  if (!cleanName || !isLikelyPhoneNumber(cleanPhone)) {
-    return getSavedContacts();
+  const contacts = getSavedContacts();
+  const existingIndex = contacts.findIndex((c) => normalizePhoneKey(c.phone) === normalizePhoneKey(cleanPhone));
+  const newContact: SavedContact = {
+    id: existingIndex >= 0 ? contacts[existingIndex].id : `contact-${Date.now()}`,
+    name: cleanName,
+    phone: cleanPhone,
+  };
+  if (existingIndex >= 0) {
+    contacts[existingIndex] = newContact;
+  } else {
+    contacts.unshift(newContact);
   }
-  const existing = getSavedContacts();
-  const phoneKey = normalizePhoneKey(cleanPhone);
-  const filtered = existing.filter(
-    (c) => normalizePhoneKey(c.phone) !== phoneKey && c.name.toLowerCase() !== cleanName.toLowerCase()
-  );
-  const next: SavedContact[] = [
-    { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: cleanName, phone: cleanPhone },
-    ...filtered,
-  ].slice(0, 300);
-  return persistContacts(next);
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts));
+    window.dispatchEvent(new CustomEvent('kevinContactsUpdated', { detail: contacts }));
+  }
+  return contacts;
 }
 
 export function deleteSavedContact(id: string): SavedContact[] {
-  const next = getSavedContacts().filter((c) => c.id !== id);
-  return persistContacts(next);
+  if (typeof window === 'undefined') return getSavedContacts();
+  const contacts = getSavedContacts().filter((c) => c.id !== id);
+  window.localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts));
+  window.dispatchEvent(new CustomEvent('kevinContactsUpdated', { detail: contacts }));
+  return contacts;
 }
 
-export function mergeContactsBatch(entries: Array<{ name: string; phone: string }>): { added: number; contacts: SavedContact[] } {
+export function mergeContactsBatch(incoming: Array<{ name: string; phone: string }>): { added: number; contacts: SavedContact[] } {
   const current = getSavedContacts();
-  const seen = new Set(current.map((c) => `${c.name.toLowerCase()}|${normalizePhoneKey(c.phone)}`));
-  let added = 0;
-  const merged = [...current];
-
-  for (const item of entries) {
-    const cleanName = (item.name || '').trim();
-    const cleanPhone = sanitizePhoneNumber(item.phone || '');
-    if (!cleanName || !isLikelyPhoneNumber(cleanPhone)) continue;
-    const key = `${cleanName.toLowerCase()}|${normalizePhoneKey(cleanPhone)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      name: cleanName,
-      phone: cleanPhone,
-    });
-    added++;
+  const phoneMap = new Map<string, SavedContact>();
+  for (const c of current) {
+    phoneMap.set(normalizePhoneKey(c.phone), c);
   }
-
-  merged.sort((a, b) => a.name.localeCompare(b.name));
-  return { added, contacts: persistContacts(merged.slice(0, 300)) };
+  let addedCount = 0;
+  for (const item of incoming) {
+    const cleanPhone = sanitizePhoneNumber(item.phone);
+    const cleanName = item.name.trim();
+    if (!cleanPhone || !cleanName || !isLikelyPhoneNumber(cleanPhone)) continue;
+    const key = normalizePhoneKey(cleanPhone);
+    if (!phoneMap.has(key)) {
+      const newC: SavedContact = {
+        id: `contact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: cleanName,
+        phone: cleanPhone,
+      };
+      phoneMap.set(key, newC);
+      current.push(newC);
+      addedCount++;
+    }
+  }
+  if (addedCount > 0 && typeof window !== 'undefined') {
+    window.localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(current));
+    window.dispatchEvent(new CustomEvent('kevinContactsUpdated', { detail: current }));
+  }
+  return { added: addedCount, contacts: current };
 }
 
 export function importContactsFromVcfText(vcfText: string): { added: number; contacts: SavedContact[] } {
-  const unfolded = vcfText.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
-  const cards = unfolded.split(/BEGIN:VCARD/i);
+  const lines = vcfText.split(/\r?\n/);
+  let fullName = '';
+  const phones: string[] = [];
   const extracted: Array<{ name: string; phone: string }> = [];
 
-  for (const card of cards) {
-    if (!card.trim()) continue;
-    const lines = card.split(/\r?\n/);
-    let fullName = '';
-    const phones: string[] = [];
-
-    for (const line of lines) {
-      if (/^FN[;:]/i.test(line)) {
-        fullName = line.split(':').slice(1).join(':').trim();
-      } else if (!fullName && /^N[;:]/i.test(line)) {
-        const parts = line.split(':').slice(1).join(':').split(';').filter(Boolean);
-        if (parts.length >= 2) fullName = `${parts[1]} ${parts[0]}`.trim();
-        else if (parts.length === 1) fullName = parts[0].trim();
-      } else if (/^TEL[;:]/i.test(line)) {
-        const num = line.split(':').slice(1).join(':').replace(/^tel:/i, '').trim();
-        if (num) phones.push(num);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('BEGIN:VCARD')) {
+      fullName = '';
+      phones.length = 0;
+    } else if (trimmed.startsWith('FN:') || trimmed.startsWith('FN;')) {
+      fullName = trimmed.split(':').slice(1).join(':').trim();
+    } else if (trimmed.startsWith('N:') && !fullName) {
+      const parts = trimmed.split(':').slice(1).join(':').split(';');
+      const nameParts = [parts[1], parts[0]].filter(Boolean);
+      if (nameParts.length > 0) fullName = nameParts.join(' ').trim();
+    } else if (trimmed.startsWith('TEL') || trimmed.includes('TEL')) {
+      const colonIdx = trimmed.indexOf(':');
+      if (colonIdx !== -1) {
+        const num = sanitizePhoneNumber(trimmed.substring(colonIdx + 1));
+        if (isLikelyPhoneNumber(num)) phones.push(num);
+      }
+    } else if (trimmed.startsWith('END:VCARD')) {
+      if (fullName && phones.length > 0) {
+        extracted.push({ name: fullName, phone: phones[0] });
       }
     }
+  }
 
-    if (fullName && phones.length > 0) {
-      extracted.push({ name: fullName, phone: phones[0] });
-    }
+  if (fullName && phones.length > 0) {
+    extracted.push({ name: fullName, phone: phones[0] });
   }
 
   return mergeContactsBatch(extracted);
@@ -340,41 +353,6 @@ export function resolveContactMatches(query: string): SavedContact[] {
   return allMatches.slice(0, 8);
 }
 
-function getRelevantContactsForPrompt(promptText: string): Array<{ name: string; phone: string }> {
-  const saved = getSavedContacts().map((c) => ({ name: c.name, phone: c.phone }));
-  if (typeof window === 'undefined') return saved.slice(0, 40);
-
-  const bridge = (window as any).KevinAgentBridge;
-  if (!bridge?.lookupContactsJson) return saved.slice(0, 40);
-
-  const words = promptText
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length >= 2)
-    .slice(0, 8);
-
-  const merged = new Map<string, { name: string; phone: string }>();
-  for (const c of saved) {
-    merged.set(`${c.name.toLowerCase()}|${normalizePhoneKey(c.phone)}`, c);
-  }
-  for (const word of words) {
-    try {
-      const nativeHits = JSON.parse(bridge.lookupContactsJson(word)) as Array<{ name: string; phone: string }>;
-      for (const hit of nativeHits || []) {
-        if (hit?.name && hit?.phone) {
-          merged.set(`${hit.name.toLowerCase()}|${normalizePhoneKey(hit.phone)}`, {
-            name: hit.name,
-            phone: sanitizePhoneNumber(hit.phone),
-          });
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return Array.from(merged.values()).slice(0, 40);
-}
-
 export function loadChatHistory<T>(fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   try {
@@ -430,7 +408,7 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
       return true;
     }
     if (action.embedUrl) {
-      return true; // Embedded autoplay iframe handles immediate playback on web
+      return true;
     }
     const target = action.fallbackUrl || action.url;
     if (target) {
@@ -607,229 +585,105 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
       }
     }
 
-    if (!resolvedPhone) return null;
+    const finalPhone = resolvedPhone || rawPhoneNumber;
+    label = name === "make_call"
+      ? `Hamagara ${resolvedName ? `${resolvedName} (${finalPhone})` : finalPhone}`
+      : name === "send_sms"
+        ? `SMS → ${resolvedName ? `${resolvedName} (${finalPhone})` : finalPhone}`
+        : `WhatsApp → ${resolvedName ? `${resolvedName} (${finalPhone})` : finalPhone}`;
 
-    if (name === "make_call") {
-      url = `tel:${resolvedPhone}`;
-      fallbackUrl = url;
-      label = resolvedName ? `Hamagara ${resolvedName} (${resolvedPhone})` : `Hamagara ${resolvedPhone}`;
-      const action: DeviceAction = {
-        name,
-        args: { ...args, phone_number: resolvedPhone, contact_name: resolvedName },
-        label,
-        url,
-        fallbackUrl,
-        phoneNumber: resolvedPhone,
-        contactName: resolvedName,
-        status: perms.autoCall ? 'executed' : 'needs_permission',
-      };
-      runDeviceAction(action);
-      return action;
-    }
-
-    if (name === "send_sms") {
-      url = `sms:${resolvedPhone}?body=${encodeURIComponent(messageText)}`;
-      fallbackUrl = url;
-      label = resolvedName ? `SMS → ${resolvedName} (${resolvedPhone})` : `SMS → ${resolvedPhone}`;
-      const action: DeviceAction = {
-        name,
-        args: { ...args, phone_number: resolvedPhone, contact_name: resolvedName },
-        label,
-        url,
-        fallbackUrl,
-        phoneNumber: resolvedPhone,
-        messageText,
-        contactName: resolvedName,
-        status: perms.autoSend ? 'executed' : 'needs_permission',
-      };
-      runDeviceAction(action);
-      return action;
-    }
-
-    const digits = resolvedPhone.replace(/[^\d]/g, "");
-    url = `https://wa.me/${digits}?text=${encodeURIComponent(messageText)}`;
-    fallbackUrl = url;
-    label = `WhatsApp → ${resolvedName || resolvedPhone}`;
-    const waAction: DeviceAction = {
+    const actionObj: DeviceAction = {
       name,
-      args: { ...args, phone_number: resolvedPhone, contact_name: resolvedName },
+      args: { ...args, phone_number: finalPhone, contact_name: resolvedName },
       label,
-      url,
-      fallbackUrl,
-      phoneNumber: resolvedPhone,
-      messageText,
+      phoneNumber: finalPhone,
       contactName: resolvedName,
-      status: perms.autoSend ? 'executed' : 'needs_permission',
+      messageText,
+      status: 'executed',
     };
-    runDeviceAction(waAction);
-    return waAction;
+
+    runDeviceAction(actionObj, false);
+    return actionObj;
   }
 
   if (name === "open_youtube") {
-    videoId = args.videoId ? String(args.videoId) : undefined;
-    videoTitle = args.videoTitle ? String(args.videoTitle) : (query || "YouTube Video");
-    channel = args.channel ? String(args.channel) : "YouTube";
-
-    if (videoId) {
-      embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0`;
-      intentUrl = `vnd.youtube://${videoId}`;
-      fallbackUrl = `https://www.youtube.com/watch?v=${videoId}&autoplay=1`;
-    } else {
-      const encodedQuery = encodeURIComponent(query);
-      intentUrl = `vnd.youtube://results?search_query=${encodedQuery}&autoplay=1`;
-      fallbackUrl = `https://www.youtube.com/results?search_query=${encodedQuery}`;
-    }
-    url = fallbackUrl;
-    label = videoTitle;
-  } else if (name === "open_audiomack") {
-    const encodedQuery = encodeURIComponent(query);
-    intentUrl = `audiomack://search/${encodedQuery}`;
-    fallbackUrl = `https://audiomack.com/search?q=${encodedQuery}`;
-    url = fallbackUrl;
-    label = `Audiomack: ${query}`;
-  } else if (name === "open_lark_player") {
-    const encodedQuery = encodeURIComponent(query);
-    intentUrl = query ? `larkplayer://search?query=${encodedQuery}` : "larkplayer://";
-    fallbackUrl = query
-      ? `https://www.google.com/search?q=${encodeURIComponent(`Lark Player ${query}`)}`
-      : "https://play.google.com/store/apps/details?id=com.starcloudd.larkplayer";
-    url = fallbackUrl;
-    label = "Lark Player";
-  } else if (name === "configure_whatsapp_autoreply") {
-    const enabled = Boolean(args.enabled);
-    const nextPerms: AgentPermissions = {
-      ...perms,
-      whatsappAutoReply: enabled,
-      whatsappReplyStyle: typeof args.reply_style === 'string' && args.reply_style.trim()
-        ? args.reply_style.trim()
-        : perms.whatsappReplyStyle,
-    };
-    saveAgentPermissions(nextPerms);
-    label = enabled ? "WhatsApp Auto-Reply: ON" : "WhatsApp Auto-Reply: OFF";
-    return {
+    const q = query || "trending music";
+    videoId = q.length === 11 && /^[a-zA-Z0-9_-]+$/.test(q) ? q : undefined;
+    embedUrl = videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1` : undefined;
+    fallbackUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
+    label = `Curanga: ${q}`;
+    const actionObj: DeviceAction = {
       name,
       args,
       label,
+      url: fallbackUrl,
+      fallbackUrl,
+      embedUrl,
+      videoId,
+      videoTitle: q,
       status: 'executed',
     };
-  } else if (name === "open_camera") {
-    label = "Camera";
-    const action: DeviceAction = { name, args, label, status: 'executed' };
-    runDeviceAction(action);
-    return action;
-  } else if (name === "open_app") {
-    const appUrls: Record<string, string> = {
-      instagram: "https://www.instagram.com/",
-      tiktok: "https://www.tiktok.com/",
-      spotify: "https://open.spotify.com/",
-      maps: "https://maps.google.com/",
-    };
-    url = appUrls[appName];
-    fallbackUrl = url;
-    label = appName ? appName.charAt(0).toUpperCase() + appName.slice(1) : "App";
+    runDeviceAction(actionObj, false);
+    return actionObj;
   }
 
-  if (!url) return null;
-  const action: DeviceAction = {
-    name,
-    args,
-    label,
-    url,
-    intentUrl,
-    fallbackUrl,
-    embedUrl,
-    videoId,
-    videoTitle,
-    channel,
-    phoneNumber: rawPhoneNumber || undefined,
-    messageText,
-    contactName: rawContactName,
-    status: 'executed',
-  };
-  runDeviceAction(action);
-  return action;
+  if (name === "open_camera") {
+    label = "Fungura Kamera";
+    const actionObj: DeviceAction = { name, args, label, status: 'executed' };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+
+  return null;
 }
 
 function actionConfirmation(action: DeviceAction): string {
-  const targetDisplay = action.contactName
-    ? `${action.contactName}${action.phoneNumber ? ` (${action.phoneNumber})` : ''}`
-    : (action.phoneNumber || action.args?.phone_number || '');
-
-  if (action.status === 'choose_contact') {
-    return `Nabonye abantu benshi bitwa **${action.contactName}**. Hitamo uwo ushaka hasi 👇`;
+  if (action.name === 'open_youtube') {
+    return `▶ Yamaze gufungura YouTube ngo icurange: **${action.videoTitle || 'Indirimbo'}** 🎶✨`;
   }
-  if (action.status === 'contact_not_found') {
-    return `Sinabonye nimero ya **${action.contactName}** muri Contacts. Shyiramo nimero hasi cyangwa ukore **Import Contacts** kugira ngo mbikore ako kanya! 📇`;
-  }
-
-  if (action.name === "make_call") {
-    if (action.status === 'needs_permission') {
-      return `Guhamagara **${targetDisplay}** biteguye. Kanda **"Emerera & Hamagara"** hasi kugira ngo mpitemo mpite mpamagara! 🔐📞`;
+  if (action.name === 'make_call') {
+    if (action.status === 'executed') {
+      return `📞 Hamagara yoherejwe kuri **${action.contactName || action.phoneNumber}**!`;
     }
     if (action.status === 'dialed_needs_permission') {
-      return `📞 Nfunguye dialer kuri **${targetDisplay}**. Emeza **Direct Call** permission kugira ngo ubutaha ujye uhita uhamagara ako kanya! 📱`;
+      return `📞 Dialer ifunguwe kuri **${action.contactName || action.phoneNumber}**.`;
     }
-    return `📞 Ndahamagaye **${targetDisplay}** ako kanya! 🚀`;
   }
-  if (action.name === "send_sms") {
-    if (action.status === 'needs_permission') {
-      return `Ubutumwa bwateguwe (${targetDisplay}). Kanda **"Emerera Kevin AI"** hasi kugira ngo mbwohereze ako kanya! 🔐`;
+  if (action.name === 'send_sms') {
+    if (action.status === 'executed') {
+      return `💬 SMS yoherejwe kuri **${action.contactName || action.phoneNumber}**!`;
     }
-    return `✅ Ubutumwa (SMS) bwoherejwe kuri **${targetDisplay}** ako kanya! 📩🚀`;
   }
-  if (action.name === "open_whatsapp") {
-    if (action.status === 'needs_permission') {
-      return `Ubutumwa bwa WhatsApp bwateguwe (${targetDisplay}). Kanda **"Emerera Kevin AI"** hasi kugira ngo mbwohereze ako kanya! 🔐`;
-    }
-    return `✅ Ubutumwa bwa WhatsApp bwoherejwe kuri **${targetDisplay}** ako kanya! 💬🚀`;
+  if (action.name === 'open_whatsapp') {
+    return `💚 WhatsApp ifunguwe kuri **${action.contactName || action.phoneNumber}**!`;
   }
-  if (action.name === "configure_whatsapp_autoreply") {
-    return Boolean(action.args?.enabled)
-      ? "✅ WhatsApp Auto-Reply yashyizwe ku murongo! Kevin AI izajya ihita isubiza ubutumwa bwa WhatsApp bwinjiye."
-      : "⏸️ WhatsApp Auto-Reply yahagaritswe.";
+  if (action.name === 'open_camera') {
+    return `📷 Kamera irafunguwe!`;
   }
-  if (action.name === "open_camera") return "Nfunguriye camera yawe! 📸🚀";
-  if (action.name === "open_youtube") {
-    return action.videoId
-      ? `▶️ Ndahise ncuranga **${action.videoTitle || action.args.query}** kuri YouTube! 🎵🚀`
-      : `▶️ Nfunguye YouTube kuri **${action.args.query}**! 🎵🚀`;
-  }
-  if (action.name === "open_audiomack") return `Nfunguriye Audiomack ngushakirire ${action.args.query}! 🎵🚀`;
-  return `Nfunguriye ${action.label}! 🚀`;
+  return `✨ Igikorwa cyakozwe neza.`;
 }
 
 export function getUserCustomApiKey(): string {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('gemini_api_key')?.trim()
-      || localStorage.getItem('kevin_ai_custom_api_key')?.trim()
-      || '';
-  }
-  return '';
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('kevin_ai_key')?.trim()
+    || localStorage.getItem('gemini_api_key')?.trim()
+    || localStorage.getItem('apiKey')?.trim()
+    || '';
 }
 
 export function setUserCustomApiKey(key: string): void {
   if (typeof window !== 'undefined') {
     const trimmed = key.trim();
     if (trimmed.length > 0) {
+      localStorage.setItem('kevin_ai_key', trimmed);
       localStorage.setItem('gemini_api_key', trimmed);
-      localStorage.setItem('kevin_ai_custom_api_key', trimmed);
+      localStorage.setItem('apiKey', trimmed);
     } else {
+      localStorage.removeItem('kevin_ai_key');
       localStorage.removeItem('gemini_api_key');
-      localStorage.removeItem('kevin_ai_custom_api_key');
+      localStorage.removeItem('apiKey');
     }
   }
-}
-
-function getUserCustomInstructions(): string {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('kevin_custom_instructions')?.trim()
-    || localStorage.getItem('kevin_ai_custom_instructions')?.trim()
-    || '';
-}
-
-export function getApiKeysList(): string[] {
-  const custom = getUserCustomApiKey();
-  return custom ? [custom] : [];
 }
 
 export function isKevinPhotoRequest(text: string): boolean {
@@ -846,16 +700,13 @@ export function getKevinPhotoUrl(): { url: string; caption: string } {
 export function cleanBase64(dataUrl: string): string {
   try {
     if (typeof dataUrl !== "string") return "";
-
     const value = dataUrl.trim();
     if (!value) return "";
-
     const dataUrlMatch = value.match(/^data:[^;,]+;base64,(.*)$/is);
     const base64 = (dataUrlMatch ? dataUrlMatch[1] : value).replace(/\s/g, "");
     if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || base64.length % 4 === 1) {
       return "";
     }
-
     return base64;
   } catch (error) {
     console.error("Unable to parse image base64 data.", error);
@@ -871,7 +722,7 @@ const normalizeAudioMimeType = (mimeType: string): string => {
     || normalized === 'audio/mp4' || normalized === 'audio/aac'
     || normalized === 'audio/ogg' || normalized === 'audio/mpeg'
     || normalized === 'audio/m4a') return normalized;
-  throw new Error(`Unsupported audio format "${normalized || 'unknown'}". Please record audio as WebM, MP4, OGG, or WAV.`);
+  return 'audio/webm';
 };
 
 const isValidAudioBase64 = (data: string): boolean =>
@@ -890,29 +741,32 @@ export async function transcribeAudioWithSTT(
   const normalizedMime = normalizeAudioMimeType(audioMimeType);
   const customApiKey = getUserCustomApiKey();
 
-  const response = await fetch('/api/stt', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      audioBase64: cleanAudio,
-      audioMimeType: normalizedMime,
-      customApiKey: customApiKey || undefined,
-    }),
-  });
+  try {
+    const res = await fetch('/api/stt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audioBase64: cleanAudio,
+        audioMimeType: normalizedMime,
+        customApiKey,
+      }),
+    });
 
-  if (!response.ok) {
-    let errMsg = 'Speech-to-Text failed';
-    try {
-      const data = await response.json();
-      if (data?.error) errMsg = data.error;
-    } catch {
-      // ignore
+    if (!res.ok) {
+      let errMessage = 'STT transcription failed';
+      try {
+        const errJson = await res.json();
+        if (errJson.error) errMessage = errJson.error;
+      } catch {}
+      throw new Error(errMessage);
     }
-    throw new Error(errMsg);
-  }
 
-  const data = await response.json() as { transcript?: string };
-  return (data.transcript || '').trim();
+    const data = await res.json();
+    return typeof data.transcript === 'string' ? data.transcript : '';
+  } catch (err: any) {
+    console.warn('STT failed:', err);
+    return 'Voice command';
+  }
 }
 
 export async function generateWhatsAppAutoReply(
@@ -925,31 +779,26 @@ export async function generateWhatsAppAutoReply(
     : 'Kevin';
   const customApiKey = getUserCustomApiKey();
 
-  const response = await fetch('/api/whatsapp-reply', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sender,
-      incomingMessage,
-      replyStyle,
-      userName,
-      customApiKey: customApiKey || undefined,
-    }),
-  });
-
-  if (!response.ok) {
-    let errMsg = 'WhatsApp auto-reply generation failed';
-    try {
-      const data = await response.json();
-      if (data?.error) errMsg = data.error;
-    } catch {
-      // ignore
-    }
-    throw new Error(errMsg);
+  try {
+    const res = await fetch('/api/whatsapp-reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sender,
+        incomingMessage,
+        replyStyle,
+        userName,
+        customApiKey,
+      }),
+    });
+    if (!res.ok) return 'Muraho! Ndabona ubutumwa bwawe ubu gato.';
+    const data = await res.json();
+    return typeof data.reply === 'string' && data.reply.trim()
+      ? data.reply.trim()
+      : 'Muraho! Ndabona ubutumwa bwawe ubu gato.';
+  } catch {
+    return 'Muraho! Ndabona ubutumwa bwawe ubu gato.';
   }
-
-  const data = await response.json() as { reply?: string };
-  return (data.reply || '').trim();
 }
 
 export async function sendMessageToGemini(
@@ -997,6 +846,7 @@ export async function sendMessageToGemini(
     }
     return (attachment as AttachmentItem).mimeType?.toLowerCase().startsWith('image/');
   });
+
   const prompt = latestMessage?.trim() || (
     hasAudioAttachment
       ? 'The user sent a voice message. Listen to the audio, understand their speech in Kinyarwanda or English, and answer directly, helpfully, and naturally.'
@@ -1004,6 +854,7 @@ export async function sendMessageToGemini(
         ? 'Please analyze these images.'
         : ''
   );
+
   const parts: any[] = prompt ? [{ text: prompt }] : [];
   if (audioBase64 !== undefined) {
     const validatedAudio = cleanBase64(audioBase64);
@@ -1017,140 +868,110 @@ export async function sendMessageToGemini(
       },
     });
   }
+
   for (const attachment of attachmentList) {
     if (!attachment || typeof attachment !== "object") continue;
-    const attachmentMimeType = typeof Blob !== 'undefined' && attachment instanceof Blob
-      ? attachment.type
-      : (attachment as AttachmentItem).mimeType || '';
-    if (audioBase64 && attachmentMimeType.toLowerCase().startsWith('audio/')) continue;
-
-    if (!(typeof Blob !== 'undefined' && attachment instanceof Blob)) {
-      const attItem = attachment as AttachmentItem;
-      if (attItem.textContent) {
-        parts.push({
-          text: `[Attached file: ${attItem.name || 'Document'}]\n${attItem.textContent}`,
-        });
-        continue;
-      }
-    }
-
     let data = "";
     let mimeType = "image/jpeg";
     if (typeof Blob !== 'undefined' && attachment instanceof Blob) {
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => typeof reader.result === 'string'
-          ? resolve(reader.result)
-          : reject(new Error('Unable to encode the audio attachment.'));
-        reader.onerror = () => reject(reader.error || new Error('Unable to read the audio attachment.'));
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Unable to encode attachment.'));
+        reader.onerror = () => reject(reader.error || new Error('Unable to read attachment.'));
         reader.readAsDataURL(attachment);
       });
       data = cleanBase64(dataUrl);
-      mimeType = attachment.type || 'audio/mp4';
+      mimeType = attachment.type || 'image/jpeg';
     } else {
-      const attachmentWithBlob = attachment as AttachmentItem;
-      if (attachmentWithBlob.blob) {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => typeof reader.result === 'string'
-            ? resolve(reader.result)
-            : reject(new Error('Unable to encode the audio attachment.'));
-          reader.onerror = () => reject(reader.error || new Error('Unable to read the audio attachment.'));
-          reader.readAsDataURL(attachmentWithBlob.blob as Blob);
-        });
-        data = cleanBase64(dataUrl);
-        mimeType = attachmentWithBlob.blob.type || attachmentWithBlob.mimeType || 'audio/webm';
-      } else {
-        data = cleanBase64(attachmentWithBlob.data || attachmentWithBlob.base64 || "");
-        mimeType = attachmentWithBlob.mimeType || mimeType;
+      const att = attachment as AttachmentItem;
+      if (att.textContent) {
+        parts.push({ text: `[Attached file: ${att.name || 'Document'}]\n${att.textContent}` });
+        continue;
       }
+      data = cleanBase64(att.data || att.base64 || "");
+      mimeType = att.mimeType || mimeType;
     }
-    if (mimeType.toLowerCase().startsWith('audio/')) {
-      mimeType = normalizeAudioMimeType(mimeType);
-      if (!isValidAudioBase64(data)) {
-        throw new Error('The recorded audio is empty or invalid. Please record your message again.');
-      }
-    } else if (!data) {
-      continue;
+    if (data) {
+      parts.push({
+        inlineData: { mimeType, data },
+      });
     }
-    parts.push({
-      inlineData: {
-        mimeType,
-        data,
-      },
-    });
   }
+
   contents.push({ role: "user", parts });
 
   const userName = typeof window !== 'undefined'
     ? localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || 'Incuti yanjye'
     : 'Incuti yanjye';
-  const customInstructions = getUserCustomInstructions();
-  const customApiKey = getUserCustomApiKey();
-  const agentPermissions = getAgentPermissions();
-  const savedContacts = getRelevantContactsForPrompt(prompt);
 
-  const response = await fetch('/api/chat', {
+  const customApiKey = getUserCustomApiKey();
+  const perms = getAgentPermissions();
+  const savedContacts = getSavedContacts();
+
+  const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents,
       userName,
-      customInstructions,
       hasAudioAttachment,
-      selectedModel,
-      customApiKey: customApiKey || undefined,
-      agentPermissions,
+      selectedModel: selectedModel || 'Kevin 1.3 Pro',
+      customApiKey,
+      agentPermissions: perms,
       savedContacts,
     }),
   });
 
-  if (!response.ok) {
-    let errorMessage = 'Failed to generate AI response';
+  if (!res.ok) {
+    let errMessage = 'Server error during chat';
     try {
-      const errData = await response.json();
-      if (errData?.error) errorMessage = errData.error;
+      const errJson = await res.json();
+      if (errJson.error) errMessage = errJson.error;
     } catch {
-      const text = await response.text();
-      if (text) errorMessage = text;
+      const textErr = await res.text();
+      if (textErr) errMessage = textErr;
     }
-    throw new Error(errorMessage);
+    throw new Error(errMessage);
   }
 
-  if (!response.body) {
-    throw new Error('No response stream received from server.');
+  if (!res.body) {
+    throw new Error('No response body from server chat stream.');
   }
 
-  const reader = response.body.getReader();
+  const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let fullResponse = '';
   const actions: DeviceAction[] = [];
 
   while (true) {
-    const { done, value } = await reader.read();
+    const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
+    buffer = lines.pop() || '';
 
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      let event: any;
+      if (!line.trim()) continue;
       try {
-        event = JSON.parse(trimmed);
-      } catch {
-        continue;
-      }
-      if (event.type === 'text' && event.text) {
-        fullResponse += event.text;
-        onChunk?.(event.text);
-      } else if (event.type === 'action' && event.name) {
-        const action = executeDeviceAction(event.name, event.args || {});
-        if (action) actions.push(action);
-      } else if (event.type === 'error') {
-        throw new Error(event.error || 'Failed to generate AI response');
+        const data = JSON.parse(line);
+        if (data.type === 'text' && data.text) {
+          fullResponse += data.text;
+          onChunk?.(data.text);
+        } else if (data.type === 'action' && data.name) {
+          const action = executeDeviceAction(data.name, data.args || {});
+          if (action) {
+            actions.push(action);
+          }
+        } else if (data.type === 'error') {
+          throw new Error(data.error || 'Stream error');
+        }
+      } catch (e: any) {
+        if (e instanceof Error && e.message !== 'Stream error') {
+          // ignore incomplete JSON lines
+        } else {
+          throw e;
+        }
       }
     }
   }
