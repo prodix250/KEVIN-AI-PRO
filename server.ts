@@ -201,9 +201,14 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
   },
 ];
 
-function getServerApiKeys(customKey?: string): string[] {
+function getServerApiKeys(customKeys?: string | string[]): string[] {
+  const customList = Array.isArray(customKeys)
+    ? customKeys
+    : typeof customKeys === 'string' && customKeys.trim()
+      ? [customKeys]
+      : [];
   const keys = [
-    customKey,
+    ...customList,
     process.env.GEMINI_API_KEY,
     process.env.GEMINI_API_KEY_BACKUP,
     process.env.GEMINI_API_KEY_BACKUP_2,
@@ -322,11 +327,12 @@ async function startServer() {
 
   app.post('/api/stt', async (req: Request, res: Response) => {
     try {
-      const { audioBase64, audioMimeType, mimeType: altMimeType, customApiKey } = req.body as {
+      const { audioBase64, audioMimeType, mimeType: altMimeType, customApiKey, customApiKeys } = req.body as {
         audioBase64?: string;
         audioMimeType?: string;
         mimeType?: string;
         customApiKey?: string;
+        customApiKeys?: string[];
       };
 
       if (!audioBase64 || typeof audioBase64 !== 'string') {
@@ -341,7 +347,7 @@ async function startServer() {
       }
 
       const mimeType = (audioMimeType || altMimeType || 'audio/webm').split(';')[0].trim().toLowerCase();
-      const availableKeys = getServerApiKeys(customApiKey);
+      const availableKeys = getServerApiKeys(customApiKeys || customApiKey);
       if (availableKeys.length === 0) {
         res.status(500).json({ error: 'Nta Gemini API key yabonetse.' });
         return;
@@ -416,12 +422,13 @@ Listen very carefully to this audio recording:
 
   app.post('/api/whatsapp-reply', async (req: Request, res: Response) => {
     try {
-      const { sender, incomingMessage, replyStyle, userName, customApiKey } = req.body as {
+      const { sender, incomingMessage, replyStyle, userName, customApiKey, customApiKeys } = req.body as {
         sender?: string;
         incomingMessage?: string;
         replyStyle?: string;
         userName?: string;
         customApiKey?: string;
+        customApiKeys?: string[];
       };
 
       if (!incomingMessage || !incomingMessage.trim()) {
@@ -429,7 +436,7 @@ Listen very carefully to this audio recording:
         return;
       }
 
-      const availableKeys = getServerApiKeys(customApiKey);
+      const availableKeys = getServerApiKeys(customApiKeys || customApiKey);
       if (availableKeys.length === 0) {
         res.status(500).json({ error: 'Nta Gemini API key yabonetse.' });
         return;
@@ -492,6 +499,7 @@ Listen very carefully to this audio recording:
         hasAudioAttachment,
         selectedModel,
         customApiKey,
+        customApiKeys,
         agentPermissions,
         savedContacts,
       } = req.body as {
@@ -501,6 +509,7 @@ Listen very carefully to this audio recording:
         hasAudioAttachment?: boolean;
         selectedModel?: string;
         customApiKey?: string;
+        customApiKeys?: string[];
         agentPermissions?: {
           autoSend?: boolean;
           autoCall?: boolean;
@@ -515,7 +524,7 @@ Listen very carefully to this audio recording:
         return;
       }
 
-      const availableKeys = getServerApiKeys(customApiKey);
+      const availableKeys = getServerApiKeys(customApiKeys || customApiKey);
       if (availableKeys.length === 0) {
         res.status(500).json({
           error: 'Nta Gemini API key yabonetse. Nyamuneka yishyireho muri Settings > Secrets panel.',

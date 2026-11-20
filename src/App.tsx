@@ -8,7 +8,7 @@ import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settin
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
@@ -474,15 +474,16 @@ export default function App() {
   });
   const [showModelPicker, setShowModelPicker] = useState(false);
 
-  // Custom Gemini API Key Settings State
+  // Multi-Key Rotation Pool Settings State
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [customApiKeyInput, setCustomApiKeyInput] = useState(() => getUserCustomApiKey());
+  const [keysPool, setKeysPool] = useState<GeminiKeysPool>(() => getGeminiKeysPool());
   const [savedApiKeyStatus, setSavedApiKeyStatus] = useState<string | null>(null);
 
-  const handleSaveCustomApiKey = () => {
-    setUserCustomApiKey(customApiKeyInput.trim());
-    setSavedApiKeyStatus(customApiKeyInput.trim() ? "API Key yabitswe neza!" : "Key yawe yakuwemo.");
-    showToastMessage(customApiKeyInput.trim() ? "✅ API Key yabitswe neza!" : "ℹ️ Key yakuwemo");
+  const handleSaveKeysPool = () => {
+    setGeminiKeysPool(keysPool);
+    const hasAny = Boolean(keysPool.primary.trim() || keysPool.backup1.trim() || keysPool.backup2.trim());
+    setSavedApiKeyStatus(hasAny ? "API Keys pool yabitswe neza!" : "Keys zose zakuwemo.");
+    showToastMessage(hasAny ? "✅ Multi-Key Rotation Pool yabitswe neza!" : "ℹ️ Keys zakuwemo");
     setTimeout(() => {
       setShowApiKeyModal(false);
       setSavedApiKeyStatus(null);
@@ -1901,15 +1902,15 @@ export default function App() {
                 </div>
 
                 <div 
-                  onClick={() => { setCustomApiKeyInput(getUserCustomApiKey()); setShowApiKeyModal(true); setDrawerOpen(false); }}
+                  onClick={() => { setKeysPool(getGeminiKeysPool()); setShowApiKeyModal(true); setDrawerOpen(false); }}
                   className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
                 >
                   <div className="flex items-center gap-2">
                     <Key size={15} className="text-amber-500" />
-                    <span>Kevin AI Key</span>
+                    <span>Multi-Key Pool</span>
                   </div>
                   <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500">
-                    {getUserCustomApiKey() ? 'Iyawe (Yaka)' : 'Iya Kevin AI'}
+                    {getGeminiApiKeysArray().length > 0 ? `${getGeminiApiKeysArray().length} Keys Active` : 'Default'}
                   </span>
                 </div>
 
@@ -2802,8 +2803,8 @@ export default function App() {
                     <Key size={20} />
                   </div>
                   <div>
-                    <h3 className="font-bold text-base text-gray-900 dark:text-white">Igenamiterere rya Kevin AI Key</h3>
-                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Koresha key yawe bwite cyangwa iya Kevin AI</p>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white">Multi-Key Rotation Pool</h3>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Shyiramo API Keys 3 zo kwimuriraho mu buryo bwikora</p>
                   </div>
                 </div>
                 <button 
@@ -2814,51 +2815,67 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-3.5 max-h-[70vh] overflow-y-auto pr-1">
                 <div className="p-3 bg-emerald-50 dark:bg-[#11241f] border border-emerald-200 dark:border-emerald-900/50 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5">
                   <ShieldCheck size={18} className="shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
                   <div>
-                    <p className="font-semibold">Umutekano n'Ubufasha bwa Kevin AI</p>
+                    <p className="font-semibold">Automatic Key Rotation (Failover)</p>
                     <p className="mt-0.5 text-[11px] opacity-90 leading-relaxed">
-                      Nushyiramo key yawe bwite, niyo ibanza gukoreshwa mbere cyane. Numara kuyikuramo cyangwa igize ikibazo, Kevin AI ihita ikoresha uburyo bwayo busanzwe.
+                      Igihe API Key ya 1 ihuye n'ikibazo cya Quota cyangwa Rate Limit (HTTP 429), porogaramu ihita yimukira kuri Key ya 2 cyangwa iya 3 ako kanya nta nkomyi.
                     </p>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                    API Key yawe ya Kevin AI:
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    1. Primary API Key (Ibanza):
                   </label>
-                  <div className="relative">
-                    <input 
-                      type="password"
-                      value={customApiKeyInput}
-                      onChange={(e) => setCustomApiKeyInput(e.target.value)}
-                      placeholder="Shyiramo Key yawe hano..."
-                      className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2.5 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-sm font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                    />
-                    {customApiKeyInput && (
-                      <button 
-                        onClick={() => setCustomApiKeyInput('')} 
-                        className="absolute right-2.5 top-2.5 text-xs text-gray-400 hover:text-red-500 font-semibold px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-800"
-                        title="Kuramo key"
-                      >
-                        Siba
-                      </button>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-gray-500 dark:text-[#8696a0] mt-1.5 flex items-center justify-between">
-                    <span>Key ibikwa muri telefone yawe gusa.</span>
-                    <a 
-                      href="https://aistudio.google.com/app/apikey" 
-                      target="_blank" 
-                      rel="noreferrer" 
-                      className="text-[#075E54] dark:text-[#00FF88] hover:underline flex items-center gap-1 font-medium"
-                    >
-                      Fata Key Hano <ExternalLink size={10} />
-                    </a>
-                  </p>
+                  <input 
+                    type="password"
+                    value={keysPool.primary}
+                    onChange={(e) => setKeysPool(prev => ({ ...prev, primary: e.target.value }))}
+                    placeholder="Shyiramo Primary API Key hano..."
+                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                  />
                 </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    2. Backup Key 1 (Iyo ya kabiri):
+                  </label>
+                  <input 
+                    type="password"
+                    value={keysPool.backup1}
+                    onChange={(e) => setKeysPool(prev => ({ ...prev, backup1: e.target.value }))}
+                    placeholder="Shyiramo Backup Key 1 hano..."
+                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    3. Backup Key 2 (Iyo ya gatatu):
+                  </label>
+                  <input 
+                    type="password"
+                    value={keysPool.backup2}
+                    onChange={(e) => setKeysPool(prev => ({ ...prev, backup2: e.target.value }))}
+                    placeholder="Shyiramo Backup Key 2 hano..."
+                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                  />
+                </div>
+
+                <p className="text-[11px] text-gray-500 dark:text-[#8696a0] flex items-center justify-between">
+                  <span>Keys zibikwa muri localStorage yawe gusa.</span>
+                  <a 
+                    href="https://aistudio.google.com/app/apikey" 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    className="text-[#075E54] dark:text-[#00FF88] hover:underline flex items-center gap-1 font-medium"
+                  >
+                    Fata Key Hano <ExternalLink size={10} />
+                  </a>
+                </p>
 
                 {savedApiKeyStatus && (
                   <motion.div 
@@ -2879,11 +2896,11 @@ export default function App() {
                     Reka
                   </button>
                   <button 
-                    onClick={handleSaveCustomApiKey}
+                    onClick={handleSaveKeysPool}
                     className="px-5 py-2 rounded-xl text-xs font-bold bg-[#00a884] hover:bg-[#075E54] text-white shadow-sm transition-colors flex items-center gap-1.5"
                   >
                     <Check size={14} />
-                    <span>Bika Key</span>
+                    <span>Bika Keys Pool</span>
                   </button>
                 </div>
               </div>

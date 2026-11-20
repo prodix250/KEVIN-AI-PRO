@@ -663,6 +663,63 @@ function actionConfirmation(action: DeviceAction): string {
   return `✨ Igikorwa cyakozwe neza.`;
 }
 
+export interface GeminiKeysPool {
+  primary: string;
+  backup1: string;
+  backup2: string;
+}
+
+export const KEYS_POOL_STORAGE_KEY = 'kevin_ai_keys_pool';
+
+export function getGeminiKeysPool(): GeminiKeysPool {
+  if (typeof window === 'undefined') return { primary: '', backup1: '', backup2: '' };
+  try {
+    const raw = localStorage.getItem(KEYS_POOL_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        primary: String(parsed.primary || ''),
+        backup1: String(parsed.backup1 || ''),
+        backup2: String(parsed.backup2 || ''),
+      };
+    }
+  } catch {}
+  const legacy = getUserCustomApiKey();
+  return {
+    primary: legacy,
+    backup1: localStorage.getItem('kevin_ai_key_backup1') || '',
+    backup2: localStorage.getItem('kevin_ai_key_backup2') || '',
+  };
+}
+
+export function setGeminiKeysPool(pool: GeminiKeysPool): void {
+  if (typeof window === 'undefined') return;
+  const cleaned = {
+    primary: pool.primary.trim(),
+    backup1: pool.backup1.trim(),
+    backup2: pool.backup2.trim(),
+  };
+  localStorage.setItem(KEYS_POOL_STORAGE_KEY, JSON.stringify(cleaned));
+  if (cleaned.primary) {
+    setUserCustomApiKey(cleaned.primary);
+  } else if (!cleaned.backup1 && !cleaned.backup2) {
+    setUserCustomApiKey('');
+  }
+}
+
+export function getGeminiApiKeysArray(): string[] {
+  const pool = getGeminiKeysPool();
+  const keys = [
+    pool.primary,
+    pool.backup1,
+    pool.backup2,
+    getUserCustomApiKey(),
+  ];
+  return Array.from(new Set(
+    keys.filter((k): k is string => typeof k === 'string' && k.trim().length > 0).map(k => k.trim())
+  ));
+}
+
 export function getUserCustomApiKey(): string {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('kevin_ai_key')?.trim()
@@ -747,6 +804,7 @@ export async function transcribeAudioWithSTT(
   }
   const normalizedMime = normalizeAudioMimeType(audioMimeType);
   const customApiKey = getUserCustomApiKey();
+  const customApiKeys = getGeminiApiKeysArray();
 
   try {
     const res = await fetch(getEndpoint('/api/stt'), {
@@ -756,6 +814,7 @@ export async function transcribeAudioWithSTT(
         audioBase64: cleanAudio,
         audioMimeType: normalizedMime,
         customApiKey,
+        customApiKeys,
       }),
     });
 
@@ -785,6 +844,7 @@ export async function generateWhatsAppAutoReply(
     ? localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || 'Kevin'
     : 'Kevin';
   const customApiKey = getUserCustomApiKey();
+  const customApiKeys = getGeminiApiKeysArray();
 
   try {
     const res = await fetch(getEndpoint('/api/whatsapp-reply'), {
@@ -796,6 +856,7 @@ export async function generateWhatsAppAutoReply(
         replyStyle,
         userName,
         customApiKey,
+        customApiKeys,
       }),
     });
     if (!res.ok) return 'Muraho! Ndabona ubutumwa bwawe ubu gato.';
@@ -915,6 +976,7 @@ export async function sendMessageToGemini(
     : 'Incuti yanjye';
 
   const customApiKey = getUserCustomApiKey();
+  const customApiKeys = getGeminiApiKeysArray();
   const perms = getAgentPermissions();
   const savedContacts = getSavedContacts();
 
@@ -927,6 +989,7 @@ export async function sendMessageToGemini(
       hasAudioAttachment,
       selectedModel: selectedModel || 'Kevin 1.3 Pro',
       customApiKey,
+      customApiKeys,
       agentPermissions: perms,
       savedContacts,
     }),
