@@ -13,7 +13,11 @@ import android.graphics.drawable.ColorDrawable;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebView;
@@ -47,20 +51,36 @@ public class KevinAssistantActivity extends AppCompatActivity {
 
     private Bridge bridge;
     private KevinAgentBridge agentBridge;
+    private FrameLayout overlayRoot;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean waitingForNotificationPermission = false;
+    private boolean waitingForInitialCleanCapture = false;
+    private boolean cleanCapturePending = false;
     private int activityDepth = 0;
+
+    private final Runnable cleanCaptureWatchdog = () -> finishCleanBehindCapture(null);
 
     private final BroadcastReceiver screenCaptureReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             if (intent == null || intent.getAction() == null) return;
             String action = intent.getAction();
-            if (ScreenCaptureService.ACTION_SCREEN_FRAME.equals(action)) {
+            if (ScreenCaptureService.ACTION_CAPTURE_READY.equals(action)) {
+                if (waitingForInitialCleanCapture) {
+                    waitingForInitialCleanCapture = false;
+                    mainHandler.postDelayed(KevinAssistantActivity.this::performCleanBehindCapture, 60L);
+                }
+            } else if (ScreenCaptureService.ACTION_CLEAN_FRAME_CAPTURED.equals(action)) {
+                String frame = intent.getStringExtra(ScreenCaptureService.EXTRA_FRAME);
+                finishCleanBehindCapture(frame);
+            } else if (ScreenCaptureService.ACTION_SCREEN_FRAME.equals(action)) {
                 String frame = intent.getStringExtra(ScreenCaptureService.EXTRA_FRAME);
                 if (frame != null) {
                     dispatchScreenFrame(frame);
                 }
             } else if (ScreenCaptureService.ACTION_STOP.equals(action)) {
+                waitingForInitialCleanCapture = false;
+                cancelCleanCaptureAndRestore();
                 dispatchScreenSharingState(false);
             } else if (KevinNotificationListenerService.ACTION_WHATSAPP_REPLIED.equals(action)) {
                 dispatchWhatsAppAutoReply(
@@ -86,6 +106,8 @@ public class KevinAssistantActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
+        overlayRoot = root;
+        ScreenCaptureService.setSuppressOverlayFrames(true);
 
         CapacitorWebView webView = new CapacitorWebView(this, null);
         webView.setId(com.getcapacitor.android.R.id.webview);
@@ -140,6 +162,8 @@ public class KevinAssistantActivity extends AppCompatActivity {
         bridgeWebView.addJavascriptInterface(agentBridge, "KevinAgentBridge");
 
         IntentFilter filter = new IntentFilter();
+        filter.addAction(ScreenCaptureService.ACTION_CAPTURE_READY);
+        filter.addAction(ScreenCaptureService.ACTION_CLEAN_FRAME_CAPTURED);
         filter.addAction(ScreenCaptureService.ACTION_SCREEN_FRAME);
         filter.addAction(ScreenCaptureService.ACTION_STOP);
         filter.addAction(KevinNotificationListenerService.ACTION_WHATSAPP_REPLIED);
@@ -206,11 +230,78 @@ public class KevinAssistantActivity extends AppCompatActivity {
     }
 
     private void stopScreenCapture() {
+        waitingForInitialCleanCapture = false;
+        cancelCleanCaptureAndRestore();
         try {
             Intent intent = new Intent(this, ScreenCaptureService.class)
                     .setAction(ScreenCaptureService.ACTION_STOP);
             startService(intent);
         } catch (Throwable ignored) {}
+    }
+
+    private void setOverlayDimVisible(boolean visible) {
+        try {
+            if (visible) {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.dimAmount = 0.42f;
+                getWindow().setAttributes(lp);
+            } else {
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.dimAmount = 0f;
+                getWindow().setAttributes(lp);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private void performCleanBehindCapture() {
+        if (!ScreenCaptureService.isCaptureRunning
+                || cleanCapturePending
+                || overlayRoot == null
+                || isFinishing()
+                || isDestroyed()) {
+            return;
+        }
+        cleanCapturePending = true;
+        ScreenCaptureService.setSuppressOverlayFrames(true);
+        overlayRoot.setVisibility(View.INVISIBLE);
+        setOverlayDimVisible(false);
+
+        overlayRoot.postOnAnimation(() -> {
+            if (!cleanCapturePending || isFinishing() || isDestroyed()) {
+                return;
+            }
+            ScreenCaptureService.beginCleanCaptureWindow(45L);
+            mainHandler.removeCallbacks(cleanCaptureWatchdog);
+            mainHandler.postDelayed(cleanCaptureWatchdog, 250L);
+        });
+    }
+
+    private void finishCleanBehindCapture(String capturedFrame) {
+        mainHandler.removeCallbacks(cleanCaptureWatchdog);
+        String fallback = ScreenCaptureService.finishCleanCaptureWindow();
+        ScreenCaptureService.setSuppressOverlayFrames(!isFinishing() && !isDestroyed());
+        if (overlayRoot != null) {
+            overlayRoot.setVisibility(View.VISIBLE);
+        }
+        setOverlayDimVisible(true);
+        cleanCapturePending = false;
+
+        String frameToSend = (capturedFrame != null && !capturedFrame.isEmpty()) ? capturedFrame : fallback;
+        if (frameToSend != null && !frameToSend.isEmpty()) {
+            dispatchScreenFrame(frameToSend);
+        }
+    }
+
+    private void cancelCleanCaptureAndRestore() {
+        mainHandler.removeCallbacks(cleanCaptureWatchdog);
+        ScreenCaptureService.finishCleanCaptureWindow();
+        if (overlayRoot != null) {
+            overlayRoot.setVisibility(View.VISIBLE);
+        }
+        setOverlayDimVisible(true);
+        cleanCapturePending = false;
     }
 
     private void openFullApp() {
@@ -223,6 +314,9 @@ public class KevinAssistantActivity extends AppCompatActivity {
     }
 
     private void dismissOverlay() {
+        waitingForInitialCleanCapture = false;
+        cancelCleanCaptureAndRestore();
+        ScreenCaptureService.setSuppressOverlayFrames(false);
         if (ScreenCaptureService.isCaptureRunning) {
             stopScreenCapture();
         }
@@ -297,6 +391,11 @@ public class KevinAssistantActivity extends AppCompatActivity {
         public void stop() {
             runOnUiThread(KevinAssistantActivity.this::stopScreenCapture);
         }
+
+        @JavascriptInterface
+        public void captureCleanFrame() {
+            runOnUiThread(KevinAssistantActivity.this::performCleanBehindCapture);
+        }
     }
 
     @Override
@@ -327,6 +426,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        ScreenCaptureService.setSuppressOverlayFrames(true);
         if (bridge != null) {
             bridge.getApp().fireStatusChange(true);
             bridge.onResume();
@@ -336,6 +436,8 @@ public class KevinAssistantActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        cancelCleanCaptureAndRestore();
+        ScreenCaptureService.setSuppressOverlayFrames(false);
         if (bridge != null) {
             bridge.onPause();
         }
@@ -355,6 +457,9 @@ public class KevinAssistantActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        waitingForInitialCleanCapture = false;
+        cancelCleanCaptureAndRestore();
+        ScreenCaptureService.setSuppressOverlayFrames(false);
         try {
             unregisterReceiver(screenCaptureReceiver);
         } catch (IllegalArgumentException ignored) {}
@@ -418,6 +523,8 @@ public class KevinAssistantActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == SCREEN_CAPTURE_REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK && data != null) {
+                ScreenCaptureService.setSuppressOverlayFrames(true);
+                waitingForInitialCleanCapture = true;
                 Intent serviceIntent = new Intent(this, ScreenCaptureService.class)
                         .setAction(ScreenCaptureService.ACTION_START)
                         .putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
@@ -425,6 +532,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
                 ContextCompat.startForegroundService(this, serviceIntent);
                 dispatchScreenSharingState(true);
             } else {
+                waitingForInitialCleanCapture = false;
                 dispatchScreenSharingState(false);
             }
         }

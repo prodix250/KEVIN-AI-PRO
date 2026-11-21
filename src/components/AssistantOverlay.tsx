@@ -172,6 +172,8 @@ export default function AssistantOverlay({
   const awaitingFirstLiveExplainRef = useRef(false);
   const liveFrameRef = useRef<string | null>(null);
   const isLiveScreenRef = useRef(false);
+  const cleanFrameWaitersRef = useRef<Array<(frame: string) => void>>([]);
+  const sendingLockRef = useRef(false);
 
   const showAudioStatus = (msg: string) => {
     setAudioStatusNote(msg);
@@ -211,6 +213,7 @@ export default function AssistantOverlay({
     }
     isLiveScreenRef.current = false;
     liveFrameRef.current = null;
+    cleanFrameWaitersRef.current = [];
     setLiveScreenFrame(null);
     setIsLiveScreen(false);
   };
@@ -261,6 +264,10 @@ export default function AssistantOverlay({
       isLiveScreenRef.current = true;
       setLiveScreenFrame(dataUrl);
       setIsLiveScreen(true);
+      if (cleanFrameWaitersRef.current.length > 0) {
+        const waiters = cleanFrameWaitersRef.current.splice(0);
+        waiters.forEach((resolve) => resolve(dataUrl));
+      }
       if (awaitingFirstLiveExplainRef.current) {
         awaitingFirstLiveExplainRef.current = false;
         void explainLiveScreenNow(dataUrl);
@@ -304,8 +311,37 @@ export default function AssistantOverlay({
     onExpandToFullApp?.(submittedPrompt || promptText, replyText, action);
   };
 
+  const requestFreshCleanFrame = (): Promise<string | null> => {
+    const nativeCapture = (window as any).KevinScreenCapture;
+    if (!nativeCapture?.captureCleanFrame || !isLiveScreenRef.current) {
+      return Promise.resolve(liveFrameRef.current || liveScreenFrame);
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (frame: string | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(frame);
+      };
+      const onFrame = (frame: string) => done(frame);
+      const timer = setTimeout(() => {
+        cleanFrameWaitersRef.current = cleanFrameWaitersRef.current.filter((w) => w !== onFrame);
+        done(liveFrameRef.current || liveScreenFrame);
+      }, 900);
+      cleanFrameWaitersRef.current.push(onFrame);
+      try {
+        nativeCapture.captureCleanFrame();
+      } catch {
+        cleanFrameWaitersRef.current = cleanFrameWaitersRef.current.filter((w) => w !== onFrame);
+        done(liveFrameRef.current || liveScreenFrame);
+      }
+    });
+  };
+
   const explainLiveScreenNow = async (frameOverride?: string) => {
-    const frame = frameOverride || liveFrameRef.current || liveScreenFrame;
+    if (isLoading || sendingLockRef.current) return;
+    const frame = frameOverride || (await requestFreshCleanFrame());
     if (!frame) return;
     await handleSend(
       'User amaze kwatsa Live Screen Share. Reba neza ibiri kuri iyi screen ubu, ubisobanure mu magambo magufi yumvikana mu Kinyarwanda, unamubaze icyo wamufashaho.',
@@ -406,28 +442,36 @@ export default function AssistantOverlay({
     audioUrlOverride?: string | null
   ) => {
     const text = (overrideText ?? promptText).trim();
-    const screenAttachment = !attachedImage && !imageOverride && isLiveScreen && liveFrameRef.current
-      ? { base64: liveFrameRef.current, mimeType: 'image/jpeg', name: 'live-screen.jpg' }
-      : undefined;
-    const effectiveAttachment = imageOverride || attachedImage || screenAttachment;
+    if (!text && !imageOverride && !attachedImage && !audioBase64 && !(isLiveScreenRef.current && liveFrameRef.current)) return;
+    if (isLoading || sendingLockRef.current) return;
 
-    if (!text && !effectiveAttachment && !audioBase64) return;
-    if (isLoading) return;
-
-    setErrorMsg(null);
-    replaceSubmittedAudioUrl(audioUrlOverride || null);
-    setSubmittedPrompt(
-      displayPromptOverride
-        || text
-        || (effectiveAttachment ? '📺 Screen yoherejwe' : '🎤 Voice Note')
-    );
-    setReplyText('');
-    setAction(null);
-    setIsLoading(true);
-    setPromptText('');
-    setAttachedImage(null);
-
+    sendingLockRef.current = true;
     try {
+      let liveScreenCapture = liveFrameRef.current;
+      if (!imageOverride && !attachedImage && isLiveScreenRef.current && (text || audioBase64)) {
+        liveScreenCapture = await requestFreshCleanFrame();
+      }
+
+      const screenAttachment = !attachedImage && !imageOverride && isLiveScreenRef.current && liveScreenCapture
+        ? { base64: liveScreenCapture, mimeType: 'image/jpeg', name: 'live-screen.jpg' }
+        : undefined;
+      const effectiveAttachment = imageOverride || attachedImage || screenAttachment;
+
+      if (!text && !effectiveAttachment && !audioBase64) return;
+
+      setErrorMsg(null);
+      replaceSubmittedAudioUrl(audioUrlOverride || null);
+      setSubmittedPrompt(
+        displayPromptOverride
+          || text
+          || (effectiveAttachment ? '📺 Screen yoherejwe' : '🎤 Voice Note')
+      );
+      setReplyText('');
+      setAction(null);
+      setIsLoading(true);
+      setPromptText('');
+      setAttachedImage(null);
+
       const response = await sendMessageToGemini(
         [],
         text,
@@ -444,6 +488,7 @@ export default function AssistantOverlay({
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Habaye ikibazo mu gusubiza.');
     } finally {
+      sendingLockRef.current = false;
       setIsLoading(false);
     }
   };

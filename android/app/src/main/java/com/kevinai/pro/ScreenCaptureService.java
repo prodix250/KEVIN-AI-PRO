@@ -16,6 +16,7 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 
@@ -30,6 +31,8 @@ public class ScreenCaptureService extends Service {
     public static final String ACTION_START = "com.kevinai.pro.action.START_SCREEN_CAPTURE";
     public static final String ACTION_STOP = "com.kevinai.pro.action.STOP_SCREEN_CAPTURE";
     public static final String ACTION_SCREEN_FRAME = "com.kevinai.pro.action.SCREEN_FRAME";
+    public static final String ACTION_CAPTURE_READY = "com.kevinai.pro.action.CAPTURE_READY";
+    public static final String ACTION_CLEAN_FRAME_CAPTURED = "com.kevinai.pro.action.CLEAN_FRAME_CAPTURED";
     public static final String EXTRA_RESULT_CODE = "resultCode";
     public static final String EXTRA_RESULT_DATA = "resultData";
     public static final String EXTRA_FRAME = "frame";
@@ -40,12 +43,34 @@ public class ScreenCaptureService extends Service {
             "🟢 Kevin AI: Live Screen Vision is Active";
 
     public static volatile boolean isCaptureRunning = false;
+    public static volatile boolean suppressOverlayFrames = false;
+    private static volatile boolean cleanCaptureWindowActive = false;
+    private static volatile long cleanCaptureReadyAtMs = 0L;
+    private static volatile String fallbackCleanFrame = null;
 
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
     private ImageReader imageReader;
     private boolean framePending;
     private long lastFrameAt;
+
+    public static void setSuppressOverlayFrames(boolean suppress) {
+        suppressOverlayFrames = suppress;
+    }
+
+    public static void beginCleanCaptureWindow(long readyDelayMs) {
+        fallbackCleanFrame = null;
+        cleanCaptureReadyAtMs = SystemClock.uptimeMillis() + Math.max(0L, readyDelayMs);
+        cleanCaptureWindowActive = true;
+    }
+
+    @Nullable
+    public static String finishCleanCaptureWindow() {
+        cleanCaptureWindowActive = false;
+        String frame = fallbackCleanFrame;
+        fallbackCleanFrame = null;
+        return frame;
+    }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -115,9 +140,58 @@ public class ScreenCaptureService extends Service {
                 null
         );
         isCaptureRunning = true;
+
+        Intent readyIntent = new Intent(ACTION_CAPTURE_READY);
+        readyIntent.setPackage(getPackageName());
+        sendBroadcast(readyIntent);
     }
 
     private void captureLatestFrame(ImageReader reader) {
+        if (cleanCaptureWindowActive) {
+            Image image = null;
+            try {
+                image = reader.acquireLatestImage();
+                if (image == null) {
+                    return;
+                }
+                String encoded = encodeImageToBase64(image);
+                long nowUptime = SystemClock.uptimeMillis();
+                if (nowUptime >= cleanCaptureReadyAtMs) {
+                    cleanCaptureWindowActive = false;
+                    suppressOverlayFrames = true;
+                    fallbackCleanFrame = null;
+                    lastFrameAt = System.currentTimeMillis();
+
+                    Intent cleanIntent = new Intent(ACTION_CLEAN_FRAME_CAPTURED);
+                    cleanIntent.setPackage(getPackageName());
+                    cleanIntent.putExtra(EXTRA_FRAME, encoded);
+                    sendBroadcast(cleanIntent);
+                } else {
+                    fallbackCleanFrame = encoded;
+                }
+            } catch (Exception exception) {
+                android.util.Log.e("ScreenCaptureService", "Failed to capture clean screen frame", exception);
+            } finally {
+                if (image != null) {
+                    image.close();
+                }
+            }
+            return;
+        }
+
+        if (suppressOverlayFrames) {
+            Image stale = null;
+            try {
+                stale = reader.acquireLatestImage();
+            } catch (Exception ignored) {
+            } finally {
+                if (stale != null) {
+                    stale.close();
+                }
+            }
+            return;
+        }
+
         long now = System.currentTimeMillis();
         if (framePending || now - lastFrameAt < 1000) {
             return;
@@ -130,30 +204,12 @@ public class ScreenCaptureService extends Service {
             }
             framePending = true;
             lastFrameAt = now;
-            Image.Plane plane = image.getPlanes()[0];
-            ByteBuffer buffer = plane.getBuffer();
-            int pixelStride = plane.getPixelStride();
-            int rowStride = plane.getRowStride();
-            int rowPadding = rowStride - pixelStride * image.getWidth();
-            Bitmap bitmap = Bitmap.createBitmap(
-                    image.getWidth() + rowPadding / pixelStride,
-                    image.getHeight(),
-                    Bitmap.Config.ARGB_8888
-            );
-            bitmap.copyPixelsFromBuffer(buffer);
-            Bitmap cropped = Bitmap.createBitmap(bitmap, 0, 0, image.getWidth(), image.getHeight());
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            cropped.compress(Bitmap.CompressFormat.JPEG, 75, output);
-            String encoded = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP);
+            String encoded = encodeImageToBase64(image);
 
             Intent frameIntent = new Intent(ACTION_SCREEN_FRAME);
             frameIntent.setPackage(getPackageName());
             frameIntent.putExtra(EXTRA_FRAME, encoded);
             sendBroadcast(frameIntent);
-
-            cropped.recycle();
-            bitmap.recycle();
-            output.close();
         } catch (Exception exception) {
             android.util.Log.e("ScreenCaptureService", "Failed to capture screen frame", exception);
         } finally {
@@ -162,6 +218,28 @@ public class ScreenCaptureService extends Service {
             }
             framePending = false;
         }
+    }
+
+    private String encodeImageToBase64(Image image) throws Exception {
+        Image.Plane plane = image.getPlanes()[0];
+        ByteBuffer buffer = plane.getBuffer();
+        int pixelStride = plane.getPixelStride();
+        int rowStride = plane.getRowStride();
+        int rowPadding = rowStride - pixelStride * image.getWidth();
+        Bitmap bitmap = Bitmap.createBitmap(
+                image.getWidth() + rowPadding / pixelStride,
+                image.getHeight(),
+                Bitmap.Config.ARGB_8888
+        );
+        bitmap.copyPixelsFromBuffer(buffer);
+        Bitmap cropped = Bitmap.createBitmap(bitmap, 0, 0, image.getWidth(), image.getHeight());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        cropped.compress(Bitmap.CompressFormat.JPEG, 75, output);
+        String encoded = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP);
+        cropped.recycle();
+        bitmap.recycle();
+        output.close();
+        return encoded;
     }
 
     private Notification buildNotification() {
@@ -197,6 +275,9 @@ public class ScreenCaptureService extends Service {
     }
 
     private void stopCaptureResources() {
+        cleanCaptureWindowActive = false;
+        fallbackCleanFrame = null;
+        suppressOverlayFrames = false;
         if (virtualDisplay != null) {
             virtualDisplay.release();
             virtualDisplay = null;
