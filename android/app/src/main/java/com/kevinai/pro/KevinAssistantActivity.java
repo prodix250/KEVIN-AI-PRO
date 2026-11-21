@@ -395,6 +395,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
             @NonNull String[] permissions,
             @NonNull int[] grantResults
     ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == KevinAgentBridge.AGENT_PERMISSIONS_REQUEST_CODE && agentBridge != null) {
             agentBridge.dispatchAgentStatus();
             return;
@@ -409,20 +410,12 @@ public class KevinAssistantActivity extends AppCompatActivity {
             } else if (shouldContinue) {
                 dispatchScreenSharingState(false);
             }
-            return;
         }
-        if (requestCode == AUDIO_PERMISSION_REQUEST_CODE) {
-            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-            return;
-        }
-        if (bridge != null && bridge.onRequestPermissionsResult(requestCode, permissions, grantResults)) {
-            return;
-        }
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == SCREEN_CAPTURE_REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK && data != null) {
                 Intent serviceIntent = new Intent(this, ScreenCaptureService.class)
@@ -434,11 +427,6 @@ public class KevinAssistantActivity extends AppCompatActivity {
             } else {
                 dispatchScreenSharingState(false);
             }
-            return;
         }
-        if (bridge != null && bridge.onActivityResult(requestCode, resultCode, data)) {
-            return;
-        }
-        super.onActivityResult(requestCode, resultCode, data);
     }
 }
