@@ -77,7 +77,7 @@ export function saveAgentPermissions(perms: AgentPermissions): void {
     const userName = window.localStorage.getItem('kevin_user_name')
       || window.localStorage.getItem('kevin_ai_user_name')
       || 'Kevin';
-    const backendBaseUrl = window.location.origin;
+    const backendBaseUrl = isCapacitorApkRuntime() ? PRODUCTION_BACKEND_URL : window.location.origin;
     const bridge = (window as any).KevinAgentBridge;
     if (bridge?.setAgentConfig) {
       bridge.setAgentConfig(
@@ -608,10 +608,12 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
 
   if (name === "open_youtube") {
     const q = query || "trending music";
-    videoId = q.length === 11 && /^[a-zA-Z0-9_-]+$/.test(q) ? q : undefined;
+    const resolvedVideoId = typeof args.videoId === 'string' && args.videoId.trim() ? args.videoId.trim() : undefined;
+    const resolvedVideoTitle = typeof args.videoTitle === 'string' && args.videoTitle.trim() ? args.videoTitle.trim() : q;
+    videoId = resolvedVideoId || (q.length === 11 && /^[a-zA-Z0-9_-]+$/.test(q) ? q : undefined);
     embedUrl = videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1` : undefined;
     fallbackUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
-    label = `Curanga: ${q}`;
+    label = `Curanga: ${resolvedVideoTitle}`;
     const actionObj: DeviceAction = {
       name,
       args,
@@ -620,7 +622,7 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
       fallbackUrl,
       embedUrl,
       videoId,
-      videoTitle: q,
+      videoTitle: resolvedVideoTitle,
       status: 'executed',
     };
     runDeviceAction(actionObj, false);
@@ -672,11 +674,57 @@ export interface GeminiKeysPool {
 }
 
 export const KEYS_POOL_STORAGE_KEY = 'kevin_ai_keys_pool';
+export const KEYS_ARRAY_STORAGE_KEY = 'kevin_ai_keys';
+
+function safeStorageGet(key: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeStorageSet(key: string, value: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {}
+}
+
+function safeStorageRemove(key: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {}
+}
+
+function parseStoredKeysList(raw: string | null): string[] {
+  if (!raw || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((k): k is string => typeof k === 'string' && k.trim().length > 0).map(k => k.trim());
+    }
+    if (parsed && typeof parsed === 'object') {
+      return [
+        parsed.primary,
+        parsed.backup1,
+        parsed.backup2,
+        parsed.backup3,
+        parsed.backup4,
+      ].filter((k): k is string => typeof k === 'string' && k.trim().length > 0).map(k => k.trim());
+    }
+  } catch {
+    return raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+}
 
 export function getGeminiKeysPool(): GeminiKeysPool {
   if (typeof window === 'undefined') return { primary: '', backup1: '', backup2: '', backup3: '', backup4: '' };
   try {
-    const raw = localStorage.getItem(KEYS_POOL_STORAGE_KEY);
+    const raw = safeStorageGet(KEYS_POOL_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
@@ -688,13 +736,15 @@ export function getGeminiKeysPool(): GeminiKeysPool {
       };
     }
   } catch {}
+
+  const kevinKeysArr = parseStoredKeysList(safeStorageGet(KEYS_ARRAY_STORAGE_KEY));
   const legacy = getUserCustomApiKey();
   return {
-    primary: legacy,
-    backup1: localStorage.getItem('kevin_ai_key_backup1') || '',
-    backup2: localStorage.getItem('kevin_ai_key_backup2') || '',
-    backup3: localStorage.getItem('kevin_ai_key_backup3') || '',
-    backup4: localStorage.getItem('kevin_ai_key_backup4') || '',
+    primary: legacy || kevinKeysArr[0] || '',
+    backup1: safeStorageGet('kevin_ai_key_backup1') || kevinKeysArr[1] || '',
+    backup2: safeStorageGet('kevin_ai_key_backup2') || kevinKeysArr[2] || '',
+    backup3: safeStorageGet('kevin_ai_key_backup3') || kevinKeysArr[3] || '',
+    backup4: safeStorageGet('kevin_ai_key_backup4') || kevinKeysArr[4] || '',
   };
 }
 
@@ -707,7 +757,19 @@ export function setGeminiKeysPool(pool: GeminiKeysPool): void {
     backup3: (pool.backup3 || '').trim(),
     backup4: (pool.backup4 || '').trim(),
   };
-  localStorage.setItem(KEYS_POOL_STORAGE_KEY, JSON.stringify(cleaned));
+  safeStorageSet(KEYS_POOL_STORAGE_KEY, JSON.stringify(cleaned));
+  const nonEmptyArray = [
+    cleaned.primary,
+    cleaned.backup1,
+    cleaned.backup2,
+    cleaned.backup3,
+    cleaned.backup4,
+  ].filter(Boolean);
+  if (nonEmptyArray.length > 0) {
+    safeStorageSet(KEYS_ARRAY_STORAGE_KEY, JSON.stringify(Array.from(new Set(nonEmptyArray))));
+  } else {
+    safeStorageRemove(KEYS_ARRAY_STORAGE_KEY);
+  }
   setUserCustomApiKey(cleaned.primary);
   const backupEntries: Array<[string, string]> = [
     ['kevin_ai_key_backup1', cleaned.backup1],
@@ -717,21 +779,23 @@ export function setGeminiKeysPool(pool: GeminiKeysPool): void {
   ];
   for (const [storageKey, val] of backupEntries) {
     if (val) {
-      localStorage.setItem(storageKey, val);
+      safeStorageSet(storageKey, val);
     } else {
-      localStorage.removeItem(storageKey);
+      safeStorageRemove(storageKey);
     }
   }
 }
 
 export function getGeminiApiKeysArray(): string[] {
   const pool = getGeminiKeysPool();
+  const kevinKeysArr = parseStoredKeysList(safeStorageGet(KEYS_ARRAY_STORAGE_KEY));
   const keys = [
     pool.primary,
     pool.backup1,
     pool.backup2,
     pool.backup3,
     pool.backup4,
+    ...kevinKeysArr,
     getUserCustomApiKey(),
   ];
   return Array.from(new Set(
@@ -741,9 +805,9 @@ export function getGeminiApiKeysArray(): string[] {
 
 export function getUserCustomApiKey(): string {
   if (typeof window === 'undefined') return '';
-  return localStorage.getItem('kevin_ai_key')?.trim()
-    || localStorage.getItem('gemini_api_key')?.trim()
-    || localStorage.getItem('apiKey')?.trim()
+  return safeStorageGet('kevin_ai_key')?.trim()
+    || safeStorageGet('gemini_api_key')?.trim()
+    || safeStorageGet('apiKey')?.trim()
     || '';
 }
 
@@ -751,13 +815,13 @@ export function setUserCustomApiKey(key: string): void {
   if (typeof window !== 'undefined') {
     const trimmed = key.trim();
     if (trimmed.length > 0) {
-      localStorage.setItem('kevin_ai_key', trimmed);
-      localStorage.setItem('gemini_api_key', trimmed);
-      localStorage.setItem('apiKey', trimmed);
+      safeStorageSet('kevin_ai_key', trimmed);
+      safeStorageSet('gemini_api_key', trimmed);
+      safeStorageSet('apiKey', trimmed);
     } else {
-      localStorage.removeItem('kevin_ai_key');
-      localStorage.removeItem('gemini_api_key');
-      localStorage.removeItem('apiKey');
+      safeStorageRemove('kevin_ai_key');
+      safeStorageRemove('gemini_api_key');
+      safeStorageRemove('apiKey');
     }
   }
 }
@@ -806,12 +870,155 @@ const isValidAudioBase64 = (data: string): boolean =>
   && data.length % 4 === 0
   && /^[A-Za-z0-9+/]+={0,2}$/.test(data);
 
+const PRODUCTION_BACKEND_URL = 'https://kevin-ai-pro.onrender.com';
+
+export function isCapacitorApkRuntime(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const cap = (window as any).Capacitor;
+    if (cap?.isNativePlatform?.()) return true;
+    const { protocol, hostname, port } = window.location;
+    if (protocol === 'capacitor:' || protocol === 'ionic:' || protocol === 'file:') return true;
+    // Capacitor Android serves bundled assets at https://localhost or http://localhost with no port
+    if ((hostname === 'localhost' || hostname === '127.0.0.1') && !port) return true;
+  } catch {}
+  return false;
+}
+
 const getEndpoint = (path: string): string => {
-  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.includes('ais-dev') || window.location.hostname.includes('ais-pre'))) {
+  if (isCapacitorApkRuntime()) {
+    return `${PRODUCTION_BACKEND_URL}${path}`;
+  }
+  if (
+    typeof window !== 'undefined'
+    && (window.location.hostname === 'localhost'
+      || window.location.hostname === '127.0.0.1'
+      || window.location.hostname.includes('ais-dev')
+      || window.location.hostname.includes('ais-pre'))
+  ) {
     return path;
   }
-  return `https://kevin-ai-pro.onrender.com${path}`;
+  return `${PRODUCTION_BACKEND_URL}${path}`;
 };
+
+const APK_DEVICE_ACTION_DECLARATIONS = [
+  {
+    name: 'open_youtube',
+    description: 'Search and play a song or video on YouTube.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        query: { type: 'STRING', description: 'Song title, artist, or YouTube search query.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'send_sms',
+    description: 'Send an SMS text message to a contact or phone number.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        phone_number: { type: 'STRING', description: 'Recipient phone number.' },
+        contact_name: { type: 'STRING', description: 'Recipient name if known.' },
+        message: { type: 'STRING', description: 'SMS message body.' },
+      },
+      required: ['message'],
+    },
+  },
+  {
+    name: 'make_call',
+    description: 'Place a phone call to a contact or phone number.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        phone_number: { type: 'STRING', description: 'Recipient phone number.' },
+        contact_name: { type: 'STRING', description: 'Recipient name if known.' },
+      },
+    },
+  },
+  {
+    name: 'open_whatsapp',
+    description: 'Open or send a WhatsApp message to a contact or phone number.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        phone_number: { type: 'STRING', description: 'Recipient phone number.' },
+        contact_name: { type: 'STRING', description: 'Recipient name if known.' },
+        message: { type: 'STRING', description: 'WhatsApp message text.' },
+      },
+    },
+  },
+  {
+    name: 'open_camera',
+    description: 'Open the device camera.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {},
+    },
+  },
+];
+
+async function resolveYouTubeVideoForApk(query: string): Promise<{ videoId: string; title: string; channel: string } | null> {
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${PRODUCTION_BACKEND_URL}/api/youtube/resolve?q=${encodeURIComponent(trimmed)}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.videoId) {
+      return {
+        videoId: String(data.videoId),
+        title: String(data.title || trimmed),
+        channel: String(data.channel || 'YouTube'),
+      };
+    }
+  } catch {}
+  return null;
+}
+
+function buildApkSystemInstruction(
+  userName: string,
+  hasAudioAttachment: boolean,
+  savedContacts: SavedContact[],
+  perms: AgentPermissions
+): string {
+  const now = new Date();
+  const realTimeContext = `[REAL-TIME CONTEXT: Today is ${now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'Africa/Kigali',
+  })}, and the current time in Rwanda is ${now.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Africa/Kigali',
+  })}.]`;
+  const contactsList = savedContacts
+    .filter((c) => c && c.name?.trim() && c.phone?.trim())
+    .slice(0, 40)
+    .map((c) => `${c.name.trim()}: ${c.phone.trim()}`);
+  const customInstructions = safeStorageGet('kevin_ai_custom_instructions')?.trim() || '';
+
+  return [
+    `You are Kevin AI, created in Rwanda by Uwumukiza Kevin (born October 28, 2003, Rwamagana District, Gahengeri Sector; studies IT at University of Rwanda UR-CST; Motto: 'UKORA GAKE BIKAGENDA CYANE').`,
+    `You have flawless native mastery of authentic Rwandan Kinyarwanda (as well as English, French, and Swahili). Reply naturally, warmly, and concisely in the user's language with friendly emojis (👋, ✨, 😊, 🚀). Avoid awkward literal English-to-Kinyarwanda translations.`,
+    `The person chatting with you is named '${userName}'. Address them warmly and naturally.`,
+    customInstructions ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions}` : '',
+    hasAudioAttachment
+      ? `The user sent a voice note/audio message. Listen attentively in Kinyarwanda, English, French, or Swahili and respond directly or execute requested tool actions immediately.`
+      : '',
+    contactsList.length > 0 ? `[SAVED CONTACTS: ${contactsList.join(' | ')}]` : '',
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. Always execute requested device actions immediately using tool calls.]`,
+    realTimeContext,
+  ].filter(Boolean).join('\n\n');
+}
 
 export async function transcribeAudioWithSTT(
   audioBase64: string,
@@ -824,6 +1031,44 @@ export async function transcribeAudioWithSTT(
   const normalizedMime = normalizeAudioMimeType(audioMimeType);
   const customApiKey = getUserCustomApiKey();
   const customApiKeys = getGeminiApiKeysArray();
+
+  if (isCapacitorApkRuntime() && customApiKeys.length > 0) {
+    for (const model of ['gemini-2.5-flash', 'gemini-3.1-flash-lite']) {
+      for (const currentKey of customApiKeys) {
+        try {
+          const directRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(currentKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    role: 'user',
+                    parts: [
+                      { inlineData: { mimeType: normalizedMime, data: cleanAudio } },
+                      {
+                        text: 'Transcribe the spoken audio verbatim in Kinyarwanda, English, French, or Swahili. Output ONLY the exact spoken words without quotes or extra explanation. Return empty string if silent.',
+                      },
+                    ],
+                  },
+                ],
+              }),
+            }
+          );
+          if (!directRes.ok) continue;
+          const directJson = await directRes.json();
+          const text = directJson?.candidates?.[0]?.content?.parts
+            ?.map((p: any) => p?.text || '')
+            .join('')
+            .trim();
+          if (text !== undefined) {
+            return text === '""' || text === "''" ? '' : text;
+          }
+        } catch {}
+      }
+    }
+  }
 
   try {
     const res = await fetch(getEndpoint('/api/stt'), {
@@ -860,10 +1105,47 @@ export async function generateWhatsAppAutoReply(
   replyStyle?: string
 ): Promise<string> {
   const userName = typeof window !== 'undefined'
-    ? localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || 'Kevin'
+    ? safeStorageGet('kevin_user_name') || safeStorageGet('kevin_ai_user_name') || 'Kevin'
     : 'Kevin';
   const customApiKey = getUserCustomApiKey();
   const customApiKeys = getGeminiApiKeysArray();
+
+  if (isCapacitorApkRuntime() && customApiKeys.length > 0) {
+    for (const model of ['gemini-2.5-flash', 'gemini-3.1-flash-lite']) {
+      for (const currentKey of customApiKeys) {
+        try {
+          const directRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(currentKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                systemInstruction: {
+                  parts: [
+                    {
+                      text: [
+                        `You are Kevin AI acting as ${userName}'s WhatsApp Auto-Reply Assistant.`,
+                        `Reply directly and naturally to "${sender || 'Contact'}" in their language (Kinyarwanda, English, French, or Swahili), 1-3 concise sentences.`,
+                        replyStyle?.trim() ? `Owner's Auto-Reply Instructions: ${replyStyle.trim()}` : '',
+                      ].filter(Boolean).join('\n'),
+                    },
+                  ],
+                },
+                contents: [{ role: 'user', parts: [{ text: incomingMessage.trim() }] }],
+              }),
+            }
+          );
+          if (!directRes.ok) continue;
+          const directJson = await directRes.json();
+          const reply = directJson?.candidates?.[0]?.content?.parts
+            ?.map((p: any) => p?.text || '')
+            .join('')
+            .trim();
+          if (reply) return reply;
+        } catch {}
+      }
+    }
+  }
 
   try {
     const res = await fetch(getEndpoint('/api/whatsapp-reply'), {
@@ -994,13 +1276,88 @@ export async function sendMessageToGemini(
   contents.push({ role: "user", parts });
 
   const userName = typeof window !== 'undefined'
-    ? localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || 'Incuti yanjye'
+    ? safeStorageGet('kevin_user_name') || safeStorageGet('kevin_ai_user_name') || 'Incuti yanjye'
     : 'Incuti yanjye';
 
   const customApiKey = getUserCustomApiKey();
   const customApiKeys = getGeminiApiKeysArray();
   const perms = getAgentPermissions();
   const savedContacts = getSavedContacts();
+  const isApk = isCapacitorApkRuntime();
+
+  const executeDirectApkGemini = async (requestContents: any[], includeAudioFlag: boolean) => {
+    const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms);
+    const apkModels = selectedModel === 'Kevin 1.3 Lite'
+      ? ['gemini-2.5-flash', 'gemini-3.1-flash-lite']
+      : ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+    const invalidKeys = new Set<string>();
+    let lastDirectErr: unknown = null;
+
+    for (const modelName of apkModels) {
+      for (const currentKey of customApiKeys) {
+        if (invalidKeys.has(currentKey)) continue;
+        try {
+          const directRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                systemInstruction: { parts: [{ text: apkSystemInstruction }] },
+                contents: requestContents,
+                tools: [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }],
+              }),
+            }
+          );
+
+          const json = await directRes.json().catch(() => null);
+          if (!directRes.ok) {
+            const apiErrMsg = json?.error?.message || `HTTP ${directRes.status}`;
+            const lowerErr = apiErrMsg.toLowerCase();
+            if (directRes.status === 401 || directRes.status === 403 || lowerErr.includes('api key not valid') || lowerErr.includes('api_key_invalid')) {
+              invalidKeys.add(currentKey);
+            }
+            lastDirectErr = new Error(apiErrMsg);
+            continue;
+          }
+
+          const responseParts: any[] = json?.candidates?.[0]?.content?.parts || [];
+          let streamedText = '';
+          const streamedActions: DeviceAction[] = [];
+
+          for (const part of responseParts) {
+            if (part?.text) {
+              streamedText += part.text;
+              onChunk?.(part.text);
+            } else if (part?.functionCall?.name) {
+              const fcName = String(part.functionCall.name);
+              const fcArgs = { ...(part.functionCall.args || {}) };
+              if (fcName === 'open_youtube' && typeof fcArgs.query === 'string' && fcArgs.query.trim()) {
+                const resolved = await resolveYouTubeVideoForApk(fcArgs.query);
+                if (resolved) {
+                  fcArgs.videoId = resolved.videoId;
+                  fcArgs.videoTitle = resolved.title;
+                  fcArgs.channel = resolved.channel;
+                }
+              }
+              const action = executeDeviceAction(fcName, fcArgs);
+              if (action) streamedActions.push(action);
+            }
+          }
+
+          if (streamedText || streamedActions.length > 0) {
+            return { streamedText, streamedActions };
+          }
+        } catch (directErr: any) {
+          lastDirectErr = directErr;
+        }
+      }
+    }
+
+    throw lastDirectErr instanceof Error
+      ? lastDirectErr
+      : new Error('Direct Gemini request failed in Android APK.');
+  };
 
   const executeChatRequest = async (requestContents: any[], includeAudioFlag: boolean) => {
     const res = await fetch(getEndpoint('/api/chat'), {
@@ -1076,27 +1433,55 @@ export async function sendMessageToGemini(
   let fullResponse = '';
   let actions: DeviceAction[] = [];
 
-  try {
-    const result = await executeChatRequest(contents, hasAudioAttachment);
-    fullResponse = result.streamedText;
-    actions = result.streamedActions;
-  } catch (err: any) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    const isHighDemand = errMsg.includes('503')
-      || errMsg.toLowerCase().includes('high demand')
-      || errMsg.toLowerCase().includes('unavailable');
-
-    // If audio inlineData hit high demand and we already have a transcribed prompt, seamlessly retry with text
-    if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
-      const textOnlyContents = [
-        ...contents.slice(0, -1),
-        { role: 'user', parts: [{ text: prompt }] },
-      ];
-      const fallbackResult = await executeChatRequest(textOnlyContents, false);
-      fullResponse = fallbackResult.streamedText;
-      actions = fallbackResult.streamedActions;
+  if (isApk) {
+    if (customApiKeys.length > 0) {
+      try {
+        const directResult = await executeDirectApkGemini(contents, hasAudioAttachment);
+        fullResponse = directResult.streamedText;
+        actions = directResult.streamedActions;
+      } catch (directErr: any) {
+        // Fallback to absolute production backend URL if direct Gemini call fails
+        try {
+          const backendResult = await executeChatRequest(contents, hasAudioAttachment);
+          fullResponse = backendResult.streamedText;
+          actions = backendResult.streamedActions;
+        } catch {
+          throw directErr;
+        }
+      }
     } else {
-      throw err;
+      // No keys stored yet in APK localStorage: try production backend first, else prompt user cleanly
+      try {
+        const backendResult = await executeChatRequest(contents, hasAudioAttachment);
+        fullResponse = backendResult.streamedText;
+        actions = backendResult.streamedActions;
+      } catch {
+        throw new Error('APK_NO_API_KEY: Nta Gemini API Key irabikwa muri porogaramu. Nyamuneka jya muri Settings > INJIZA KEVIN API KEYS ushyiremo API Key yawe.');
+      }
+    }
+  } else {
+    try {
+      const result = await executeChatRequest(contents, hasAudioAttachment);
+      fullResponse = result.streamedText;
+      actions = result.streamedActions;
+    } catch (err: any) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const isHighDemand = errMsg.includes('503')
+        || errMsg.toLowerCase().includes('high demand')
+        || errMsg.toLowerCase().includes('unavailable');
+
+      // If audio inlineData hit high demand and we already have a transcribed prompt, seamlessly retry with text
+      if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
+        const textOnlyContents = [
+          ...contents.slice(0, -1),
+          { role: 'user', parts: [{ text: prompt }] },
+        ];
+        const fallbackResult = await executeChatRequest(textOnlyContents, false);
+        fullResponse = fallbackResult.streamedText;
+        actions = fallbackResult.streamedActions;
+      } else {
+        throw err;
+      }
     }
   }
 
