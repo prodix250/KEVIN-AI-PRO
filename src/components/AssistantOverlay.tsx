@@ -26,14 +26,112 @@ interface AssistantOverlayProps {
   onExpandToFullApp?: (prompt?: string, reply?: string, action?: DeviceAction | null) => void;
 }
 
-const blobToBase64 = (blob: Blob): Promise<string> =>
+type VoiceRecordingSession = {
+  mimeType: string;
+  stop: () => Promise<Blob>;
+  cancel: () => void;
+};
+
+const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    throw new Error('Audio recording is not supported on this device.');
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const supportedMimeType = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/aac',
+  ].find((type) => MediaRecorder.isTypeSupported(type)) || '';
+
+  let recorder: MediaRecorder;
+  try {
+    recorder = new MediaRecorder(stream, supportedMimeType ? { mimeType: supportedMimeType } : undefined);
+  } catch (err) {
+    stream.getTracks().forEach((track) => track.stop());
+    throw err instanceof Error ? err : new Error('This device cannot record audio.');
+  }
+
+  const chunks: Blob[] = [];
+  let cancelled = false;
+  let settled = false;
+  let stopRequested = false;
+  let resolveStop: (blob: Blob) => void = () => undefined;
+  let rejectStop: (error: Error) => void = () => undefined;
+  const stopped = new Promise<Blob>((resolve, reject) => {
+    resolveStop = resolve;
+    rejectStop = reject;
+  });
+  const recorderMimeType = (recorder.mimeType || supportedMimeType || 'audio/webm').split(';')[0];
+  const cleanup = () => stream.getTracks().forEach((track) => track.stop());
+
+  recorder.ondataavailable = (event) => {
+    if (event.data.size > 0) chunks.push(event.data);
+  };
+  recorder.onerror = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    rejectStop(new Error('Microphone recording failed.'));
+  };
+  recorder.onstop = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    resolveStop(
+      new Blob(cancelled ? [] : chunks, {
+        type: recorder.mimeType || supportedMimeType || 'audio/webm',
+      })
+    );
+  };
+  recorder.start(200);
+
+  return {
+    mimeType: recorderMimeType,
+    stop: () => {
+      if (recorder.state === 'inactive') {
+        return Promise.resolve(new Blob(chunks, { type: recorderMimeType }));
+      }
+      if (!stopRequested) {
+        stopRequested = true;
+        recorder.stop();
+      }
+      return stopped;
+    },
+    cancel: () => {
+      cancelled = true;
+      if (recorder.state === 'inactive') {
+        cleanup();
+      } else if (!stopRequested) {
+        stopRequested = true;
+        recorder.stop();
+      }
+    },
+  };
+};
+
+const blobToDataUrl = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () =>
       typeof reader.result === 'string'
         ? resolve(reader.result)
-        : reject(new Error('Could not read audio recording.'));
-    reader.onerror = () => reject(reader.error || new Error('Could not read audio recording.'));
+        : reject(new Error('Could not read file.'));
+    reader.onerror = () => reject(reader.error || new Error('Could not read file.'));
+    reader.readAsDataURL(blob);
+  });
+
+const blobToRawBase64 = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = typeof reader.result === 'string' ? reader.result.split(',')[1] : '';
+      result ? resolve(result) : reject(new Error('Unable to encode recorded audio.'));
+    };
+    reader.onerror = () => reject(reader.error || new Error('Unable to read recorded audio.'));
     reader.readAsDataURL(blob);
   });
 
@@ -46,6 +144,7 @@ export default function AssistantOverlay({
 }: AssistantOverlayProps) {
   const [promptText, setPromptText] = useState('');
   const [submittedPrompt, setSubmittedPrompt] = useState('');
+  const [submittedAudioUrl, setSubmittedAudioUrl] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [action, setAction] = useState<DeviceAction | null>(null);
   const [attachedImage, setAttachedImage] = useState<AttachmentItem | null>(null);
@@ -53,6 +152,7 @@ export default function AssistantOverlay({
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSec, setRecordingSec] = useState(0);
+  const [audioStatusNote, setAudioStatusNote] = useState<string | null>(null);
   const [quickPhone, setQuickPhone] = useState('');
   const [perms, setPerms] = useState<AgentPermissions>(() => getAgentPermissions());
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -61,16 +161,31 @@ export default function AssistantOverlay({
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const voiceRecordingRef = useRef<VoiceRecordingSession | null>(null);
+  const voiceStoppingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const statusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submittedAudioUrlRef = useRef<string | null>(null);
   const liveStreamRef = useRef<MediaStream | null>(null);
   const liveVideoRef = useRef<HTMLVideoElement | null>(null);
   const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const awaitingFirstLiveExplainRef = useRef(false);
   const liveFrameRef = useRef<string | null>(null);
   const isLiveScreenRef = useRef(false);
+
+  const showAudioStatus = (msg: string) => {
+    setAudioStatusNote(msg);
+    if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
+    statusTimeoutRef.current = setTimeout(() => setAudioStatusNote(null), 2600);
+  };
+
+  const replaceSubmittedAudioUrl = (nextUrl: string | null) => {
+    if (submittedAudioUrlRef.current && submittedAudioUrlRef.current !== nextUrl) {
+      URL.revokeObjectURL(submittedAudioUrlRef.current);
+    }
+    submittedAudioUrlRef.current = nextUrl;
+    setSubmittedAudioUrl(nextUrl);
+  };
 
   const stopLiveScreen = () => {
     awaitingFirstLiveExplainRef.current = false;
@@ -100,19 +215,40 @@ export default function AssistantOverlay({
     setIsLiveScreen(false);
   };
 
+  const resetVoiceRecordingState = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    voiceRecordingRef.current = null;
+    setIsRecording(false);
+    setRecordingSec(0);
+  };
+
+  const stopStreamCleanly = () => {
+    if (voiceRecordingRef.current) {
+      voiceRecordingRef.current.cancel();
+    }
+    voiceStoppingRef.current = false;
+    resetVoiceRecordingState();
+  };
+
   useEffect(() => {
     if (isOpen) {
       setPerms(getAgentPermissions());
       setTimeout(() => textareaRef.current?.focus(), 180);
     } else {
+      stopStreamCleanly();
       stopLiveScreen();
     }
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
+      if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
+      stopStreamCleanly();
       stopLiveScreen();
+      if (submittedAudioUrlRef.current) {
+        URL.revokeObjectURL(submittedAudioUrlRef.current);
+        submittedAudioUrlRef.current = null;
+      }
     };
   }, [isOpen]);
 
@@ -166,27 +302,6 @@ export default function AssistantOverlay({
       return;
     }
     onExpandToFullApp?.(submittedPrompt || promptText, replyText, action);
-  };
-
-  const stopStreamCleanly = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    try {
-      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-        recorderRef.current.stop();
-      }
-    } catch {
-      // ignore
-    }
-    recorderRef.current = null;
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    setIsRecording(false);
-    setRecordingSec(0);
   };
 
   const explainLiveScreenNow = async (frameOverride?: string) => {
@@ -287,7 +402,8 @@ export default function AssistantOverlay({
     audioBase64?: string,
     audioMimeType?: string,
     imageOverride?: AttachmentItem,
-    displayPromptOverride?: string
+    displayPromptOverride?: string,
+    audioUrlOverride?: string | null
   ) => {
     const text = (overrideText ?? promptText).trim();
     const screenAttachment = !attachedImage && !imageOverride && isLiveScreen && liveFrameRef.current
@@ -299,10 +415,11 @@ export default function AssistantOverlay({
     if (isLoading) return;
 
     setErrorMsg(null);
+    replaceSubmittedAudioUrl(audioUrlOverride || null);
     setSubmittedPrompt(
       displayPromptOverride
         || text
-        || (effectiveAttachment ? '📺 Screen yoherejwe' : '🎤 Voice command')
+        || (effectiveAttachment ? '📺 Screen yoherejwe' : '🎤 Voice Note')
     );
     setReplyText('');
     setAction(null);
@@ -331,65 +448,108 @@ export default function AssistantOverlay({
     }
   };
 
-  const toggleVoice = async () => {
-    if (isRecording) {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      const rec = recorderRef.current;
-      if (!rec) return;
-
-      const mimeType = rec.mimeType || 'audio/webm';
-      const blob = await new Promise<Blob>((resolve) => {
-        rec.onstop = () => {
-          resolve(new Blob(chunksRef.current, { type: mimeType }));
-        };
-        rec.stop();
-      });
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-      recorderRef.current = null;
-      setIsRecording(false);
+  // Chat-identical audio recording controls
+  const startVoiceRecording = async () => {
+    if (voiceRecordingRef.current) return;
+    try {
+      setErrorMsg(null);
+      const recording = await createVoiceRecordingSession();
+      voiceRecordingRef.current = recording;
+      setIsRecording(true);
       setRecordingSec(0);
+      timerRef.current = setInterval(() => {
+        setRecordingSec((prev) => prev + 1);
+      }, 1000);
+    } catch (error) {
+      resetVoiceRecordingState();
+      setErrorMsg(error instanceof Error ? error.message : 'Emerera Kevin AI gukoresha Microphone.');
+    }
+  };
 
-      if (blob.size < 200) return;
+  const cancelRecording = () => {
+    if (voiceRecordingRef.current) {
+      voiceRecordingRef.current.cancel();
+      resetVoiceRecordingState();
+      showAudioStatus('Amajwi yasibwe.');
+    }
+  };
+
+  const transcribeRecordingToInput = async () => {
+    if (voiceStoppingRef.current) return;
+    const recording = voiceRecordingRef.current;
+    if (!recording) return;
+
+    voiceStoppingRef.current = true;
+    setIsTranscribing(true);
+    try {
+      const audioBlob = await recording.stop();
+      resetVoiceRecordingState();
+      if (!audioBlob.size) {
+        throw new Error('No audio was captured.');
+      }
+      const audioBase64 = await blobToRawBase64(audioBlob);
+      const transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
+      if (transcript) {
+        setPromptText((prev) => (prev ? `${prev.trim()} ${transcript}` : transcript));
+        showAudioStatus('🎙️ Amajwi yahinduwe inyandiko (STT)!');
+        setTimeout(() => textareaRef.current?.focus(), 60);
+      } else {
+        showAudioStatus('Ntacyo ijwi ryabashije kumvikana. Ongera ugerageze.');
+      }
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'STT transcription failed.');
+    } finally {
+      setIsTranscribing(false);
+      voiceStoppingRef.current = false;
+      resetVoiceRecordingState();
+    }
+  };
+
+  const finishVoiceRecording = async () => {
+    if (voiceStoppingRef.current) return;
+    const recording = voiceRecordingRef.current;
+    if (!recording) return;
+
+    voiceStoppingRef.current = true;
+    try {
+      const audioBlob = await recording.stop();
+      resetVoiceRecordingState();
+      if (!audioBlob.size) {
+        throw new Error('No audio was captured.');
+      }
+
+      const audioBase64 = await blobToRawBase64(audioBlob);
+      if (audioBase64.length <= 100) {
+        throw new Error('The recorded audio is empty or invalid. Please record your message again.');
+      }
+
+      let transcript = '';
       setIsTranscribing(true);
       try {
-        const audioBase64 = await blobToBase64(blob);
-        const transcript = await transcribeAudioWithSTT(audioBase64, mimeType);
-        await handleSend(transcript || '🎤 Voice command', audioBase64, mimeType);
-      } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : 'Mic STT yanze.');
+        transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
+      } catch (sttErr) {
+        console.warn('STT fallback to multimodal audio:', sttErr);
       } finally {
         setIsTranscribing(false);
       }
-      return;
-    }
 
-    try {
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-        setErrorMsg('Mic ntishobora gukoreshwa kuri iki gikoresho.');
-        return;
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      chunksRef.current = [];
-      const candidateMime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg']
-        .find((m) => MediaRecorder.isTypeSupported(m)) || '';
-      const rec = candidateMime ? new MediaRecorder(stream, { mimeType: candidateMime }) : new MediaRecorder(stream);
-      rec.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      recorderRef.current = rec;
-      rec.start(200);
-      setIsRecording(true);
-      setRecordingSec(0);
-      timerRef.current = setInterval(() => setRecordingSec((s) => s + 1), 1000);
-    } catch {
-      setErrorMsg('Emerera Kevin AI gukoresha Microphone.');
+      const prompt = transcript || 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action.';
+      const audioUrl = URL.createObjectURL(audioBlob);
+      await handleSend(prompt, audioBase64, recording.mimeType, undefined, transcript || '🎤 Voice Note', audioUrl);
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Unable to process the voice message.');
+    } finally {
+      setIsTranscribing(false);
+      voiceStoppingRef.current = false;
+      resetVoiceRecordingState();
+    }
+  };
+
+  const toggleVoice = async () => {
+    if (isRecording) {
+      await finishVoiceRecording();
+    } else {
+      await startVoiceRecording();
     }
   };
 
@@ -398,7 +558,7 @@ export default function AssistantOverlay({
     e.target.value = '';
     if (!file) return;
     try {
-      const dataUrl = await blobToBase64(file);
+      const dataUrl = await blobToDataUrl(file);
       if (!cleanBase64(dataUrl)) return;
       setAttachedImage({
         base64: dataUrl,
@@ -413,9 +573,11 @@ export default function AssistantOverlay({
 
   const resetConversation = () => {
     setSubmittedPrompt('');
+    replaceSubmittedAudioUrl(null);
     setReplyText('');
     setAction(null);
     setErrorMsg(null);
+    setAudioStatusNote(null);
     setPromptText('');
     setTimeout(() => textareaRef.current?.focus(), 100);
   };
@@ -485,7 +647,7 @@ export default function AssistantOverlay({
                     {isRecording
                       ? 'Ndumva... Vuga icyo ushaka'
                       : isTranscribing
-                        ? 'Ndabishyira mu nyandiko...'
+                        ? 'Guhindura amajwi mu nyandiko (STT)...'
                         : isLoading
                           ? 'Ndabikora ako kanya...'
                           : 'Nakufasha iki uyu munsi?'}
@@ -527,7 +689,14 @@ export default function AssistantOverlay({
             {(submittedPrompt || replyText || action || errorMsg) && (
               <div className="max-h-[38vh] overflow-y-auto px-4 py-2 space-y-2.5 border-t border-gray-100 dark:border-[#202c33]">
                 {submittedPrompt && (
-                  <div className="flex justify-end">
+                  <div className="flex flex-col items-end gap-1">
+                    {submittedAudioUrl && (
+                      <audio
+                        controls
+                        src={submittedAudioUrl}
+                        className="h-8 max-w-[230px]"
+                      />
+                    )}
                     <span className="inline-block max-w-[88%] rounded-2xl rounded-tr-xs bg-[#075E54] text-white px-3 py-1.5 text-xs font-medium shadow-xs">
                       {submittedPrompt}
                     </span>
@@ -633,8 +802,17 @@ export default function AssistantOverlay({
                 )}
 
                 {errorMsg && (
-                  <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-xl px-3 py-2">
-                    {errorMsg}
+                  <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-xl px-3 py-2 space-y-2">
+                    <p>{errorMsg}</p>
+                    {errorMsg.includes('APK_NO_API_KEY') && isDedicatedOverlay && (
+                      <button
+                        type="button"
+                        onClick={handleExpand}
+                        className="inline-flex items-center px-3 py-1 rounded-full bg-[#075E54] text-white text-[11px] font-bold cursor-pointer"
+                      >
+                        Fungura Settings (INJIZA KEVIN API KEYS)
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -681,7 +859,7 @@ export default function AssistantOverlay({
               </div>
             )}
 
-            {/* Main Prompt Box (Spacious & Clean like the Reference Photo, Kevin AI Styled) */}
+            {/* Main Prompt Box (Spacious & Clean like Photo 1, Kevin AI Styled) */}
             <div className="px-4 pt-2 pb-2">
               {attachedImage && (
                 <div className="mb-2 flex items-center gap-2 bg-gray-50 dark:bg-[#202c33] p-1.5 rounded-xl border border-gray-200 dark:border-[#2f3b43]">
@@ -703,28 +881,85 @@ export default function AssistantOverlay({
                 </div>
               )}
 
-              <textarea
-                ref={textareaRef}
-                rows={submittedPrompt || replyText ? 1 : 2}
-                value={promptText}
-                onChange={(e) => setPromptText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void handleSend();
+              {audioStatusNote && (
+                <div className="mb-1.5 px-3 py-1 rounded-full bg-gray-100 dark:bg-[#202c33] text-[11px] font-medium text-[#075E54] dark:text-[#00FF88] inline-block">
+                  {audioStatusNote}
+                </div>
+              )}
+
+              {isRecording ? (
+                <div className="my-2 px-3 py-2.5 rounded-full bg-gray-100 dark:bg-[#2a3942] text-sm flex items-center justify-between gap-2 shadow-inner">
+                  <div className="flex items-center gap-2 text-red-500 min-w-0">
+                    <button
+                      type="button"
+                      onClick={cancelRecording}
+                      className="p-1 rounded-full hover:bg-red-50 dark:hover:bg-red-950/40 text-gray-500 hover:text-red-500 cursor-pointer shrink-0"
+                      title="Siba amajwi"
+                    >
+                      <X size={16} />
+                    </button>
+                    <div className="flex items-end gap-0.5 h-4 shrink-0">
+                      <motion.div
+                        animate={{ height: ['20%', '100%', '20%'] }}
+                        transition={{ repeat: Infinity, duration: 0.8 }}
+                        className="w-1 bg-red-500 rounded-t-sm"
+                      />
+                      <motion.div
+                        animate={{ height: ['40%', '100%', '40%'] }}
+                        transition={{ repeat: Infinity, duration: 1, delay: 0.2 }}
+                        className="w-1 bg-red-500 rounded-t-sm"
+                      />
+                      <motion.div
+                        animate={{ height: ['60%', '100%', '60%'] }}
+                        transition={{ repeat: Infinity, duration: 0.9, delay: 0.4 }}
+                        className="w-1 bg-red-500 rounded-t-sm"
+                      />
+                    </div>
+                    <span className="font-medium animate-pulse truncate text-xs sm:text-sm">
+                      Recording...
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => void transcribeRecordingToInput()}
+                      className="px-2.5 py-1 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] text-white text-[11px] font-bold cursor-pointer"
+                      title="Hindura amajwi mu nyandiko (STT)"
+                    >
+                      STT → Text
+                    </button>
+                    <span className="text-gray-500 dark:text-[#8696a0] font-mono text-xs">
+                      {Math.floor(recordingSec / 60).toString().padStart(2, '0')}:
+                      {(recordingSec % 60).toString().padStart(2, '0')}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <textarea
+                  ref={textareaRef}
+                  rows={submittedPrompt || replyText ? 1 : 2}
+                  value={promptText}
+                  onChange={(e) => setPromptText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void handleSend();
+                    }
+                  }}
+                  placeholder={
+                    isTranscribing
+                      ? 'Guhindura amajwi mu nyandiko (STT)...'
+                      : submittedPrompt || replyText
+                        ? 'Baza ikindi cyangwa utegeke...'
+                        : 'Andika, vuga, cyangwa usangize ifoto...'
                   }
-                }}
-                placeholder={
-                  submittedPrompt || replyText
-                    ? 'Baza ikindi cyangwa utegeke...'
-                    : 'Andika, vuga, cyangwa usangize ifoto...'
-                }
-                className={`w-full bg-transparent resize-none focus:outline-none text-gray-900 dark:text-[#e9edef] placeholder:text-gray-400 dark:placeholder:text-[#8696a0] ${
-                  submittedPrompt || replyText
-                    ? 'text-sm py-1.5'
-                    : 'text-lg sm:text-xl font-medium py-2 leading-snug'
-                }`}
-              />
+                  className={`w-full bg-transparent resize-none focus:outline-none text-gray-900 dark:text-[#e9edef] placeholder:text-gray-400 dark:placeholder:text-[#8696a0] ${
+                    submittedPrompt || replyText
+                      ? 'text-sm py-1.5'
+                      : 'text-lg sm:text-xl font-medium py-2 leading-snug'
+                  }`}
+                />
+              )}
 
               {/* Quick Agent Suggestion & Live Screen Controls */}
               <div className="flex flex-wrap gap-1.5 pb-1">
@@ -785,7 +1020,7 @@ export default function AssistantOverlay({
                 <button
                   type="button"
                   onClick={() => void toggleVoice()}
-                  title={isRecording ? 'Hagarika amajwi' : 'Vuga (Voice + STT)'}
+                  title={isRecording ? 'Ohereza amajwi' : 'Fata amajwi (Voice + STT)'}
                   className={`w-12 h-12 rounded-full flex items-center justify-center text-white shadow-lg transition-all cursor-pointer relative ${
                     isRecording
                       ? 'bg-red-500 animate-pulse ring-4 ring-red-500/30 scale-105'
@@ -793,12 +1028,6 @@ export default function AssistantOverlay({
                   }`}
                 >
                   <Mic size={21} />
-                  {isRecording && (
-                    <span className="absolute -top-6 px-2 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-mono font-bold shadow">
-                      {Math.floor(recordingSec / 60).toString().padStart(2, '0')}:
-                      {(recordingSec % 60).toString().padStart(2, '0')}
-                    </span>
-                  )}
                 </button>
 
                 <button
@@ -820,7 +1049,7 @@ export default function AssistantOverlay({
               </div>
 
               <div className="w-9 flex justify-end shrink-0">
-                {(promptText.trim() || attachedImage) && (
+                {(promptText.trim() || attachedImage) && !isRecording && (
                   <button
                     type="button"
                     onClick={() => void handleSend()}
