@@ -700,10 +700,16 @@ export function setGeminiKeysPool(pool: GeminiKeysPool): void {
     backup2: pool.backup2.trim(),
   };
   localStorage.setItem(KEYS_POOL_STORAGE_KEY, JSON.stringify(cleaned));
-  if (cleaned.primary) {
-    setUserCustomApiKey(cleaned.primary);
-  } else if (!cleaned.backup1 && !cleaned.backup2) {
-    setUserCustomApiKey('');
+  setUserCustomApiKey(cleaned.primary);
+  if (cleaned.backup1) {
+    localStorage.setItem('kevin_ai_key_backup1', cleaned.backup1);
+  } else {
+    localStorage.removeItem('kevin_ai_key_backup1');
+  }
+  if (cleaned.backup2) {
+    localStorage.setItem('kevin_ai_key_backup2', cleaned.backup2);
+  } else {
+    localStorage.removeItem('kevin_ai_key_backup2');
   }
 }
 
@@ -945,6 +951,9 @@ export async function sendMessageToGemini(
     let data = "";
     let mimeType = "image/jpeg";
     if (typeof Blob !== 'undefined' && attachment instanceof Blob) {
+      if (audioBase64 !== undefined && attachment.type.toLowerCase().startsWith('audio/')) {
+        continue;
+      }
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Unable to encode attachment.'));
@@ -980,72 +989,101 @@ export async function sendMessageToGemini(
   const perms = getAgentPermissions();
   const savedContacts = getSavedContacts();
 
-  const res = await fetch(getEndpoint('/api/chat'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents,
-      userName,
-      hasAudioAttachment,
-      selectedModel: selectedModel || 'Kevin 1.3 Pro',
-      customApiKey,
-      customApiKeys,
-      agentPermissions: perms,
-      savedContacts,
-    }),
-  });
+  const executeChatRequest = async (requestContents: any[], includeAudioFlag: boolean) => {
+    const res = await fetch(getEndpoint('/api/chat'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: requestContents,
+        userName,
+        hasAudioAttachment: includeAudioFlag,
+        selectedModel: selectedModel || 'Kevin 1.3 Pro',
+        customApiKey,
+        customApiKeys,
+        agentPermissions: perms,
+        savedContacts,
+      }),
+    });
 
-  if (!res.ok) {
-    let errMessage = 'Server error during chat';
-    try {
-      const errJson = await res.json();
-      if (errJson.error) errMessage = errJson.error;
-    } catch {
-      const textErr = await res.text();
-      if (textErr) errMessage = textErr;
-    }
-    throw new Error(errMessage);
-  }
-
-  if (!res.body) {
-    throw new Error('No response body from server chat stream.');
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let fullResponse = '';
-  const actions: DeviceAction[] = [];
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
+    if (!res.ok) {
+      let errMessage = 'Server error during chat';
       try {
-        const data = JSON.parse(line);
+        const errJson = await res.json();
+        if (errJson.error) errMessage = errJson.error;
+      } catch {
+        const textErr = await res.text();
+        if (textErr) errMessage = textErr;
+      }
+      throw new Error(errMessage);
+    }
+
+    if (!res.body) {
+      throw new Error('No response body from server chat stream.');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let streamedText = '';
+    const streamedActions: DeviceAction[] = [];
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let data: any;
+        try {
+          data = JSON.parse(line);
+        } catch {
+          // ignore incomplete JSON lines
+          continue;
+        }
         if (data.type === 'text' && data.text) {
-          fullResponse += data.text;
+          streamedText += data.text;
           onChunk?.(data.text);
         } else if (data.type === 'action' && data.name) {
           const action = executeDeviceAction(data.name, data.args || {});
           if (action) {
-            actions.push(action);
+            streamedActions.push(action);
           }
         } else if (data.type === 'error') {
           throw new Error(data.error || 'Stream error');
         }
-      } catch (e: any) {
-        if (e instanceof Error && e.message !== 'Stream error') {
-          // ignore incomplete JSON lines
-        } else {
-          throw e;
-        }
       }
+    }
+
+    return { streamedText, streamedActions };
+  };
+
+  let fullResponse = '';
+  let actions: DeviceAction[] = [];
+
+  try {
+    const result = await executeChatRequest(contents, hasAudioAttachment);
+    fullResponse = result.streamedText;
+    actions = result.streamedActions;
+  } catch (err: any) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const isHighDemand = errMsg.includes('503')
+      || errMsg.toLowerCase().includes('high demand')
+      || errMsg.toLowerCase().includes('unavailable');
+
+    // If audio inlineData hit high demand and we already have a transcribed prompt, seamlessly retry with text
+    if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
+      const textOnlyContents = [
+        ...contents.slice(0, -1),
+        { role: 'user', parts: [{ text: prompt }] },
+      ];
+      const fallbackResult = await executeChatRequest(textOnlyContents, false);
+      fullResponse = fallbackResult.streamedText;
+      actions = fallbackResult.streamedActions;
+    } else {
+      throw err;
     }
   }
 

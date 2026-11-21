@@ -220,6 +220,43 @@ function getServerApiKeys(customKeys?: string | string[]): string[] {
   ));
 }
 
+function isInvalidApiKeyError(err: any, combinedText: string): boolean {
+  const lower = combinedText.toLowerCase();
+  const status = err?.status;
+  return Boolean(
+    status === 401
+    || status === 403
+    || combinedText.includes('401')
+    || combinedText.includes('403')
+    || combinedText.includes('API_KEY_INVALID')
+    || combinedText.includes('PERMISSION_DENIED')
+    || combinedText.includes('UNAUTHENTICATED')
+    || lower.includes('api key not valid')
+    || lower.includes('api_key_invalid')
+    || lower.includes('invalid api key')
+    || lower.includes('api key expired')
+    || lower.includes('key expired')
+    || lower.includes('revoked')
+    || lower.includes('reported as leaked')
+  );
+}
+
+function shouldRotateApiKey(err: any, combinedText: string): boolean {
+  const lower = combinedText.toLowerCase();
+  const status = err?.status;
+  if (
+    status === 429
+    || combinedText.includes('429')
+    || combinedText.includes('RESOURCE_EXHAUSTED')
+    || lower.includes('quota')
+    || lower.includes('rate limit')
+    || lower.includes('too many requests')
+  ) {
+    return true;
+  }
+  return isInvalidApiKeyError(err, combinedText);
+}
+
 async function resolveYouTubeVideo(query: string): Promise<{
   videoId: string;
   title: string;
@@ -353,19 +390,23 @@ async function startServer() {
         return;
       }
 
-      const sttModels = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen', 'gemini-3.5-transcribe'];
+      const sttModels = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
       let lastErr: unknown = null;
+      const invalidKeys = new Set<string>();
 
-      for (const key of availableKeys) {
-        const ai = new GoogleGenAI({
-          apiKey: key,
-          httpOptions: {
-            apiVersion: 'v1beta',
-            headers: { 'User-Agent': 'aistudio-build' },
-          },
-        });
+      for (const model of sttModels) {
+        for (let keyIdx = 0; keyIdx < availableKeys.length; keyIdx++) {
+          const key = availableKeys[keyIdx];
+          if (invalidKeys.has(key)) continue;
 
-        for (const model of sttModels) {
+          const ai = new GoogleGenAI({
+            apiKey: key,
+            httpOptions: {
+              apiVersion: 'v1beta',
+              headers: { 'User-Agent': 'aistudio-build' },
+            },
+          });
+
           try {
             const sttPromise = ai.models.generateContent({
               model,
@@ -388,13 +429,16 @@ Listen very carefully to this audio recording:
                   },
                 ],
               },
+              ...(model === 'gemini-4-hydrogen'
+                ? { config: { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } }
+                : {}),
             });
             sttPromise.catch(() => {});
 
             const response = await Promise.race([
               sttPromise,
               new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('503 STT timed out')), 10000)
+                setTimeout(() => reject(new Error('503 STT timed out')), 9000)
               ),
             ]);
 
@@ -405,9 +449,14 @@ Listen very carefully to this audio recording:
           } catch (err: any) {
             lastErr = err;
             const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`STT model ${model} failed:`, msg);
-            if (err?.status === 429 || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
-              break; // rotate key
+            const readable = extractReadableError(err);
+            const combined = `${msg} ${readable}`;
+            console.warn(`STT model ${model} (key #${keyIdx + 1}) failed:`, readable);
+            if (isInvalidApiKeyError(err, combined)) {
+              invalidKeys.add(key);
+            }
+            if (err?.status === 404 || combined.includes('NOT_FOUND')) {
+              break;
             }
           }
         }
@@ -453,32 +502,70 @@ Listen very carefully to this audio recording:
       ].filter(Boolean).join('\n');
 
       let lastErr: unknown = null;
-      for (const key of availableKeys) {
-        const ai = new GoogleGenAI({
-          apiKey: key,
-          httpOptions: {
-            apiVersion: 'v1beta',
-            headers: { 'User-Agent': 'aistudio-build' },
-          },
-        });
-        for (const model of ['gemini-3.1-flash-lite', 'gemini-4-hydrogen']) {
-          try {
-            const response = await ai.models.generateContent({
-              model,
-              contents: incomingMessage.trim(),
-              config: {
-                systemInstruction,
-              },
-            });
-            const reply = (response.text || '').trim();
-            if (reply) {
-              res.json({ reply, model });
-              return;
+      const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      const invalidKeys = new Set<string>();
+      const waModels = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+
+      for (const model of waModels) {
+        const waHasFallback = model !== waModels[waModels.length - 1];
+        for (let keyIdx = 0; keyIdx < availableKeys.length; keyIdx++) {
+          const key = availableKeys[keyIdx];
+          if (invalidKeys.has(key)) continue;
+
+          const ai = new GoogleGenAI({
+            apiKey: key,
+            httpOptions: {
+              apiVersion: 'v1beta',
+              headers: { 'User-Agent': 'aistudio-build' },
+            },
+          });
+          const waAttempts = waHasFallback ? 1 : 2;
+          for (let attempt = 0; attempt < waAttempts; attempt++) {
+            try {
+              const waPromise = ai.models.generateContent({
+                model,
+                contents: incomingMessage.trim(),
+                config: {
+                  systemInstruction,
+                  ...(model === 'gemini-4-hydrogen'
+                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                    : {}),
+                },
+              });
+              waPromise.catch(() => {});
+
+              const response = await Promise.race([
+                waPromise,
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error('503 WhatsApp reply timed out during high demand')), 6000)
+                ),
+              ]);
+              const reply = (response.text || '').trim();
+              if (reply) {
+                res.json({ reply, model });
+                return;
+              }
+              break;
+            } catch (err: any) {
+              lastErr = err;
+              const msg = err instanceof Error ? err.message : String(err);
+              const readable = extractReadableError(err);
+              const combined = `${msg} ${readable}`;
+              if (isInvalidApiKeyError(err, combined)) {
+                console.warn(`[WhatsApp Key Rotation] Key #${keyIdx + 1} invalid (${readable}), rotating to next key...`);
+                invalidKeys.add(key);
+                break;
+              }
+              if (shouldRotateApiKey(err, combined)) {
+                console.warn(`[WhatsApp Key Rotation] Key #${keyIdx + 1} quota hit on ${model}, rotating...`);
+                break;
+              }
+              if (!waHasFallback && attempt === 0 && (err?.status === 503 || combined.includes('503') || combined.toLowerCase().includes('high demand'))) {
+                await sleep(400);
+                continue;
+              }
+              break;
             }
-          } catch (err: any) {
-            lastErr = err;
-            const msg = err instanceof Error ? err.message : String(err);
-            if (err?.status === 429 || msg.includes('429')) break;
           }
         }
       }
@@ -581,28 +668,76 @@ Listen very carefully to this audio recording:
 
       let lastErr: unknown = null;
       let streamStarted = false;
-      const modelsToTry = selectedModel === 'Kevin 1.3 Lite'
-        ? ['gemini-3.1-flash-lite', 'gemini-4-hydrogen']
+      const modelsToTry = selectedModel === 'Prodix pro'
+        ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']
         : ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
 
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      const firstModelTimeoutMs = hasAudioAttachment ? 9500 : 5500;
 
-      for (const key of availableKeys) {
-        const ai = new GoogleGenAI({
-          apiKey: key,
-          httpOptions: {
-            apiVersion: 'v1beta',
-            headers: {
-              'User-Agent': 'aistudio-build',
+      const ensureStreamHeaders = () => {
+        if (!streamStarted && !res.headersSent) {
+          res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          streamStarted = true;
+        }
+      };
+
+      const writePayloadChunk = async (functionCalls: any[], textChunk?: string) => {
+        for (const functionCall of functionCalls) {
+          const args = { ...(functionCall.args || {}) };
+          if (functionCall.name === 'open_youtube' && typeof args.query === 'string' && args.query.trim()) {
+            const resolved = await resolveYouTubeVideo(args.query);
+            if (resolved) {
+              args.videoId = resolved.videoId;
+              args.videoTitle = resolved.title;
+              args.channel = resolved.channel;
+            }
+          }
+          ensureStreamHeaders();
+          res.write(JSON.stringify({
+            type: 'action',
+            name: functionCall.name,
+            args,
+          }) + '\n');
+        }
+        if (textChunk) {
+          ensureStreamHeaders();
+          res.write(JSON.stringify({
+            type: 'text',
+            text: textChunk,
+          }) + '\n');
+        }
+      };
+
+      const invalidKeys = new Set<string>();
+
+      for (const modelName of modelsToTry) {
+        const hasFallbackModel = modelName !== modelsToTry[modelsToTry.length - 1];
+        const modelThinkingConfig = modelName === 'gemini-4-hydrogen'
+          ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+          : {};
+
+        for (let keyIdx = 0; keyIdx < availableKeys.length; keyIdx++) {
+          const key = availableKeys[keyIdx];
+          if (invalidKeys.has(key)) continue;
+
+          const ai = new GoogleGenAI({
+            apiKey: key,
+            httpOptions: {
+              apiVersion: 'v1beta',
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
             },
-          },
-        });
+          });
 
-        let shouldRotateKey = false;
+          const isLastAttemptOverall = !hasFallbackModel && keyIdx === availableKeys.length - 1;
+          const maxAttempts = isLastAttemptOverall ? 2 : 1;
+          let abortModelLoop = false;
 
-        for (const modelName of modelsToTry) {
-          const hasFallbackModel = modelName !== modelsToTry[modelsToTry.length - 1];
-          for (let attempt = 0; attempt < 2; attempt++) {
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
             try {
               const streamPromise = ai.models.generateContentStream({
                 model: modelName,
@@ -610,65 +745,43 @@ Listen very carefully to this audio recording:
                 config: {
                   systemInstruction,
                   tools: [{ functionDeclarations: deviceActionDeclarations }],
+                  ...modelThinkingConfig,
                 },
               });
               streamPromise.catch(() => {});
 
-              const responseStream = hasFallbackModel
+              const responseStream = !isLastAttemptOverall
                 ? await Promise.race([
                     streamPromise,
                     new Promise<never>((_, reject) =>
-                      setTimeout(() => reject(new Error('503 Model response timed out during high demand')), 8000)
+                      setTimeout(() => reject(new Error('503 Model response timed out during high demand')), firstModelTimeoutMs)
                     ),
                   ])
                 : await streamPromise;
 
-              res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-              res.setHeader('Cache-Control', 'no-cache');
-              res.setHeader('Connection', 'keep-alive');
-              streamStarted = true;
-
               for await (const chunk of responseStream) {
                 const functionCalls = (chunk as any).functionCalls || [];
-                for (const functionCall of functionCalls) {
-                  const args = { ...(functionCall.args || {}) };
-                  if (functionCall.name === 'open_youtube' && typeof args.query === 'string' && args.query.trim()) {
-                    const resolved = await resolveYouTubeVideo(args.query);
-                    if (resolved) {
-                      args.videoId = resolved.videoId;
-                      args.videoTitle = resolved.title;
-                      args.channel = resolved.channel;
-                    }
-                  }
-                  res.write(JSON.stringify({
-                    type: 'action',
-                    name: functionCall.name,
-                    args,
-                  }) + '\n');
-                }
-                if (chunk.text) {
-                  res.write(JSON.stringify({
-                    type: 'text',
-                    text: chunk.text,
-                  }) + '\n');
-                }
+                await writePayloadChunk(functionCalls, chunk.text);
               }
 
+              ensureStreamHeaders();
               res.write(JSON.stringify({ type: 'done' }) + '\n');
               res.end();
               return;
             } catch (error: any) {
               lastErr = error;
-              const errorText = error instanceof Error ? error.message : String(error);
-              const isQuotaError = error?.status === 429
-                || errorText.includes('429')
-                || errorText.includes('RESOURCE_EXHAUSTED')
-                || errorText.toLowerCase().includes('quota')
-                || errorText.toLowerCase().includes('rate limit');
+              const errorText = extractReadableError(error);
+              const rawText = error instanceof Error ? error.message : String(error);
+              const combinedText = `${rawText} ${errorText}`;
+              const isRotateKeyError = shouldRotateApiKey(error, combinedText);
               const isUnavailableError = error?.status === 503
-                || errorText.includes('503')
-                || errorText.includes('UNAVAILABLE')
-                || errorText.toLowerCase().includes('high demand');
+                || combinedText.includes('503')
+                || combinedText.includes('UNAVAILABLE')
+                || combinedText.toLowerCase().includes('high demand')
+                || combinedText.toLowerCase().includes('overloaded');
+              const isModelNotFound = error?.status === 404
+                || combinedText.includes('404')
+                || combinedText.includes('NOT_FOUND');
 
               if (streamStarted) {
                 res.write(JSON.stringify({ type: 'error', error: errorText }) + '\n');
@@ -676,20 +789,61 @@ Listen very carefully to this audio recording:
                 return;
               }
 
-              if (isQuotaError) {
-                console.warn('Gemini key failed due to rate limit (429). Rotating to next available key...');
-                shouldRotateKey = true;
+              if (isInvalidApiKeyError(error, combinedText)) {
+                console.warn(`[Chat Key Rotation] Key #${keyIdx + 1} invalid (${errorText}). Skipping key and rotating...`);
+                invalidKeys.add(key);
+                break;
+              }
+
+              if (isRotateKeyError) {
+                console.warn(`[Chat Key Rotation] Key #${keyIdx + 1} hit quota/rate-limit on ${modelName}. Rotating...`);
+                break;
+              }
+
+              if (isModelNotFound) {
+                console.warn(`Model ${modelName} not found, falling back to next model.`);
+                abortModelLoop = true;
                 break;
               }
 
               if (isUnavailableError) {
-                console.warn(`Model ${modelName} unavailable/timed out (attempt ${attempt + 1}).`);
-                if (hasFallbackModel) {
+                console.warn(`Model ${modelName} unavailable/high demand (attempt ${attempt + 1}, key #${keyIdx + 1}).`);
+                if (!isLastAttemptOverall) {
                   break;
                 }
                 if (attempt === 0) {
                   await sleep(400);
                   continue;
+                }
+                // Try one bounded non-streaming generateContent call as final rescue
+                try {
+                  const fallbackPromise = ai.models.generateContent({
+                    model: modelName,
+                    contents: contents as any,
+                    config: {
+                      systemInstruction,
+                      tools: [{ functionDeclarations: deviceActionDeclarations }],
+                      ...modelThinkingConfig,
+                    },
+                  });
+                  fallbackPromise.catch(() => {});
+                  const fallbackRes = await Promise.race([
+                    fallbackPromise,
+                    new Promise<never>((_, reject) =>
+                      setTimeout(() => reject(new Error('503 Fallback timed out')), 8000)
+                    ),
+                  ]);
+                  const fallbackCalls = (fallbackRes as any).functionCalls || [];
+                  const fallbackText = fallbackRes.text || '';
+                  if (fallbackCalls.length > 0 || fallbackText) {
+                    await writePayloadChunk(fallbackCalls, fallbackText);
+                    ensureStreamHeaders();
+                    res.write(JSON.stringify({ type: 'done' }) + '\n');
+                    res.end();
+                    return;
+                  }
+                } catch (fallbackErr: any) {
+                  lastErr = fallbackErr;
                 }
                 break;
               }
@@ -697,7 +851,7 @@ Listen very carefully to this audio recording:
               throw error;
             }
           }
-          if (shouldRotateKey) break;
+          if (abortModelLoop) break;
         }
       }
 

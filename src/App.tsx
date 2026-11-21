@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload } from 'lucide-react';
+import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
@@ -461,6 +461,7 @@ export default function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<number | null>(null);
   const [showAbout, setShowAbout] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -483,7 +484,7 @@ export default function App() {
     setGeminiKeysPool(keysPool);
     const hasAny = Boolean(keysPool.primary.trim() || keysPool.backup1.trim() || keysPool.backup2.trim());
     setSavedApiKeyStatus(hasAny ? "API Keys pool yabitswe neza!" : "Keys zose zakuwemo.");
-    showToastMessage(hasAny ? "✅ Multi-Key Rotation Pool yabitswe neza!" : "ℹ️ Keys zakuwemo");
+    showToastMessage(hasAny ? "✅ INJIZA KEVIN API KEYS yabitswe neza!" : "ℹ️ Keys zakuwemo");
     setTimeout(() => {
       setShowApiKeyModal(false);
       setSavedApiKeyStatus(null);
@@ -1392,10 +1393,13 @@ export default function App() {
       setIsTyping(false);
       const errMsg = error?.message || String(error);
       const isQuotaError = errMsg.includes('resource_exhausted') || errMsg.includes('Quota exceeded') || errMsg.includes('429') || errMsg.includes('quota');
+      const isHighDemandError = errMsg.includes('503') || errMsg.toLowerCase().includes('high demand') || errMsg.toLowerCase().includes('unavailable');
       const isAuthError = errMsg.includes('API key not valid') || errMsg.includes('401') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('Secrets') || errMsg.includes('Nta Gemini API key');
       let displayMsg = "Mbabarira, habaye ikibazo cyo kohereza ubutumwa. Ongera ugerageze.";
       if (isQuotaError) {
         displayMsg = "⚠️ Umubare w'ubutumwa wemerewe muri aka kanya wuzuye (Rate Limit / Quota). Nyamuneka ongera ugerageze nyuma y'iminota mike.";
+      } else if (isHighDemandError) {
+        displayMsg = "⚠️ Seriveri irimo gukoreshwa n'abantu benshi cyane muri aka kanya. Nyamuneka ongera wohereze nyuma y'amasegonda make.";
       } else if (isAuthError) {
         displayMsg = "⚠️ Nta API Key yabonetse cyangwa ntabwo yashyizweho neza. Nyamuneka yishyireho muri Settings > Secrets panel.";
       } else if (errMsg && errMsg.length < 160 && !errMsg.includes("{") && !errMsg.includes("[object")) {
@@ -1549,20 +1553,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2.5 relative">
-            <button
-              onClick={() => { setNativeAgentStatus(getNativeAgentStatus()); setShowAgentModal(true); }}
-              className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors relative ${
-                agentPermissions.autoSend || agentPermissions.whatsappAutoReply
-                  ? 'bg-[#00FF88]/20 text-[#00FF88]'
-                  : 'bg-white/10 hover:bg-white/25 text-white'
-              }`}
-              title="Full Agent & WhatsApp Auto-Reply"
-            >
-              <Bot className="w-4.5 h-4.5" />
-              {(agentPermissions.autoSend || agentPermissions.whatsappAutoReply) && (
-                <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-[#00FF88]" />
-              )}
-            </button>
             <button onClick={startNewChat} className="w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 text-white transition-colors" title="New Chat">
               <Plus className="w-5 h-5 text-[#00FF88]" />
             </button>
@@ -1876,74 +1866,15 @@ export default function App() {
                 </div>
 
                 <div 
-                  onClick={() => { setTempUserName(userName); setShowProfileModal(true); setDrawerOpen(false); }}
+                  onClick={() => { setShowSettingsModal(true); setDrawerOpen(false); }}
                   className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
                 >
                   <div className="flex items-center gap-2">
-                    <User size={15} className="text-emerald-500" />
-                    <span>Izina ryawe (Profile)</span>
+                    <Settings size={15} className="text-[#00a884]" />
+                    <span>Settings</span>
                   </div>
-                  <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 truncate max-w-[100px]">
-                    {userName || 'Ntago ryashyizweho'}
-                  </span>
+                  <ChevronRight size={14} className="text-gray-400 dark:text-gray-500" />
                 </div>
-
-                <div 
-                  onClick={() => { setTempCustomInstructions(customInstructions); setShowCustomInstructionsModal(true); setDrawerOpen(false); }}
-                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Settings size={15} className="text-purple-500" />
-                    <span>Custom Instructions</span>
-                  </div>
-                  <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 truncate max-w-[100px]">
-                    {customInstructions ? 'Birakora (Active)' : 'Ntayo'}
-                  </span>
-                </div>
-
-                <div 
-                  onClick={() => { setKeysPool(getGeminiKeysPool()); setShowApiKeyModal(true); setDrawerOpen(false); }}
-                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Key size={15} className="text-amber-500" />
-                    <span>Multi-Key Pool</span>
-                  </div>
-                  <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500">
-                    {getGeminiApiKeysArray().length > 0 ? `${getGeminiApiKeysArray().length} Keys Active` : 'Default'}
-                  </span>
-                </div>
-
-                <div 
-                  onClick={() => { setNativeAgentStatus(getNativeAgentStatus()); setShowAgentModal(true); setDrawerOpen(false); }}
-                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Bot size={15} className="text-[#00a884]" />
-                    <span>Full Agent & WhatsApp</span>
-                  </div>
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                    agentPermissions.autoSend || agentPermissions.whatsappAutoReply
-                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                      : 'text-gray-400 dark:text-gray-500'
-                  }`}>
-                    {agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? 'ACTIVE' : 'SETUP'}
-                  </span>
-                </div>
-
-                <div
-                  onClick={() => { setShowAssistantOverlay(true); setDrawerOpen(false); }}
-                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Sparkles size={15} className="text-[#00FF88]" />
-                    <span>Assistant Box (Home)</span>
-                  </div>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#00a884]/15 text-[#075E54] dark:text-[#00FF88]">
-                    PREVIEW
-                  </span>
-                </div>
-
 
                 <div 
                   onClick={() => { setShowAbout(true); setDrawerOpen(false); }}
@@ -1954,17 +1885,6 @@ export default function App() {
                     <span>Ibyerekeye Kevin AI</span>
                   </div>
                   <span className="text-[10px] font-bold text-amber-600">Amakuru</span>
-                </div>
-
-                <div 
-                  onClick={toggleTheme}
-                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-                    <span>Theme</span>
-                  </div>
-                  <span className="text-[11px] font-semibold capitalize">{theme}</span>
                 </div>
               </div>
             </motion.div>
@@ -2786,6 +2706,122 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Settings Hub Modal */}
+      <AnimatePresence>
+        {showSettingsModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setShowSettingsModal(false)}>
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-2xl p-5 sm:p-6 w-full max-w-md"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#00a884]/15 text-[#00a884] flex items-center justify-center">
+                    <Settings size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white">Settings</h3>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Igenamiterere rya Kevin AI</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsModal(false)}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                <div
+                  onClick={() => { setTempUserName(userName); setShowSettingsModal(false); setShowProfileModal(true); }}
+                  className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <User size={16} className="text-emerald-500" />
+                    <span>Izina ryawe (Profile)</span>
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500 truncate max-w-[120px]">
+                    {userName || 'Ntago ryashyizweho'}
+                  </span>
+                </div>
+
+                <div
+                  onClick={() => { setTempCustomInstructions(customInstructions); setShowSettingsModal(false); setShowCustomInstructionsModal(true); }}
+                  className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Settings size={16} className="text-purple-500" />
+                    <span>Custom Instructions</span>
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500 truncate max-w-[120px]">
+                    {customInstructions ? 'Birakora (Active)' : 'Ntayo'}
+                  </span>
+                </div>
+
+                <div
+                  onClick={() => { setKeysPool(getGeminiKeysPool()); setShowSettingsModal(false); setShowApiKeyModal(true); }}
+                  className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Key size={16} className="text-amber-500" />
+                    <span>INJIZA KEVIN API KEYS</span>
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500">
+                    {getGeminiApiKeysArray().length > 0 ? `${getGeminiApiKeysArray().length} Keys Active` : 'Default'}
+                  </span>
+                </div>
+
+                <div
+                  onClick={() => { setNativeAgentStatus(getNativeAgentStatus()); setShowSettingsModal(false); setShowAgentModal(true); }}
+                  className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Bot size={16} className="text-[#00a884]" />
+                    <span>Kevin Permission</span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                    agentPermissions.autoSend || agentPermissions.whatsappAutoReply
+                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                      : 'text-gray-400 dark:text-gray-500'
+                  }`}>
+                    {agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? 'ACTIVE' : 'SETUP'}
+                  </span>
+                </div>
+
+                <div
+                  onClick={() => { setShowSettingsModal(false); setShowAssistantOverlay(true); }}
+                  className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Sparkles size={16} className="text-[#00FF88]" />
+                    <span>Assistant Box (Home)</span>
+                  </div>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#00a884]/15 text-[#075E54] dark:text-[#00FF88]">
+                    PREVIEW
+                  </span>
+                </div>
+
+                <div
+                  onClick={toggleTheme}
+                  className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    {theme === 'dark' ? <Sun size={16} className="text-amber-400" /> : <Moon size={16} className="text-indigo-500" />}
+                    <span>Theme</span>
+                  </div>
+                  <span className="text-[11px] font-semibold capitalize">{theme}</span>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Kevin AI Key Settings Modal */}
       <AnimatePresence>
         {showApiKeyModal && (
@@ -2803,8 +2839,8 @@ export default function App() {
                     <Key size={20} />
                   </div>
                   <div>
-                    <h3 className="font-bold text-base text-gray-900 dark:text-white">Multi-Key Rotation Pool</h3>
-                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Shyiramo API Keys 3 zo kwimuriraho mu buryo bwikora</p>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white">INJIZA KEVIN API KEYS</h3>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">aha niho ushyira API KEYS zawe niba uzifite.</p>
                   </div>
                 </div>
                 <button 
@@ -2816,19 +2852,9 @@ export default function App() {
               </div>
 
               <div className="space-y-3.5 max-h-[70vh] overflow-y-auto pr-1">
-                <div className="p-3 bg-emerald-50 dark:bg-[#11241f] border border-emerald-200 dark:border-emerald-900/50 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5">
-                  <ShieldCheck size={18} className="shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
-                  <div>
-                    <p className="font-semibold">Automatic Key Rotation (Failover)</p>
-                    <p className="mt-0.5 text-[11px] opacity-90 leading-relaxed">
-                      Igihe API Key ya 1 ihuye n'ikibazo cya Quota cyangwa Rate Limit (HTTP 429), porogaramu ihita yimukira kuri Key ya 2 cyangwa iya 3 ako kanya nta nkomyi.
-                    </p>
-                  </div>
-                </div>
-
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                    1. Primary API Key (Ibanza):
+                    1. Primary API Key:
                   </label>
                   <input 
                     type="password"
@@ -2841,7 +2867,7 @@ export default function App() {
 
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                    2. Backup Key 1 (Iyo ya kabiri):
+                    2. Backup Key 1:
                   </label>
                   <input 
                     type="password"
@@ -2854,7 +2880,7 @@ export default function App() {
 
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                    3. Backup Key 2 (Iyo ya gatatu):
+                    3. Backup Key 2:
                   </label>
                   <input 
                     type="password"
@@ -2926,8 +2952,7 @@ export default function App() {
                     <Bot size={22} />
                   </div>
                   <div>
-                    <h3 className="font-bold text-base text-gray-900 dark:text-white">Kevin Full Agent & Permissions</h3>
-                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">YouTube Auto-Play, Auto-Send SMS/WhatsApp & Auto-Reply</p>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white">Kevin Permissions</h3>
                   </div>
                 </div>
                 <button
