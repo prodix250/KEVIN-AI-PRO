@@ -667,12 +667,14 @@ export interface GeminiKeysPool {
   primary: string;
   backup1: string;
   backup2: string;
+  backup3: string;
+  backup4: string;
 }
 
 export const KEYS_POOL_STORAGE_KEY = 'kevin_ai_keys_pool';
 
 export function getGeminiKeysPool(): GeminiKeysPool {
-  if (typeof window === 'undefined') return { primary: '', backup1: '', backup2: '' };
+  if (typeof window === 'undefined') return { primary: '', backup1: '', backup2: '', backup3: '', backup4: '' };
   try {
     const raw = localStorage.getItem(KEYS_POOL_STORAGE_KEY);
     if (raw) {
@@ -681,6 +683,8 @@ export function getGeminiKeysPool(): GeminiKeysPool {
         primary: String(parsed.primary || ''),
         backup1: String(parsed.backup1 || ''),
         backup2: String(parsed.backup2 || ''),
+        backup3: String(parsed.backup3 || ''),
+        backup4: String(parsed.backup4 || ''),
       };
     }
   } catch {}
@@ -689,27 +693,34 @@ export function getGeminiKeysPool(): GeminiKeysPool {
     primary: legacy,
     backup1: localStorage.getItem('kevin_ai_key_backup1') || '',
     backup2: localStorage.getItem('kevin_ai_key_backup2') || '',
+    backup3: localStorage.getItem('kevin_ai_key_backup3') || '',
+    backup4: localStorage.getItem('kevin_ai_key_backup4') || '',
   };
 }
 
 export function setGeminiKeysPool(pool: GeminiKeysPool): void {
   if (typeof window === 'undefined') return;
-  const cleaned = {
-    primary: pool.primary.trim(),
-    backup1: pool.backup1.trim(),
-    backup2: pool.backup2.trim(),
+  const cleaned: GeminiKeysPool = {
+    primary: (pool.primary || '').trim(),
+    backup1: (pool.backup1 || '').trim(),
+    backup2: (pool.backup2 || '').trim(),
+    backup3: (pool.backup3 || '').trim(),
+    backup4: (pool.backup4 || '').trim(),
   };
   localStorage.setItem(KEYS_POOL_STORAGE_KEY, JSON.stringify(cleaned));
   setUserCustomApiKey(cleaned.primary);
-  if (cleaned.backup1) {
-    localStorage.setItem('kevin_ai_key_backup1', cleaned.backup1);
-  } else {
-    localStorage.removeItem('kevin_ai_key_backup1');
-  }
-  if (cleaned.backup2) {
-    localStorage.setItem('kevin_ai_key_backup2', cleaned.backup2);
-  } else {
-    localStorage.removeItem('kevin_ai_key_backup2');
+  const backupEntries: Array<[string, string]> = [
+    ['kevin_ai_key_backup1', cleaned.backup1],
+    ['kevin_ai_key_backup2', cleaned.backup2],
+    ['kevin_ai_key_backup3', cleaned.backup3],
+    ['kevin_ai_key_backup4', cleaned.backup4],
+  ];
+  for (const [storageKey, val] of backupEntries) {
+    if (val) {
+      localStorage.setItem(storageKey, val);
+    } else {
+      localStorage.removeItem(storageKey);
+    }
   }
 }
 
@@ -719,6 +730,8 @@ export function getGeminiApiKeysArray(): string[] {
     pool.primary,
     pool.backup1,
     pool.backup2,
+    pool.backup3,
+    pool.backup4,
     getUserCustomApiKey(),
   ];
   return Array.from(new Set(

@@ -482,7 +482,7 @@ export default function App() {
 
   const handleSaveKeysPool = () => {
     setGeminiKeysPool(keysPool);
-    const hasAny = Boolean(keysPool.primary.trim() || keysPool.backup1.trim() || keysPool.backup2.trim());
+    const hasAny = Boolean(keysPool.primary.trim() || keysPool.backup1.trim() || keysPool.backup2.trim() || keysPool.backup3.trim() || keysPool.backup4.trim());
     setSavedApiKeyStatus(hasAny ? "API Keys pool yabitswe neza!" : "Keys zose zakuwemo.");
     showToastMessage(hasAny ? "✅ INJIZA KEVIN API KEYS yabitswe neza!" : "ℹ️ Keys zakuwemo");
     setTimeout(() => {
@@ -1397,7 +1397,7 @@ export default function App() {
       const isAuthError = errMsg.includes('API key not valid') || errMsg.includes('401') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('Secrets') || errMsg.includes('Nta Gemini API key');
       let displayMsg = "Mbabarira, habaye ikibazo cyo kohereza ubutumwa. Ongera ugerageze.";
       if (isQuotaError) {
-        displayMsg = "⚠️ Umubare w'ubutumwa wemerewe muri aka kanya wuzuye (Rate Limit / Quota). Nyamuneka ongera ugerageze nyuma y'iminota mike.";
+        displayMsg = "⚠️ Umubare w'ubutumwa wemerewe muri aka kanya wuzuye (Rate Limit / Quota). Nyamuneka ongera ugerageze nyuma y'iminota mike cyangwa ushyiremo kevin api keys muri setting niba uzifite";
       } else if (isHighDemandError) {
         displayMsg = "⚠️ Seriveri irimo gukoreshwa n'abantu benshi cyane muri aka kanya. Nyamuneka ongera wohereze nyuma y'amasegonda make.";
       } else if (isAuthError) {
@@ -2887,6 +2887,32 @@ export default function App() {
                     value={keysPool.backup2}
                     onChange={(e) => setKeysPool(prev => ({ ...prev, backup2: e.target.value }))}
                     placeholder="Shyiramo Backup Key 2 hano..."
+                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    4. Backup Key 3:
+                  </label>
+                  <input 
+                    type="password"
+                    value={keysPool.backup3}
+                    onChange={(e) => setKeysPool(prev => ({ ...prev, backup3: e.target.value }))}
+                    placeholder="Shyiramo Backup Key 3 hano..."
+                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    5. Backup Key 4:
+                  </label>
+                  <input 
+                    type="password"
+                    value={keysPool.backup4}
+                    onChange={(e) => setKeysPool(prev => ({ ...prev, backup4: e.target.value }))}
+                    placeholder="Shyiramo Backup Key 4 hano..."
                     className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
                   />
                 </div>
