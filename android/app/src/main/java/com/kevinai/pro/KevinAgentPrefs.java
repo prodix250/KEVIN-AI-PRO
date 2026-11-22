@@ -15,6 +15,7 @@ public final class KevinAgentPrefs {
     private static final String KEY_USER_NAME = "user_name";
     private static final String KEY_BACKEND_BASE_URL = "backend_base_url";
     private static final String KEY_AUTO_LIVE_SCREEN_ON_HOME = "auto_live_screen_on_home";
+    private static final String KEY_WAKE_WORD_ENABLED = "wake_word_enabled";
     private static final String KEY_PENDING_WA_UNTIL = "pending_wa_until";
     private static final String KEY_PENDING_YT_UNTIL = "pending_yt_until";
 
@@ -80,6 +81,14 @@ public final class KevinAgentPrefs {
 
     public static boolean isAutoLiveScreenOnHome(Context context) {
         return prefs(context).getBoolean(KEY_AUTO_LIVE_SCREEN_ON_HOME, true);
+    }
+
+    public static void setWakeWordEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_WAKE_WORD_ENABLED, enabled).apply();
+    }
+
+    public static boolean isWakeWordEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_WAKE_WORD_ENABLED, true);
     }
 
     public static void armPendingWhatsAppSend(Context context, long durationMs) {

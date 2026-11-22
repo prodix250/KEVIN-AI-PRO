@@ -23,11 +23,13 @@ export interface NativeAgentStatus {
   hasSmsPermission?: boolean;
   hasCallPermission?: boolean;
   hasContactsPermission?: boolean;
+  hasMicPermission?: boolean;
   hasAccessibility?: boolean;
   hasNotificationAccess?: boolean;
   isDefaultAssistant?: boolean;
   autoSendEnabled?: boolean;
   whatsappAutoReplyEnabled?: boolean;
+  wakeWordEnabled?: boolean;
 }
 
 export interface AgentOutboxItem {
@@ -52,7 +54,7 @@ export const AGENT_OUTBOX_STORAGE_KEY = 'kevin_ai_agent_outbox';
 export const CONTACTS_STORAGE_KEY = 'kevin_ai_contacts';
 
 const DEFAULT_AGENT_PERMISSIONS: AgentPermissions = {
-  autoSend: false,
+  autoSend: true,
   autoCall: true,
   autoPlayYouTube: true,
   whatsappAutoReply: false,

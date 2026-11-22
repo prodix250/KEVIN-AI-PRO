@@ -73,7 +73,23 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
       throw new Error('Audio recording is not supported on this device.');
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const agentBridge = (window as any).KevinAgentBridge;
+    if (agentBridge?.pauseWakeWord) {
+      try {
+        agentBridge.pauseWakeWord();
+        await new Promise((resolve) => setTimeout(resolve, 140));
+      } catch {
+        // ignore
+      }
+    }
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      try { agentBridge?.resumeWakeWord?.(); } catch { /* ignore */ }
+      throw err;
+    }
     const supportedMimeType = [
       'audio/webm;codecs=opus',
       'audio/webm',
@@ -84,6 +100,7 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
     ].find(type => MediaRecorder.isTypeSupported(type)) || '';
     if (!supportedMimeType) {
       stream.getTracks().forEach(track => track.stop());
+      try { agentBridge?.resumeWakeWord?.(); } catch { /* ignore */ }
       throw new Error('This device cannot record audio.');
     }
     const recorder = new MediaRecorder(stream, supportedMimeType ? { mimeType: supportedMimeType } : undefined);
@@ -98,7 +115,10 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
       rejectStop = reject;
     });
     const recorderMimeType = (recorder.mimeType || supportedMimeType || 'audio/webm').split(';')[0];
-    const cleanup = () => stream.getTracks().forEach(track => track.stop());
+    const cleanup = () => {
+      stream.getTracks().forEach(track => track.stop());
+      try { agentBridge?.resumeWakeWord?.(); } catch { /* ignore */ }
+    };
 
     recorder.ondataavailable = event => {
       if (event.data.size > 0) chunks.push(event.data);
@@ -3153,6 +3173,32 @@ export default function App() {
                     </button>
                   </div>
 
+                  {nativeAgentStatus.isAndroid && (
+                    <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">🎙️ &ldquo;Hi Kevin&rdquo; Voice Wake Word</p>
+                        <p className="text-xs text-gray-500 dark:text-[#8696a0]">
+                          Iyo uvuze &ldquo;Hi Kevin&rdquo;, Assistant AI ihita ifunguka ako kanya nta gukanda ahandi.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={Boolean(nativeAgentStatus.wakeWordEnabled)}
+                        onClick={() => {
+                          const next = !nativeAgentStatus.wakeWordEnabled;
+                          (window as any).KevinAgentBridge?.setWakeWordEnabled?.(next);
+                          setNativeAgentStatus(getNativeAgentStatus());
+                        }}
+                        className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${
+                          nativeAgentStatus.wakeWordEnabled ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-gray-700'
+                        }`}
+                      >
+                        <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${nativeAgentStatus.wakeWordEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]">
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">💬 WhatsApp Auto-Reply Agent</p>
@@ -3235,13 +3281,18 @@ export default function App() {
                         Home Assist: {nativeAgentStatus.isDefaultAssistant ? 'Active' : 'Shyiraho'}
                       </button>
                     </div>
-                    {(!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission) && (
+                    {!nativeAgentStatus.hasAccessibility && (
+                      <p className="text-[11px] text-amber-800 dark:text-amber-200">
+                        Kanda &ldquo;Accessibility: Fungura&rdquo; wemerere &ldquo;Kevin AI Full Agent&rdquo; kugira ngo ubutumwa bwa WhatsApp buhite bukanda Send ako kanya.
+                      </p>
+                    )}
+                    {(!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission || !nativeAgentStatus.hasMicPermission) && (
                       <button
                         type="button"
                         onClick={() => (window as any).KevinAgentBridge?.requestAgentPermissions?.()}
                         className="w-full py-2 rounded-lg bg-[#00a884] hover:bg-[#075E54] text-white text-xs font-bold cursor-pointer"
                       >
-                        Saba Permissions (SMS, Direct Call & Contacts)
+                        Saba Permissions (SMS, Direct Call, Contacts &amp; Mic)
                       </button>
                     )}
                   </div>

@@ -85,11 +85,13 @@ public class KevinAgentBridge {
             obj.put("hasSmsPermission", ContextCompat.checkSelfPermission(activity, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED);
             obj.put("hasCallPermission", ContextCompat.checkSelfPermission(activity, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED);
             obj.put("hasContactsPermission", ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED);
+            obj.put("hasMicPermission", ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED);
             obj.put("hasAccessibility", isAccessibilityEnabled());
             obj.put("hasNotificationAccess", isNotificationListenerEnabled());
             obj.put("isDefaultAssistant", isDefaultAssistant());
             obj.put("autoSendEnabled", KevinAgentPrefs.isAutoSendEnabled(activity));
             obj.put("whatsappAutoReplyEnabled", KevinAgentPrefs.isWhatsAppAutoReplyEnabled(activity));
+            obj.put("wakeWordEnabled", KevinAgentPrefs.isWakeWordEnabled(activity));
             return obj.toString();
         } catch (Exception e) {
             return "{\"isAndroid\":true}";
@@ -119,10 +121,39 @@ public class KevinAgentBridge {
                 new String[] {
                     Manifest.permission.SEND_SMS,
                     Manifest.permission.CALL_PHONE,
-                    Manifest.permission.READ_CONTACTS
+                    Manifest.permission.READ_CONTACTS,
+                    Manifest.permission.RECORD_AUDIO
                 },
                 AGENT_PERMISSIONS_REQUEST_CODE
         ));
+    }
+
+    @JavascriptInterface
+    public boolean setWakeWordEnabled(boolean enabled) {
+        KevinAgentPrefs.setWakeWordEnabled(activity, enabled);
+        if (enabled && ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            activity.runOnUiThread(() -> ActivityCompat.requestPermissions(
+                    activity,
+                    new String[] { Manifest.permission.RECORD_AUDIO },
+                    AGENT_PERMISSIONS_REQUEST_CODE
+            ));
+            dispatchAgentStatus();
+            return false;
+        }
+        KevinWakeWordService.syncWithPreferences(activity);
+        dispatchAgentStatus();
+        return enabled;
+    }
+
+    @JavascriptInterface
+    public void pauseWakeWord() {
+        KevinWakeWordService.pauseListening(activity);
+    }
+
+    @JavascriptInterface
+    public void resumeWakeWord() {
+        KevinWakeWordService.resumeListening(activity);
     }
 
     @JavascriptInterface
@@ -270,19 +301,50 @@ public class KevinAgentBridge {
         }
     }
 
+    private String findInstalledWhatsAppPackage() {
+        PackageManager pm = activity.getPackageManager();
+        String[] pkgs = new String[] { "com.whatsapp", "com.whatsapp.w4b" };
+        for (String pkg : pkgs) {
+            try {
+                pm.getPackageInfo(pkg, 0);
+                return pkg;
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
     @JavascriptInterface
     public boolean sendWhatsApp(String phoneNumber, String message) {
         if (TextUtils.isEmpty(phoneNumber)) return false;
         activity.runOnUiThread(() -> {
             try {
-                KevinAgentPrefs.armPendingWhatsAppSend(activity, 15_000L);
+                KevinAgentPrefs.armPendingWhatsAppSend(activity, 20_000L);
                 String cleanDigits = formatWhatsAppNumber(phoneNumber);
-                String uri = "https://api.whatsapp.com/send?phone="
+                String encodedText = Uri.encode(message != null ? message : "");
+                String waPkg = findInstalledWhatsAppPackage();
+
+                String directSchemeUri = "whatsapp://send?phone="
                         + Uri.encode(cleanDigits)
-                        + "&text=" + Uri.encode(message != null ? message : "");
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri));
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                activity.startActivity(intent);
+                        + "&text=" + encodedText;
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(directSchemeUri));
+                if (waPkg != null) {
+                    intent.setPackage(waPkg);
+                }
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                try {
+                    activity.startActivity(intent);
+                    return;
+                } catch (Exception ignored) {}
+
+                String webUri = "https://api.whatsapp.com/send?phone="
+                        + Uri.encode(cleanDigits)
+                        + "&text=" + encodedText;
+                Intent fallback = new Intent(Intent.ACTION_VIEW, Uri.parse(webUri));
+                if (waPkg != null) {
+                    fallback.setPackage(waPkg);
+                }
+                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                activity.startActivity(fallback);
             } catch (Exception ignored) {}
         });
         return true;

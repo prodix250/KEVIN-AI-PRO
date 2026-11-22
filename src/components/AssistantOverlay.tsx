@@ -39,7 +39,23 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
     throw new Error('Audio recording is not supported on this device.');
   }
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const agentBridge = (window as any).KevinAgentBridge;
+  if (agentBridge?.pauseWakeWord) {
+    try {
+      agentBridge.pauseWakeWord();
+      await new Promise((resolve) => setTimeout(resolve, 140));
+    } catch {
+      // ignore
+    }
+  }
+
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    try { agentBridge?.resumeWakeWord?.(); } catch { /* ignore */ }
+    throw err;
+  }
   const supportedMimeType = [
     'audio/webm;codecs=opus',
     'audio/webm',
@@ -54,6 +70,7 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
     recorder = new MediaRecorder(stream, supportedMimeType ? { mimeType: supportedMimeType } : undefined);
   } catch (err) {
     stream.getTracks().forEach((track) => track.stop());
+    try { agentBridge?.resumeWakeWord?.(); } catch { /* ignore */ }
     throw err instanceof Error ? err : new Error('This device cannot record audio.');
   }
 
@@ -68,7 +85,10 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
     rejectStop = reject;
   });
   const recorderMimeType = (recorder.mimeType || supportedMimeType || 'audio/webm').split(';')[0];
-  const cleanup = () => stream.getTracks().forEach((track) => track.stop());
+  const cleanup = () => {
+    stream.getTracks().forEach((track) => track.stop());
+    try { agentBridge?.resumeWakeWord?.(); } catch { /* ignore */ }
+  };
 
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data);
@@ -178,6 +198,14 @@ export default function AssistantOverlay({
   const isLiveScreenRef = useRef(false);
   const cleanFrameWaitersRef = useRef<Array<(frame: string) => void>>([]);
   const sendingLockRef = useRef(false);
+  const lastWakeIdRef = useRef<number>(0);
+  const wakeHandlersRef = useRef<{
+    handleSend: (overrideText?: string) => Promise<void>;
+    startVoiceRecording: () => Promise<void>;
+  }>({
+    handleSend: async () => undefined,
+    startVoiceRecording: async () => undefined,
+  });
 
   const showAudioStatus = (msg: string) => {
     setAudioStatusNote(msg);
@@ -288,9 +316,41 @@ export default function AssistantOverlay({
     };
     window.addEventListener('screenCaptured', onNativeFrame);
     window.addEventListener('screenSharingState', onNativeState);
+
+    const processWakeWordDetail = (detail?: { id?: number; command?: string }) => {
+      if (!detail) return;
+      const wakeId = typeof detail.id === 'number' ? detail.id : Date.now();
+      if (wakeId && lastWakeIdRef.current === wakeId) return;
+      lastWakeIdRef.current = wakeId;
+      try {
+        delete (window as any).__kevinPendingWakeWord;
+      } catch {
+        (window as any).__kevinPendingWakeWord = undefined;
+      }
+      const cmd = (detail.command || '').trim();
+      if (cmd) {
+        void wakeHandlersRef.current.handleSend(cmd);
+      } else {
+        showAudioStatus('🎙️ Ndakumva! Mbwira icyo ushaka...');
+        setTimeout(() => {
+          void wakeHandlersRef.current.startVoiceRecording();
+        }, 250);
+      }
+    };
+
+    const onWakeWord = (event: Event) => {
+      processWakeWordDetail((event as CustomEvent<{ id?: number; command?: string }>).detail);
+    };
+    window.addEventListener('kevinWakeWordTriggered', onWakeWord);
+    const pendingWake = (window as any).__kevinPendingWakeWord;
+    if (pendingWake) {
+      processWakeWordDetail(pendingWake);
+    }
+
     return () => {
       window.removeEventListener('screenCaptured', onNativeFrame);
       window.removeEventListener('screenSharingState', onNativeState);
+      window.removeEventListener('kevinWakeWordTriggered', onWakeWord);
     };
   }, []);
 
@@ -603,6 +663,11 @@ export default function AssistantOverlay({
     } else {
       await startVoiceRecording();
     }
+  };
+
+  wakeHandlersRef.current = {
+    handleSend: (overrideText?: string) => handleSend(overrideText),
+    startVoiceRecording,
   };
 
   const handleImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {

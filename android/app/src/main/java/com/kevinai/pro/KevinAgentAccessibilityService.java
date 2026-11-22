@@ -21,8 +21,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
 
         try {
             if (("com.whatsapp".equals(pkg) || "com.whatsapp.w4b".equals(pkg))
-                    && KevinAgentPrefs.isPendingWhatsAppSend(this)
-                    && KevinAgentPrefs.isAutoSendEnabled(this)) {
+                    && KevinAgentPrefs.isPendingWhatsAppSend(this)) {
                 if (tryClickWhatsAppSend(root, pkg)) {
                     KevinAgentPrefs.clearPendingWhatsAppSend(this);
                 }
@@ -42,8 +41,58 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         if (clickFirstClickable(byId)) {
             return true;
         }
+        List<AccessibilityNodeInfo> byActionBtn = root.findAccessibilityNodeInfosByViewId(
+                pkg + ":id/conversation_entry_action_button");
+        if (byActionBtn != null) {
+            for (AccessibilityNodeInfo node : byActionBtn) {
+                CharSequence desc = node.getContentDescription();
+                String lowerDesc = desc != null ? desc.toString().toLowerCase() : "";
+                if (lowerDesc.contains("send") || lowerDesc.contains("ohereza") || lowerDesc.contains("envoyer")) {
+                    if (node.isClickable() && node.isEnabled()
+                            && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        if (clickByContentDescRecursive(root)) {
+            return true;
+        }
         List<AccessibilityNodeInfo> byDesc = root.findAccessibilityNodeInfosByText("Send");
         return clickFirstClickable(byDesc);
+    }
+
+    private boolean clickByContentDescRecursive(AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        CharSequence desc = node.getContentDescription();
+        if (desc != null) {
+            String lower = desc.toString().trim().toLowerCase();
+            if ("send".equals(lower) || "ohereza".equals(lower) || "envoyer".equals(lower)) {
+                AccessibilityNodeInfo current = node;
+                int depth = 0;
+                while (current != null && depth < 4) {
+                    if (current.isClickable() && current.isEnabled()) {
+                        return current.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    }
+                    current = current.getParent();
+                    depth++;
+                }
+            }
+        }
+        int count = node.getChildCount();
+        for (int i = 0; i < count; i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                try {
+                    if (clickByContentDescRecursive(child)) {
+                        return true;
+                    }
+                } finally {
+                    child.recycle();
+                }
+            }
+        }
+        return false;
     }
 
     private boolean tryClickFirstYouTubeResult(AccessibilityNodeInfo root) {

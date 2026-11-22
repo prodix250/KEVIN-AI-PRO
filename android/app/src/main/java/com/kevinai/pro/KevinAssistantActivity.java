@@ -178,7 +178,31 @@ public class KevinAssistantActivity extends AppCompatActivity {
 
         if (getIntent() != null) {
             bridge.onNewIntent(getIntent());
+            handleWakeWordIntent(getIntent());
         }
+    }
+
+    private void handleWakeWordIntent(Intent intent) {
+        if (intent == null || bridge == null || bridge.getWebView() == null) return;
+        if (!intent.getBooleanExtra(KevinWakeWordService.EXTRA_WAKE_WORD_TRIGGERED, false)) return;
+        final String command = intent.getStringExtra(KevinWakeWordService.EXTRA_WAKE_COMMAND);
+        intent.removeExtra(KevinWakeWordService.EXTRA_WAKE_WORD_TRIGGERED);
+        intent.removeExtra(KevinWakeWordService.EXTRA_WAKE_COMMAND);
+        final long wakeId = System.currentTimeMillis();
+        final String quotedCmd = JSONObject.quote(command != null ? command : "");
+        final String js = "try{window.__kevinPendingWakeWord={id:" + wakeId + ",command:" + quotedCmd
+                + "};window.dispatchEvent(new CustomEvent('kevinWakeWordTriggered',{detail:{id:"
+                + wakeId + ",command:" + quotedCmd + "}}));}catch(e){}";
+        mainHandler.postDelayed(() -> {
+            if (bridge != null && bridge.getWebView() != null) {
+                bridge.getWebView().evaluateJavascript(js, null);
+            }
+        }, 400L);
+        mainHandler.postDelayed(() -> {
+            if (bridge != null && bridge.getWebView() != null) {
+                bridge.getWebView().evaluateJavascript(js, null);
+            }
+        }, 1150L);
     }
 
     private void requestMissingRuntimePermissions() {
@@ -426,6 +450,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        KevinWakeWordService.pauseListening(this);
         ScreenCaptureService.setSuppressOverlayFrames(true);
         if (bridge != null) {
             bridge.getApp().fireStatusChange(true);
@@ -446,6 +471,9 @@ public class KevinAssistantActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
+        if (isFinishing()) {
+            KevinWakeWordService.resumeListening(this);
+        }
         if (bridge != null) {
             activityDepth = Math.max(0, activityDepth - 1);
             if (activityDepth == 0) {
@@ -460,6 +488,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
         waitingForInitialCleanCapture = false;
         cancelCleanCaptureAndRestore();
         ScreenCaptureService.setSuppressOverlayFrames(false);
+        KevinWakeWordService.resumeListening(this);
         try {
             unregisterReceiver(screenCaptureReceiver);
         } catch (IllegalArgumentException ignored) {}
@@ -483,6 +512,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
         setIntent(intent);
         if (bridge != null && intent != null) {
             bridge.onNewIntent(intent);
+            handleWakeWordIntent(intent);
         }
     }
 

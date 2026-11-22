@@ -49,6 +49,10 @@
         <!-- WhatsApp -->
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="whatsapp" />
+        </intent>
 
         <!-- Audiomack -->
         <package android:name="com.audiomack" />
@@ -113,6 +117,13 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!-- "Hi Kevin" Voice Wake Word Service -->
+        <service
+            android:name=".KevinWakeWordService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- Kevin AI Full Agent Accessibility Service -->
         <service

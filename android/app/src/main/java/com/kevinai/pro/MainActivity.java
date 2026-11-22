@@ -84,6 +84,14 @@ public class MainActivity extends BridgeActivity {
                 filter,
                 4
         );
+
+        KevinWakeWordService.syncWithPreferences(this);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        KevinWakeWordService.syncWithPreferences(this);
     }
 
     @Override
@@ -128,7 +136,11 @@ public class MainActivity extends BridgeActivity {
             int[] grantResults
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == AUDIO_PERMISSION_REQUEST_CODE) {
+            KevinWakeWordService.syncWithPreferences(this);
+        }
         if (requestCode == KevinAgentBridge.AGENT_PERMISSIONS_REQUEST_CODE && agentBridge != null) {
+            KevinWakeWordService.syncWithPreferences(this);
             agentBridge.dispatchAgentStatus();
             return;
         }
