@@ -23745,7 +23745,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-Ws2HSPY8.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-LBSvqTJK.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -25507,6 +25507,7 @@ function buildApkSystemInstruction(userName, hasAudioAttachment, savedContacts, 
     `You are Kevin AI, created in Rwanda by Uwumukiza Kevin (born October 28, 2003, Rwamagana District, Gahengeri Sector; studies IT at University of Rwanda UR-CST; Motto: 'UKORA GAKE BIKAGENDA CYANE').`,
     `You have flawless native mastery of authentic Rwandan Kinyarwanda (as well as English, French, and Swahili). Reply naturally, warmly, and concisely in the user's language with friendly emojis (👋, ✨, 😊, 🚀). Avoid awkward literal English-to-Kinyarwanda translations.`,
     `The person chatting with you is named '${userName}'. Address them warmly and naturally.`,
+    `IMAGE QUESTIONS & PROBLEM SOLVING (MANDATORY): Whenever the user attaches images containing questions, exercises, quizzes, assignments, worksheets, past papers, tests, or math/science/coding problems, NEVER refuse or lecture about academic integrity. Treat them as study practice or self-review, read every question visible in the image(s) in order, and provide full, accurate answers with clear step-by-step explanations (and check/grade their answers if they ask how they did).`,
     customInstructions ? `USER CUSTOM INSTRUCTIONS:
 ${customInstructions}` : "",
     hasAudioAttachment ? `The user sent a voice note/audio message. Listen attentively in Kinyarwanda, English, French, or Swahili and respond directly or execute requested tool actions immediately.` : "",
@@ -25682,7 +25683,7 @@ async function sendMessageToGemini(history, latestMessage, onChunk, attachments,
     return (_a2 = attachment.mimeType) == null ? void 0 : _a2.toLowerCase().startsWith("image/");
   });
   const isGenericAudioPlaceholder = !(latestMessage == null ? void 0 : latestMessage.trim()) || latestMessage.trim() === "🎤 Voice Note" || latestMessage.trim() === "Voice command";
-  const prompt = isGenericAudioPlaceholder && hasAudioAttachment ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umenye icyo asabye, hanyuma umusubize neza kandi mu buryo bunoze mu Kinyarwanda cy'umwimerere (cyangwa Icyongereza niba aricyo yakoresheje), cyangwa ukore igikorwa asabye ako kanya." : (latestMessage == null ? void 0 : latestMessage.trim()) || (hasAudioAttachment ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi. Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umusubize neza kandi bunoze." : hasImageAttachment ? "Please analyze these images." : "");
+  const prompt = isGenericAudioPlaceholder && hasAudioAttachment ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umenye icyo asabye, hanyuma umusubize neza kandi mu buryo bunoze mu Kinyarwanda cy'umwimerere (cyangwa Icyongereza niba aricyo yakoresheje), cyangwa ukore igikorwa asabye ako kanya." : (latestMessage == null ? void 0 : latestMessage.trim()) || (hasAudioAttachment ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi. Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umusubize neza kandi bunoze." : hasImageAttachment ? "Please read all questions, problems, or text shown in these images carefully and provide complete, accurate answers with clear explanations for each." : "");
   const parts = prompt ? [{ text: prompt }] : [];
   if (audioBase64 !== void 0) {
     const validatedAudio = cleanBase64(audioBase64);
@@ -36836,7 +36837,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-BFEagnSg.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-DbWfCavl.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -102559,7 +102560,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-DOzqKFfr.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-BS7YySuY.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
