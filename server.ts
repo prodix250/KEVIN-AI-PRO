@@ -103,7 +103,7 @@ You are a full autonomous agent with direct permission-backed control over apps 
 - YouTube Playback: When the user asks to play a song or video on YouTube (e.g., 'fungura youtube uncurangire...', 'play ... on youtube'), ALWAYS call open_youtube(query) so the exact video starts playing immediately instead of just searching.
 - Direct Calling & Contact Resolution: When the user asks to call someone or a phone number (e.g., 'hamagara 0788...', 'hamagara Aline', 'call Mom', 'terefone Jean'), ALWAYS call make_call(phone_number, contact_name) immediately. If the user gives a phone number, pass phone_number. If the user gives a contact name without a number, check [SAVED CONTACTS] in your context first—if found there, pass both phone_number and contact_name; if NOT in [SAVED CONTACTS], pass contact_name only and leave phone_number empty so the device resolves it from Contacts. NEVER invent or guess a phone number!
 - Direct SMS Sending: When the user asks to send an SMS/text message (e.g., 'ohereza ubutumwa kuri 078...', 'send sms to Aline'), ALWAYS call send_sms(phone_number, message, contact_name) immediately (never tell the user to open their SMS app manually, and never invent a missing number).
-- Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately so the agent dispatches it automatically.
+- Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately. For phone numbers in Rwanda, ensure the country code +250 is used (e.g. +250788123456 or 250788123456 instead of 0788123456) so WhatsApp can deliver the message immediately without missing country code errors.
 - WhatsApp Auto-Reply Mode: When the user asks you to automatically reply to incoming WhatsApp messages on their behalf (e.g., 'ujye unsubiriza kuri whatsapp', 'enable whatsapp auto reply'), ALWAYS call configure_whatsapp_autoreply(enabled, reply_style).
 - Calls & Other Apps: Use make_call, open_audiomack, open_lark_player, open_camera, or open_app immediately whenever requested.`;
 
@@ -162,11 +162,11 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: "open_whatsapp",
-    description: "Immediately send a WhatsApp message to a phone number or contact using Kevin AI's auto-send agent.",
+    description: "Immediately send a WhatsApp message to a phone number or contact using Kevin AI's auto-send agent. For Rwanda numbers, include country code +250 (e.g. +250788123456 or 250788123456).",
     parametersJsonSchema: {
       type: "object",
       properties: {
-        phone_number: { type: "string", description: "Recipient phone number with country code or local digits." },
+        phone_number: { type: "string", description: "Recipient phone number with country code (e.g. +250788123456 or 250788123456 for Rwanda)." },
         message: { type: "string", description: "Message text to send on WhatsApp." },
         contact_name: { type: "string", description: "Contact display name to resolve from Contacts if needed." }
       },
@@ -739,16 +739,34 @@ Listen very carefully to this audio recording:
 
           for (let attempt = 0; attempt < maxAttempts; attempt++) {
             try {
-              const streamPromise = ai.models.generateContentStream({
-                model: modelName,
-                contents: contents as any,
-                config: {
-                  systemInstruction,
-                  tools: [{ functionDeclarations: deviceActionDeclarations }],
-                  ...modelThinkingConfig,
-                },
-              });
-              streamPromise.catch(() => {});
+              let streamPromise: Promise<any>;
+              try {
+                streamPromise = ai.models.generateContentStream({
+                  model: modelName,
+                  contents: contents as any,
+                  config: {
+                    systemInstruction,
+                    tools: [
+                      { googleSearch: {} },
+                      { functionDeclarations: deviceActionDeclarations },
+                    ],
+                    toolConfig: { includeServerSideToolInvocations: true },
+                    ...modelThinkingConfig,
+                  },
+                });
+                streamPromise.catch(() => {});
+              } catch {
+                streamPromise = ai.models.generateContentStream({
+                  model: modelName,
+                  contents: contents as any,
+                  config: {
+                    systemInstruction,
+                    tools: [{ functionDeclarations: deviceActionDeclarations }],
+                    ...modelThinkingConfig,
+                  },
+                });
+                streamPromise.catch(() => {});
+              }
 
               const responseStream = !isLastAttemptOverall
                 ? await Promise.race([
@@ -759,9 +777,45 @@ Listen very carefully to this audio recording:
                   ])
                 : await streamPromise;
 
+              const seenSourceUrls = new Set<string>();
+              const collectedSources: Array<{ title: string; url: string }> = [];
+              let accumulatedText = '';
+
               for await (const chunk of responseStream) {
                 const functionCalls = (chunk as any).functionCalls || [];
+                const candidate = (chunk as any).candidates?.[0];
+                const gm = candidate?.groundingMetadata || (chunk as any).groundingMetadata;
+                const gChunks = gm?.groundingChunks || [];
+                for (const gc of gChunks) {
+                  const uri = gc?.web?.uri || gc?.maps?.uri;
+                  const title = gc?.web?.title || gc?.maps?.title || uri;
+                  if (uri && !seenSourceUrls.has(uri)) {
+                    seenSourceUrls.add(uri);
+                    collectedSources.push({ title, url: uri });
+                  }
+                }
+                if (chunk.text) {
+                  accumulatedText += chunk.text;
+                }
                 await writePayloadChunk(functionCalls, chunk.text);
+              }
+
+              if (collectedSources.length === 0 && accumulatedText) {
+                const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+                let match;
+                while ((match = linkRegex.exec(accumulatedText)) !== null) {
+                  const title = match[1].trim();
+                  const url = match[2].trim();
+                  if (url && !seenSourceUrls.has(url) && !url.includes('image.pollinations.ai') && !url.includes('localhost')) {
+                    seenSourceUrls.add(url);
+                    collectedSources.push({ title, url });
+                  }
+                }
+              }
+
+              if (collectedSources.length > 0) {
+                ensureStreamHeaders();
+                res.write(JSON.stringify({ type: 'sources', sources: collectedSources }) + '\n');
               }
 
               ensureStreamHeaders();
@@ -837,6 +891,35 @@ Listen very carefully to this audio recording:
                   const fallbackText = fallbackRes.text || '';
                   if (fallbackCalls.length > 0 || fallbackText) {
                     await writePayloadChunk(fallbackCalls, fallbackText);
+                    const fallbackCandidate = (fallbackRes as any).candidates?.[0];
+                    const fallbackGm = fallbackCandidate?.groundingMetadata || (fallbackRes as any).groundingMetadata;
+                    const fallbackGChunks = fallbackGm?.groundingChunks || [];
+                    const fallbackSources: Array<{ title: string; url: string }> = [];
+                    const seenUrls = new Set<string>();
+                    for (const gc of fallbackGChunks) {
+                      const uri = gc?.web?.uri || gc?.maps?.uri;
+                      const title = gc?.web?.title || gc?.maps?.title || uri;
+                      if (uri && !seenUrls.has(uri)) {
+                        seenUrls.add(uri);
+                        fallbackSources.push({ title, url: uri });
+                      }
+                    }
+                    if (fallbackSources.length === 0 && fallbackText) {
+                      const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+                      let match;
+                      while ((match = linkRegex.exec(fallbackText)) !== null) {
+                        const title = match[1].trim();
+                        const url = match[2].trim();
+                        if (url && !seenUrls.has(url) && !url.includes('image.pollinations.ai') && !url.includes('localhost')) {
+                          seenUrls.add(url);
+                          fallbackSources.push({ title, url });
+                        }
+                      }
+                    }
+                    if (fallbackSources.length > 0) {
+                      ensureStreamHeaders();
+                      res.write(JSON.stringify({ type: 'sources', sources: fallbackSources }) + '\n');
+                    }
                     ensureStreamHeaders();
                     res.write(JSON.stringify({ type: 'done' }) + '\n');
                     res.end();

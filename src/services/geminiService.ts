@@ -140,6 +140,69 @@ export function sanitizePhoneNumber(raw: string): string {
   return String(raw || '').trim().replace(/[^\d+*#]/g, '');
 }
 
+export function formatWhatsAppPhoneNumber(raw: string): string {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+
+  if (trimmed.startsWith('+')) {
+    return trimmed.replace(/[^\d]/g, '');
+  }
+
+  let digits = trimmed.replace(/[^\d]/g, '');
+  if (!digits) return '';
+
+  if (digits.startsWith('00')) {
+    digits = digits.slice(2);
+  }
+
+  if (digits.startsWith('250')) {
+    return digits;
+  }
+
+  // Rwandan local format with leading 0 (e.g. 078..., 079..., 072..., 073...) - 10 digits
+  if (digits.startsWith('0') && digits.length === 10) {
+    return `250${digits.slice(1)}`;
+  }
+
+  // Rwandan local format without leading 0 (e.g. 78..., 79..., 72..., 73...) - 9 digits
+  if (digits.length === 9 && digits.startsWith('7')) {
+    return `250${digits}`;
+  }
+
+  // Any 10-digit number starting with 0 in Rwanda
+  if (digits.startsWith('0') && digits.length >= 9 && digits.length <= 11) {
+    return `250${digits.replace(/^0+/, '')}`;
+  }
+
+  // Standard 9-digit Rwandan number
+  if (digits.length === 9) {
+    return `250${digits}`;
+  }
+
+  return digits;
+}
+
+export interface GroundingSource {
+  title: string;
+  url: string;
+}
+
+export function extractMarkdownUrls(text: string): GroundingSource[] {
+  const sources: GroundingSource[] = [];
+  const seen = new Set<string>();
+  const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  let match;
+  while ((match = linkRegex.exec(text)) !== null) {
+    const title = match[1].trim();
+    const url = match[2].trim();
+    if (url && !seen.has(url) && !url.includes('image.pollinations.ai') && !url.includes('localhost')) {
+      seen.add(url);
+      sources.push({ title, url });
+    }
+  }
+  return sources;
+}
+
 export function isLikelyPhoneNumber(raw: string): boolean {
   const trimmed = String(raw || '').trim();
   if (!trimmed || /[a-zA-Z]/.test(trimmed)) return false;
@@ -455,11 +518,21 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
       action.status = 'needs_permission';
       return false;
     }
-    const phone = sanitizePhoneNumber(action.phoneNumber || action.args?.phone_number || '');
+    const rawPhone = action.phoneNumber || action.args?.phone_number || '';
+    const phone = formatWhatsAppPhoneNumber(rawPhone);
     const msg = action.messageText || action.args?.message || '';
     if (!isLikelyPhoneNumber(phone)) return false;
     if (bridge?.sendWhatsApp) {
       bridge.sendWhatsApp(phone, msg);
+    } else {
+      const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+      const link = document.createElement('a');
+      link.href = waUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
     action.status = 'executed';
     appendAgentOutbox({
@@ -585,7 +658,9 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
       }
     }
 
-    const finalPhone = resolvedPhone || rawPhoneNumber;
+    const finalPhone = name === "open_whatsapp"
+      ? formatWhatsAppPhoneNumber(resolvedPhone || rawPhoneNumber)
+      : (resolvedPhone || rawPhoneNumber);
     label = name === "make_call"
       ? `Hamagara ${resolvedName ? `${resolvedName} (${finalPhone})` : finalPhone}`
       : name === "send_sms"
@@ -599,6 +674,8 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
       phoneNumber: finalPhone,
       contactName: resolvedName,
       messageText,
+      url: name === "open_whatsapp" ? `https://wa.me/${finalPhone}?text=${encodeURIComponent(messageText || '')}` : undefined,
+      fallbackUrl: name === "open_whatsapp" ? `https://wa.me/${finalPhone}?text=${encodeURIComponent(messageText || '')}` : undefined,
       status: 'executed',
     };
 
@@ -939,14 +1016,15 @@ const APK_DEVICE_ACTION_DECLARATIONS = [
   },
   {
     name: 'open_whatsapp',
-    description: 'Open or send a WhatsApp message to a contact or phone number.',
+    description: 'Open or send a WhatsApp message to a contact or phone number. For Rwanda numbers, include country code +250 (e.g. +250788123456 or 250788123456).',
     parameters: {
       type: 'OBJECT',
       properties: {
-        phone_number: { type: 'STRING', description: 'Recipient phone number.' },
+        phone_number: { type: 'STRING', description: 'Recipient phone number (include Rwanda country code +250, e.g. +250788123456 or 250788123456).' },
         contact_name: { type: 'STRING', description: 'Recipient name if known.' },
         message: { type: 'STRING', description: 'WhatsApp message text.' },
       },
+      required: ['message'],
     },
   },
   {
@@ -1015,7 +1093,7 @@ function buildApkSystemInstruction(
       ? `The user sent a voice note/audio message. Listen attentively in Kinyarwanda, English, French, or Swahili and respond directly or execute requested tool actions immediately.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS: ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. Always execute requested device actions immediately using tool calls.]`,
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. Always execute requested device actions immediately using tool calls.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }
@@ -1178,7 +1256,8 @@ export async function sendMessageToGemini(
   selectedModel?: string,
   onAction?: (action: DeviceAction) => void,
   audioBase64?: string,
-  audioMimeType?: string
+  audioMimeType?: string,
+  onSources?: (sources: GroundingSource[]) => void
 ): Promise<string> {
   const contents: any[] = history.map((msg: any) => {
     const historyParts: any[] = [{ text: msg.text || "..." }];
@@ -1324,6 +1403,17 @@ export async function sendMessageToGemini(
           const responseParts: any[] = json?.candidates?.[0]?.content?.parts || [];
           let streamedText = '';
           const streamedActions: DeviceAction[] = [];
+          const directSources: GroundingSource[] = [];
+
+          // Extract grounding chunks if available
+          const gChunks = json?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+          for (const gc of gChunks) {
+            const uri = gc?.web?.uri || gc?.maps?.uri;
+            const title = gc?.web?.title || gc?.maps?.title || uri;
+            if (uri && !directSources.some(s => s.url === uri)) {
+              directSources.push({ title, url: uri });
+            }
+          }
 
           for (const part of responseParts) {
             if (part?.text) {
@@ -1345,8 +1435,17 @@ export async function sendMessageToGemini(
             }
           }
 
+          if (directSources.length === 0) {
+            const mdSources = extractMarkdownUrls(streamedText);
+            directSources.push(...mdSources);
+          }
+
+          if (directSources.length > 0) {
+            onSources?.(directSources);
+          }
+
           if (streamedText || streamedActions.length > 0) {
-            return { streamedText, streamedActions };
+            return { streamedText, streamedActions, streamedSources: directSources };
           }
         } catch (directErr: any) {
           lastDirectErr = directErr;
@@ -1396,6 +1495,7 @@ export async function sendMessageToGemini(
     let buffer = '';
     let streamedText = '';
     const streamedActions: DeviceAction[] = [];
+    const streamedSources: GroundingSource[] = [];
 
     while (true) {
       const { value, done } = await reader.read();
@@ -1421,13 +1521,28 @@ export async function sendMessageToGemini(
           if (action) {
             streamedActions.push(action);
           }
+        } else if (data.type === 'sources' && Array.isArray(data.sources)) {
+          for (const s of data.sources) {
+            if (s?.url && !streamedSources.some(existing => existing.url === s.url)) {
+              streamedSources.push({ title: s.title || s.url, url: s.url });
+            }
+          }
+          onSources?.(streamedSources);
         } else if (data.type === 'error') {
           throw new Error(data.error || 'Stream error');
         }
       }
     }
 
-    return { streamedText, streamedActions };
+    if (streamedSources.length === 0) {
+      const textSources = extractMarkdownUrls(streamedText);
+      if (textSources.length > 0) {
+        streamedSources.push(...textSources);
+        onSources?.(streamedSources);
+      }
+    }
+
+    return { streamedText, streamedActions, streamedSources };
   };
 
   let fullResponse = '';

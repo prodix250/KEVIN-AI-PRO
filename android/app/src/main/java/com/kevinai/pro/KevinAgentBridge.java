@@ -271,7 +271,7 @@ public class KevinAgentBridge {
         activity.runOnUiThread(() -> {
             try {
                 KevinAgentPrefs.armPendingWhatsAppSend(activity, 15_000L);
-                String cleanDigits = phoneNumber.replaceAll("[^\\d]", "");
+                String cleanDigits = formatWhatsAppNumber(phoneNumber);
                 String uri = "https://api.whatsapp.com/send?phone="
                         + Uri.encode(cleanDigits)
                         + "&text=" + Uri.encode(message != null ? message : "");
@@ -281,6 +281,34 @@ public class KevinAgentBridge {
             } catch (Exception ignored) {}
         });
         return true;
+    }
+
+    private String formatWhatsAppNumber(String raw) {
+        if (TextUtils.isEmpty(raw)) return "";
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("+")) {
+            return trimmed.replaceAll("[^\\d]", "");
+        }
+        String digits = trimmed.replaceAll("[^\\d]", "");
+        if (digits.startsWith("00")) {
+            digits = digits.substring(2);
+        }
+        if (digits.startsWith("250")) {
+            return digits;
+        }
+        if (digits.startsWith("0") && digits.length() == 10) {
+            return "250" + digits.substring(1);
+        }
+        if (digits.length() == 9 && digits.startsWith("7")) {
+            return "250" + digits;
+        }
+        if (digits.startsWith("0") && digits.length() >= 9) {
+            return "250" + digits.replaceFirst("^0+", "");
+        }
+        if (digits.length() == 9) {
+            return "250" + digits;
+        }
+        return digits;
     }
 
     @JavascriptInterface

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mic, Camera, Keyboard, Send, X, Maximize2, Sparkles, Phone, Play, MessageSquare, RotateCcw, MonitorUp, Square } from 'lucide-react';
+import { Mic, Camera, Keyboard, Send, X, Maximize2, Sparkles, Phone, Play, MessageSquare, RotateCcw, MonitorUp, Square, Globe, ChevronDown, ExternalLink } from 'lucide-react';
 import kevin2Url from '../assets/kevin_2.jpg';
 import MarkdownRenderer from './MarkdownRenderer';
 import {
@@ -16,6 +16,8 @@ import {
   saveContact,
   isLikelyPhoneNumber,
   sanitizePhoneNumber,
+  formatWhatsAppPhoneNumber,
+  GroundingSource,
 } from '../services/geminiService';
 
 interface AssistantOverlayProps {
@@ -158,6 +160,8 @@ export default function AssistantOverlay({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isLiveScreen, setIsLiveScreen] = useState(false);
   const [liveScreenFrame, setLiveScreenFrame] = useState<string | null>(null);
+  const [sources, setSources] = useState<GroundingSource[]>([]);
+  const [showSources, setShowSources] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -471,6 +475,8 @@ export default function AssistantOverlay({
       setIsLoading(true);
       setPromptText('');
       setAttachedImage(null);
+      setSources([]);
+      setShowSources(false);
 
       const response = await sendMessageToGemini(
         [],
@@ -480,7 +486,8 @@ export default function AssistantOverlay({
         selectedModel,
         (act) => setAction(act),
         audioBase64,
-        audioMimeType
+        audioMimeType,
+        (srcs) => setSources(srcs)
       );
       if (response) {
         setReplyText(response);
@@ -624,12 +631,14 @@ export default function AssistantOverlay({
     setErrorMsg(null);
     setAudioStatusNote(null);
     setPromptText('');
+    setSources([]);
+    setShowSources(false);
     setTimeout(() => textareaRef.current?.focus(), 100);
   };
 
   const executeQuickCallOrSend = (name: string, phone: string) => {
     if (!action) return;
-    const cleanPhone = sanitizePhoneNumber(phone);
+    const cleanPhone = action.name === 'open_whatsapp' ? formatWhatsAppPhoneNumber(phone) : sanitizePhoneNumber(phone);
     if (!isLikelyPhoneNumber(cleanPhone)) return;
     const updated: DeviceAction = {
       ...action,
@@ -641,8 +650,16 @@ export default function AssistantOverlay({
         : action.name === 'send_sms'
           ? `SMS → ${name ? `${name} (${cleanPhone})` : cleanPhone}`
           : `WhatsApp → ${name || cleanPhone}`,
-      url: action.name === 'make_call' ? `tel:${cleanPhone}` : action.url,
-      fallbackUrl: action.name === 'make_call' ? `tel:${cleanPhone}` : action.fallbackUrl,
+      url: action.name === 'make_call'
+        ? `tel:${cleanPhone}`
+        : action.name === 'send_sms'
+          ? `sms:${cleanPhone}?body=${encodeURIComponent(action.messageText || '')}`
+          : `https://wa.me/${formatWhatsAppPhoneNumber(cleanPhone)}?text=${encodeURIComponent(action.messageText || '')}`,
+      fallbackUrl: action.name === 'make_call'
+        ? `tel:${cleanPhone}`
+        : action.name === 'send_sms'
+          ? `sms:${cleanPhone}`
+          : `https://wa.me/${formatWhatsAppPhoneNumber(cleanPhone)}?text=${encodeURIComponent(action.messageText || '')}`,
       contactMatches: undefined,
       status: 'executed',
     };
@@ -843,6 +860,43 @@ export default function AssistantOverlay({
                 {replyText && (
                   <div className="text-sm leading-relaxed text-gray-800 dark:text-[#e9edef] bg-gray-50 dark:bg-[#202c33]/70 rounded-2xl px-3.5 py-2.5">
                     <MarkdownRenderer content={replyText} />
+                    {sources && sources.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-black/5 dark:border-white/5">
+                        <button
+                          type="button"
+                          onClick={() => setShowSources(!showSources)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-[#075E54] dark:text-[#00FF88] border border-[#00a884]/30 transition-all cursor-pointer shadow-2xs group"
+                          title="Kanda urebe amasoko y'amakuru (Sources)"
+                        >
+                          <Globe size={12} className="text-[#00a884] group-hover:rotate-12 transition-transform shrink-0" />
+                          <span>Sources ({sources.length})</span>
+                          <ChevronDown size={11} className={`transition-transform shrink-0 ${showSources ? 'rotate-180' : ''}`} />
+                        </button>
+                        {showSources && (
+                          <div className="mt-1.5 space-y-1 max-h-36 overflow-y-auto pr-1">
+                            {sources.map((s, idx) => {
+                              let domain = '';
+                              try { domain = new URL(s.url).hostname.replace(/^www\./, ''); } catch { domain = 'web'; }
+                              return (
+                                <a
+                                  key={idx}
+                                  href={s.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-xs text-gray-800 dark:text-[#e9edef]"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="font-medium truncate text-[11px]">{s.title || s.url}</p>
+                                    <p className="text-[9px] text-gray-400 font-mono truncate">{domain}</p>
+                                  </div>
+                                  <ExternalLink size={11} className="shrink-0 text-gray-400" />
+                                </a>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 

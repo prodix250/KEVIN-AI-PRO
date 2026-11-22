@@ -4,11 +4,11 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight } from 'lucide-react';
+import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
@@ -191,6 +191,63 @@ type Message = {
   };
   status?: MessageStatus;
   action?: DeviceAction;
+  sources?: GroundingSource[];
+};
+
+const SearchSourcesBadge = ({ sources }: { sources: GroundingSource[] }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  if (!sources || sources.length === 0) return null;
+
+  return (
+    <div className="my-2 pt-2 border-t border-black/5 dark:border-white/5">
+      <button
+        type="button"
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-[#075E54] dark:text-[#00FF88] border border-[#00a884]/30 transition-all cursor-pointer group shadow-2xs"
+        title="Kanda urebe amasoko y'amakuru (Search sources)"
+      >
+        <Globe size={13} className="text-[#00a884] group-hover:rotate-12 transition-transform shrink-0" />
+        <span>Sources ({sources.length})</span>
+        <ChevronDown
+          size={12}
+          className={`transition-transform duration-200 shrink-0 ${isExpanded ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {isExpanded && (
+        <div className="mt-2 space-y-1.5 max-h-52 overflow-y-auto pr-1">
+          {sources.map((s, idx) => {
+            let domain = '';
+            try {
+              domain = new URL(s.url).hostname.replace(/^www\./, '');
+            } catch {
+              domain = 'web';
+            }
+            return (
+              <a
+                key={idx}
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between gap-2 p-2 rounded-xl bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-xs text-gray-800 dark:text-[#e9edef] group cursor-pointer border border-black/5 dark:border-white/5"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-5 h-5 rounded-full bg-[#00a884]/15 text-[#00a884] text-[10px] font-bold flex items-center justify-center shrink-0">
+                    {idx + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-medium truncate group-hover:text-[#00a884] transition-colors">{s.title || s.url}</p>
+                    <p className="text-[10px] text-gray-400 dark:text-[#8696a0] font-mono truncate">{domain}</p>
+                  </div>
+                </div>
+                <ExternalLink size={12} className="shrink-0 text-gray-400 group-hover:text-[#00a884] transition-colors" />
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 };
 
 type ChatSession = {
@@ -606,7 +663,7 @@ export default function App() {
   };
 
   const executeResolvedContactAction = (messageId: string, action: DeviceAction, name: string, phone: string) => {
-    const cleanPhone = sanitizePhoneNumber(phone);
+    const cleanPhone = action.name === 'open_whatsapp' ? formatWhatsAppPhoneNumber(phone) : sanitizePhoneNumber(phone);
     if (!isLikelyPhoneNumber(cleanPhone)) {
       showToastMessage('Shyiramo nimero ya telefoni yemewe.');
       return;
@@ -625,7 +682,7 @@ export default function App() {
         ? `tel:${cleanPhone}`
         : action.name === 'send_sms'
           ? `sms:${cleanPhone}?body=${encodeURIComponent(action.messageText || '')}`
-          : `https://wa.me/${cleanPhone.replace(/[^\d]/g, '')}?text=${encodeURIComponent(action.messageText || '')}`,
+          : `https://wa.me/${formatWhatsAppPhoneNumber(cleanPhone)}?text=${encodeURIComponent(action.messageText || '')}`,
       fallbackUrl: action.name === 'make_call' ? `tel:${cleanPhone}` : action.fallbackUrl,
       contactMatches: undefined,
       status: 'executed',
@@ -1329,7 +1386,17 @@ export default function App() {
           ));
           return updatedMessages;
         });
-      }, audioBase64, audioMimeType);
+      }, audioBase64, audioMimeType, (sources) => {
+        setMessages(prevMessages => {
+          const updatedMessages = prevMessages.map(message =>
+            message.id === aiMessageId ? { ...message, sources } : message
+          );
+          setSessions(prev => prev.map(session =>
+            session.id === currentSessionId ? { ...session, messages: updatedMessages } : session
+          ));
+          return updatedMessages;
+        });
+      });
       // Automatically generate and attach professional document if requested or export-oriented
       const lowerText = textToSend.toLowerCase();
       const isImageRequest = isImageGenerationRequest(textToSend);
@@ -2273,6 +2340,9 @@ export default function App() {
                       </div>
                     )}
                     <MarkdownRenderer content={message.text} />
+                    {message.sources && message.sources.length > 0 && (
+                      <SearchSourcesBadge sources={message.sources} />
+                    )}
                     <div className="text-xs text-gray-500 dark:text-[#8696a0] flex items-center justify-end gap-2 mt-1.5 font-medium">
                       <CopyButton text={message.text} />
                       <span>{message.timestamp}</span>
