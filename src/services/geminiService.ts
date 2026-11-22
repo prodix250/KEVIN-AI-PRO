@@ -713,6 +713,29 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
     return actionObj;
   }
 
+  if (name === "open_app" && appName && !appName.includes('google search')) {
+    const rawApp = String(args.app_name || 'App').trim();
+    label = `Fungura ${rawApp}`;
+    const appUrls: Record<string, string> = {
+      instagram: 'https://www.instagram.com',
+      tiktok: 'https://www.tiktok.com',
+      spotify: 'https://open.spotify.com',
+      maps: 'https://maps.google.com',
+      youtube: 'https://www.youtube.com',
+    };
+    const matchedUrl = Object.entries(appUrls).find(([key]) => appName.includes(key))?.[1];
+    const actionObj: DeviceAction = {
+      name,
+      args,
+      label,
+      url: matchedUrl,
+      fallbackUrl: matchedUrl,
+      status: 'executed',
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+
   return null;
 }
 
@@ -738,6 +761,9 @@ function actionConfirmation(action: DeviceAction): string {
   }
   if (action.name === 'open_camera') {
     return `📷 Kamera irafunguwe!`;
+  }
+  if (action.name === 'open_app') {
+    return `📱 ${action.label || 'Porogaramu irafunguwe'}!`;
   }
   return `✨ Igikorwa cyakozwe neza.`;
 }
@@ -1605,6 +1631,12 @@ export async function sendMessageToGemini(
     const confirmation = actionConfirmation(action);
     fullResponse += `\n\n${confirmation}`;
     onChunk?.(`\n\n${confirmation}`);
+  }
+
+  if (!fullResponse.trim()) {
+    const fallbackReply = "Mbabarira, sinabashije kubona igisubizo kuri iki kibazo ako kanya. Ongera ugerageze!";
+    fullResponse = fallbackReply;
+    onChunk?.(fallbackReply);
   }
 
   return fullResponse;

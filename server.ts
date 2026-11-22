@@ -192,7 +192,7 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: "open_app",
-    description: "Open a common device app such as Instagram, TikTok, Spotify, or Maps.",
+    description: "Open a specific local device app explicitly requested by name (such as Instagram, TikTok, Spotify, Settings, or Maps). NEVER call this for Google Search or to answer news, sports, or factual questions.",
     parametersJsonSchema: {
       type: "object",
       properties: { app_name: { type: "string" } },
@@ -312,6 +312,96 @@ async function resolveYouTubeVideo(query: string): Promise<{
     console.warn('YouTube resolution failed:', err);
   }
   return null;
+}
+
+function decodeXmlEntities(text: string): string {
+  return text
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .trim();
+}
+
+function buildCleanWebSearchQuery(rawQuery: string): string {
+  const expanded = rawQuery
+    .replace(/\bmancity\b/gi, 'Manchester City')
+    .replace(/\bman\s*city\b/gi, 'Manchester City')
+    .replace(/\bmanutd\b/gi, 'Manchester United')
+    .replace(/\bbarca\b/gi, 'Barcelona');
+  const stopWords = new Set([
+    'wampaye', 'ampaye', 'mbonera', 'mbwira', 'shaka', 'kuri', 'internet', 'google',
+    'amakuru', 'agezweho', 'mashya', 'mwikipe', 'ikipe', 'ya', 'yo', 'za', 'mu', 'muri',
+    'ubu', 'uyu', 'munsi', 'niba', 'hari', 'icyo', 'uko', 'bimeze', 'please', 'tell',
+    'me', 'about', 'what', 'is', 'are', 'the', 'in', 'on', 'for', 'of', 'latest', 'news',
+    'current', 'today', 'now', 'give', 'search', 'online', 'live',
+  ]);
+  const tokens = expanded
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !stopWords.has(w.toLowerCase()));
+  return tokens.length > 0 ? tokens.join(' ').slice(0, 120) : expanded.trim().slice(0, 120);
+}
+
+async function fetchLiveWebSearchContext(rawQuery: string): Promise<{
+  contextText: string;
+  sources: Array<{ title: string; url: string }>;
+}> {
+  const cleanQuery = buildCleanWebSearchQuery(rawQuery);
+  if (!cleanQuery) return { contextText: '', sources: [] };
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4500);
+    const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQuery)}&hl=en&gl=US&ceid=US:en`;
+    const response = await fetch(rssUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      },
+    });
+    clearTimeout(timer);
+    if (!response.ok) return { contextText: '', sources: [] };
+    const xml = await response.text();
+    const itemMatches = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 6);
+    const items: Array<{ title: string; url: string; pubDate: string; sourceName: string }> = [];
+
+    for (const match of itemMatches) {
+      const block = match[1];
+      const rawTitle = block.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '';
+      const rawLink = block.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '';
+      const rawDate = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '';
+      const rawSource = block.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] || '';
+      const sourceUrl = block.match(/<source[^>]*url="([^"]+)"/)?.[1] || '';
+
+      const title = decodeXmlEntities(rawTitle);
+      const url = decodeXmlEntities(rawLink) || decodeXmlEntities(sourceUrl);
+      const pubDate = decodeXmlEntities(rawDate);
+      const sourceName = decodeXmlEntities(rawSource);
+
+      if (title && url) {
+        items.push({ title, url, pubDate, sourceName });
+      }
+    }
+
+    if (items.length === 0) return { contextText: '', sources: [] };
+
+    const lines = items.map((it, idx) =>
+      `${idx + 1}. "${it.title}"${it.sourceName ? ` (${it.sourceName})` : ''}${it.pubDate ? ` [${it.pubDate}]` : ''} — ${it.url}`
+    );
+    const contextText = `[LIVE INTERNET NEWS & WEB SEARCH RESULTS FOR "${cleanQuery}"]:\nUse these verified, up-to-date real-time articles below to answer the user's question accurately in their language. Do NOT say you lack live internet access — summarize the latest developments directly from these current articles:\n${lines.join('\n')}`;
+    const sources = items.map((it) => ({
+      title: it.sourceName ? `${it.sourceName}: ${it.title}` : it.title,
+      url: it.url,
+    }));
+    return { contextText, sources };
+  } catch (err) {
+    console.warn('Live web search RSS fetch failed:', err);
+    return { contextText: '', sources: [] };
+  }
 }
 
 function extractReadableError(err: unknown): string {
@@ -668,24 +758,27 @@ Listen very carefully to this audio recording:
 
       let lastErr: unknown = null;
       let streamStarted = false;
-      const modelsToTry = selectedModel === 'Prodix pro'
-        ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
-        : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen'];
-
       const latestUserText = Array.isArray(contents) && contents.length > 0
         ? ((contents[contents.length - 1] as any)?.parts || [])
             .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
             .join(' ')
             .trim()
         : '';
+      const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps)\b/i.test(latestUserText);
       const shouldTryWebSearch = Boolean(
         latestUserText
         && !hasAudioAttachment
-        && /\b(news|amakuru|weather|score|match|price|current|latest|internet|google|search|shaka kuri internet|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|perezida|uri he|amakuru mashya)\b/i.test(latestUserText)
+        && !isExplicitDeviceCommand
+        && /\b(news|amakuru|agezweho|ubu|weather|score|match|price|current|latest|internet|google|search|shaka|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|ikipe|perezida|uri he|amakuru mashya|mancity|man city|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr)\b/i.test(latestUserText)
       );
+      const modelsToTry = shouldTryWebSearch
+        ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']
+        : selectedModel === 'Prodix pro'
+          ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
+          : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen'];
 
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-      const firstModelTimeoutMs = hasAudioAttachment ? 9500 : 5500;
+      const firstModelTimeoutMs = shouldTryWebSearch ? 12000 : (hasAudioAttachment ? 9500 : 5500);
 
       const ensureStreamHeaders = () => {
         if (!streamStarted && !res.headersSent) {
@@ -699,6 +792,9 @@ Listen very carefully to this audio recording:
       const writePayloadChunk = async (functionCalls: any[], textChunk?: string) => {
         for (const functionCall of functionCalls) {
           const args = { ...(functionCall.args || {}) };
+          if (functionCall.name === 'open_app' && String(args.app_name || '').toLowerCase().includes('google search')) {
+            continue;
+          }
           if (functionCall.name === 'open_youtube' && typeof args.query === 'string' && args.query.trim()) {
             const resolved = await resolveYouTubeVideo(args.query);
             if (resolved) {
@@ -724,227 +820,276 @@ Listen very carefully to this audio recording:
       };
 
       const invalidKeys = new Set<string>();
+      const phases: Array<'search' | 'rss_text' | 'device'> = shouldTryWebSearch
+        ? ['search', 'rss_text']
+        : ['device'];
 
-      for (const modelName of modelsToTry) {
-        const hasFallbackModel = modelName !== modelsToTry[modelsToTry.length - 1];
-        const modelThinkingConfig = modelName === 'gemini-4-hydrogen'
-          ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-          : {};
+      let rssCache: { contextText: string; sources: Array<{ title: string; url: string }> } | null = null;
 
-        for (let keyIdx = 0; keyIdx < availableKeys.length; keyIdx++) {
-          const key = availableKeys[keyIdx];
-          if (invalidKeys.has(key)) continue;
+      for (const phase of phases) {
+        let phaseContents = contents as any[];
+        let phaseSources: Array<{ title: string; url: string }> = [];
 
-          const ai = new GoogleGenAI({
-            apiKey: key,
-            httpOptions: {
-              apiVersion: 'v1beta',
-              headers: {
-                'User-Agent': 'aistudio-build',
+        if (phase === 'rss_text') {
+          if (!rssCache) {
+            rssCache = await fetchLiveWebSearchContext(latestUserText);
+          }
+          if (rssCache.contextText) {
+            phaseSources = rssCache.sources;
+            phaseContents = [
+              ...(contents as any[]),
+              { role: 'user', parts: [{ text: rssCache.contextText }] },
+            ];
+          }
+        }
+
+        const phaseModels = phase === 'rss_text'
+          ? (selectedModel === 'Prodix pro'
+              ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
+              : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen'])
+          : modelsToTry;
+
+        for (const modelName of phaseModels) {
+          const hasFallbackModel = modelName !== phaseModels[phaseModels.length - 1];
+          const modelThinkingConfig = modelName === 'gemini-4-hydrogen'
+            ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+            : {};
+
+          for (let keyIdx = 0; keyIdx < availableKeys.length; keyIdx++) {
+            const key = availableKeys[keyIdx];
+            if (invalidKeys.has(key)) continue;
+
+            const ai = new GoogleGenAI({
+              apiKey: key,
+              httpOptions: {
+                apiVersion: 'v1beta',
+                headers: {
+                  'User-Agent': 'aistudio-build',
+                },
               },
-            },
-          });
+            });
 
-          const isLastAttemptOverall = !hasFallbackModel && keyIdx === availableKeys.length - 1;
-          const maxAttempts = isLastAttemptOverall ? 2 : 1;
-          let abortModelLoop = false;
+            const isLastAttemptOverall = (phase === phases[phases.length - 1])
+              && !hasFallbackModel
+              && keyIdx === availableKeys.length - 1;
+            const maxAttempts = isLastAttemptOverall ? 2 : 1;
+            let abortModelLoop = false;
 
-          for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            try {
-              const seenSourceUrls = new Set<string>();
-              const collectedSources: Array<{ title: string; url: string }> = [];
-              let accumulatedText = '';
-
-              const consumeStream = async (useSearchTool: boolean) => {
-                const streamPromise = ai.models.generateContentStream({
-                  model: modelName,
-                  contents: contents as any,
-                  config: {
-                    systemInstruction,
-                    tools: useSearchTool
-                      ? [{ googleSearch: {} }, { functionDeclarations: deviceActionDeclarations }]
-                      : [{ functionDeclarations: deviceActionDeclarations }],
-                    ...(useSearchTool ? { toolConfig: { includeServerSideToolInvocations: true } } : {}),
-                    ...modelThinkingConfig,
-                  },
-                });
-                streamPromise.catch(() => {});
-
-                const responseStream = !isLastAttemptOverall
-                  ? await Promise.race([
-                      streamPromise,
-                      new Promise<never>((_, reject) =>
-                        setTimeout(() => reject(new Error('503 Model response timed out during high demand')), firstModelTimeoutMs)
-                      ),
-                    ])
-                  : await streamPromise;
-
-                for await (const chunk of responseStream) {
-                  const functionCalls = (chunk as any).functionCalls || [];
-                  const candidate = (chunk as any).candidates?.[0];
-                  const gm = candidate?.groundingMetadata || (chunk as any).groundingMetadata;
-                  const gChunks = gm?.groundingChunks || [];
-                  for (const gc of gChunks) {
-                    const uri = gc?.web?.uri || gc?.maps?.uri;
-                    const title = gc?.web?.title || gc?.maps?.title || uri;
-                    if (uri && !seenSourceUrls.has(uri)) {
-                      seenSourceUrls.add(uri);
-                      collectedSources.push({ title, url: uri });
-                    }
-                  }
-                  if (chunk.text) {
-                    accumulatedText += chunk.text;
-                  }
-                  await writePayloadChunk(functionCalls, chunk.text);
-                }
-              };
-
-              if (shouldTryWebSearch) {
-                try {
-                  await consumeStream(true);
-                } catch (searchErr) {
-                  if (streamStarted) throw searchErr;
-                  await consumeStream(false);
-                }
-              } else {
-                await consumeStream(false);
-              }
-
-              if (collectedSources.length === 0 && accumulatedText) {
-                const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-                let match;
-                while ((match = linkRegex.exec(accumulatedText)) !== null) {
-                  const title = match[1].trim();
-                  const url = match[2].trim();
-                  if (url && !seenSourceUrls.has(url) && !url.includes('image.pollinations.ai') && !url.includes('localhost')) {
-                    seenSourceUrls.add(url);
-                    collectedSources.push({ title, url });
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+              try {
+                const seenSourceUrls = new Set<string>();
+                const collectedSources: Array<{ title: string; url: string }> = [];
+                for (const ps of phaseSources) {
+                  if (ps.url && !seenSourceUrls.has(ps.url)) {
+                    seenSourceUrls.add(ps.url);
+                    collectedSources.push(ps);
                   }
                 }
-              }
+                let accumulatedText = '';
 
-              if (collectedSources.length > 0) {
-                ensureStreamHeaders();
-                res.write(JSON.stringify({ type: 'sources', sources: collectedSources }) + '\n');
-              }
-
-              ensureStreamHeaders();
-              res.write(JSON.stringify({ type: 'done' }) + '\n');
-              res.end();
-              return;
-            } catch (error: any) {
-              lastErr = error;
-              const errorText = extractReadableError(error);
-              const rawText = error instanceof Error ? error.message : String(error);
-              const combinedText = `${rawText} ${errorText}`;
-              const isRotateKeyError = shouldRotateApiKey(error, combinedText);
-              const isUnavailableError = error?.status === 503
-                || combinedText.includes('503')
-                || combinedText.includes('UNAVAILABLE')
-                || combinedText.toLowerCase().includes('high demand')
-                || combinedText.toLowerCase().includes('overloaded');
-              const isModelNotFound = error?.status === 404
-                || combinedText.includes('404')
-                || combinedText.includes('NOT_FOUND');
-
-              if (streamStarted) {
-                res.write(JSON.stringify({ type: 'error', error: errorText }) + '\n');
-                res.end();
-                return;
-              }
-
-              if (isInvalidApiKeyError(error, combinedText)) {
-                console.warn(`[Chat Key Rotation] Key #${keyIdx + 1} invalid (${errorText}). Skipping key and rotating...`);
-                invalidKeys.add(key);
-                break;
-              }
-
-              if (isRotateKeyError) {
-                console.warn(`[Chat Key Rotation] Key #${keyIdx + 1} hit quota/rate-limit on ${modelName}. Rotating...`);
-                break;
-              }
-
-              if (isModelNotFound) {
-                console.warn(`Model ${modelName} not found, falling back to next model.`);
-                abortModelLoop = true;
-                break;
-              }
-
-              if (isUnavailableError) {
-                console.warn(`Model ${modelName} unavailable/high demand (attempt ${attempt + 1}, key #${keyIdx + 1}).`);
-                if (!isLastAttemptOverall) {
-                  break;
-                }
-                if (attempt === 0) {
-                  await sleep(400);
-                  continue;
-                }
-                // Try one bounded non-streaming generateContent call as final rescue
-                try {
-                  const fallbackPromise = ai.models.generateContent({
+                const consumeStream = async (toolMode: 'search' | 'device' | 'none') => {
+                  const streamPromise = ai.models.generateContentStream({
                     model: modelName,
-                    contents: contents as any,
+                    contents: phaseContents as any,
                     config: {
                       systemInstruction,
-                      tools: [{ functionDeclarations: deviceActionDeclarations }],
+                      ...(toolMode === 'search'
+                        ? { tools: [{ googleSearch: {} }] }
+                        : toolMode === 'device'
+                          ? { tools: [{ functionDeclarations: deviceActionDeclarations }] }
+                          : {}),
                       ...modelThinkingConfig,
                     },
                   });
-                  fallbackPromise.catch(() => {});
-                  const fallbackRes = await Promise.race([
-                    fallbackPromise,
-                    new Promise<never>((_, reject) =>
-                      setTimeout(() => reject(new Error('503 Fallback timed out')), 8000)
-                    ),
-                  ]);
-                  const fallbackCalls = (fallbackRes as any).functionCalls || [];
-                  const fallbackText = fallbackRes.text || '';
-                  if (fallbackCalls.length > 0 || fallbackText) {
-                    await writePayloadChunk(fallbackCalls, fallbackText);
-                    const fallbackCandidate = (fallbackRes as any).candidates?.[0];
-                    const fallbackGm = fallbackCandidate?.groundingMetadata || (fallbackRes as any).groundingMetadata;
-                    const fallbackGChunks = fallbackGm?.groundingChunks || [];
-                    const fallbackSources: Array<{ title: string; url: string }> = [];
-                    const seenUrls = new Set<string>();
-                    for (const gc of fallbackGChunks) {
+                  streamPromise.catch(() => {});
+
+                  const responseStream = !isLastAttemptOverall
+                    ? await Promise.race([
+                        streamPromise,
+                        new Promise<never>((_, reject) =>
+                          setTimeout(() => reject(new Error('503 Model response timed out during high demand')), firstModelTimeoutMs)
+                        ),
+                      ])
+                    : await streamPromise;
+
+                  for await (const chunk of responseStream) {
+                    const functionCalls = (chunk as any).functionCalls || [];
+                    const candidate = (chunk as any).candidates?.[0];
+                    const gm = candidate?.groundingMetadata || (chunk as any).groundingMetadata;
+                    const gChunks = gm?.groundingChunks || [];
+                    for (const gc of gChunks) {
                       const uri = gc?.web?.uri || gc?.maps?.uri;
                       const title = gc?.web?.title || gc?.maps?.title || uri;
-                      if (uri && !seenUrls.has(uri)) {
-                        seenUrls.add(uri);
-                        fallbackSources.push({ title, url: uri });
+                      if (uri && !seenSourceUrls.has(uri)) {
+                        seenSourceUrls.add(uri);
+                        collectedSources.push({ title, url: uri });
                       }
                     }
-                    if (fallbackSources.length === 0 && fallbackText) {
-                      const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-                      let match;
-                      while ((match = linkRegex.exec(fallbackText)) !== null) {
-                        const title = match[1].trim();
-                        const url = match[2].trim();
-                        if (url && !seenUrls.has(url) && !url.includes('image.pollinations.ai') && !url.includes('localhost')) {
-                          seenUrls.add(url);
-                          fallbackSources.push({ title, url });
+                    if (chunk.text) {
+                      accumulatedText += chunk.text;
+                    }
+                    await writePayloadChunk(functionCalls, chunk.text);
+                  }
+                };
+
+                if (phase === 'search') {
+                  await consumeStream('search');
+                } else if (phase === 'rss_text') {
+                  await consumeStream('none');
+                } else {
+                  await consumeStream('device');
+                  if (!streamStarted && !accumulatedText.trim()) {
+                    await consumeStream('none');
+                  }
+                }
+
+                if (collectedSources.length === 0 && accumulatedText) {
+                  const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+                  let match;
+                  while ((match = linkRegex.exec(accumulatedText)) !== null) {
+                    const title = match[1].trim();
+                    const url = match[2].trim();
+                    if (url && !seenSourceUrls.has(url) && !url.includes('image.pollinations.ai') && !url.includes('localhost')) {
+                      seenSourceUrls.add(url);
+                      collectedSources.push({ title, url });
+                    }
+                  }
+                }
+
+                if (collectedSources.length > 0) {
+                  ensureStreamHeaders();
+                  res.write(JSON.stringify({ type: 'sources', sources: collectedSources }) + '\n');
+                }
+
+                ensureStreamHeaders();
+                res.write(JSON.stringify({ type: 'done' }) + '\n');
+                res.end();
+                return;
+              } catch (error: any) {
+                lastErr = error;
+                const errorText = extractReadableError(error);
+                const rawText = error instanceof Error ? error.message : String(error);
+                const combinedText = `${rawText} ${errorText}`;
+                const isRotateKeyError = shouldRotateApiKey(error, combinedText);
+                const isUnavailableError = error?.status === 503
+                  || combinedText.includes('503')
+                  || combinedText.includes('UNAVAILABLE')
+                  || combinedText.toLowerCase().includes('high demand')
+                  || combinedText.toLowerCase().includes('overloaded');
+                const isModelNotFound = error?.status === 404
+                  || combinedText.includes('404')
+                  || combinedText.includes('NOT_FOUND');
+
+                if (streamStarted) {
+                  res.write(JSON.stringify({ type: 'error', error: errorText }) + '\n');
+                  res.end();
+                  return;
+                }
+
+                if (phase === 'search') {
+                  console.warn(`[Search Phase] ${modelName} key #${keyIdx + 1} failed (${errorText}). Trying next...`);
+                  if (isInvalidApiKeyError(error, combinedText)) {
+                    invalidKeys.add(key);
+                  }
+                  if (isModelNotFound) {
+                    abortModelLoop = true;
+                  }
+                  break;
+                }
+
+                if (isInvalidApiKeyError(error, combinedText)) {
+                  console.warn(`[Chat Key Rotation] Key #${keyIdx + 1} invalid (${errorText}). Skipping key and rotating...`);
+                  invalidKeys.add(key);
+                  break;
+                }
+
+                if (isRotateKeyError) {
+                  console.warn(`[Chat Key Rotation] Key #${keyIdx + 1} hit quota/rate-limit on ${modelName}. Rotating...`);
+                  break;
+                }
+
+                if (isModelNotFound) {
+                  console.warn(`Model ${modelName} not found, falling back to next model.`);
+                  abortModelLoop = true;
+                  break;
+                }
+
+                if (isUnavailableError) {
+                  console.warn(`Model ${modelName} unavailable/high demand (attempt ${attempt + 1}, key #${keyIdx + 1}).`);
+                  if (!isLastAttemptOverall) {
+                    break;
+                  }
+                  if (attempt === 0) {
+                    await sleep(400);
+                    continue;
+                  }
+                  // Try one bounded non-streaming generateContent call as final rescue
+                  try {
+                    const fallbackPromise = ai.models.generateContent({
+                      model: modelName,
+                      contents: phaseContents as any,
+                      config: {
+                        systemInstruction,
+                        ...(phase === 'device' ? { tools: [{ functionDeclarations: deviceActionDeclarations }] } : {}),
+                        ...modelThinkingConfig,
+                      },
+                    });
+                    fallbackPromise.catch(() => {});
+                    const fallbackRes = await Promise.race([
+                      fallbackPromise,
+                      new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error('503 Fallback timed out')), 8000)
+                      ),
+                    ]);
+                    const fallbackCalls = (fallbackRes as any).functionCalls || [];
+                    const fallbackText = fallbackRes.text || '';
+                    if (fallbackCalls.length > 0 || fallbackText) {
+                      await writePayloadChunk(fallbackCalls, fallbackText);
+                      const fallbackCandidate = (fallbackRes as any).candidates?.[0];
+                      const fallbackGm = fallbackCandidate?.groundingMetadata || (fallbackRes as any).groundingMetadata;
+                      const fallbackGChunks = fallbackGm?.groundingChunks || [];
+                      const fallbackSources: Array<{ title: string; url: string }> = [...phaseSources];
+                      const seenUrls = new Set<string>(phaseSources.map(s => s.url));
+                      for (const gc of fallbackGChunks) {
+                        const uri = gc?.web?.uri || gc?.maps?.uri;
+                        const title = gc?.web?.title || gc?.maps?.title || uri;
+                        if (uri && !seenUrls.has(uri)) {
+                          seenUrls.add(uri);
+                          fallbackSources.push({ title, url: uri });
                         }
                       }
-                    }
-                    if (fallbackSources.length > 0) {
+                      if (fallbackSources.length === 0 && fallbackText) {
+                        const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+                        let match;
+                        while ((match = linkRegex.exec(fallbackText)) !== null) {
+                          const title = match[1].trim();
+                          const url = match[2].trim();
+                          if (url && !seenUrls.has(url) && !url.includes('image.pollinations.ai') && !url.includes('localhost')) {
+                            seenUrls.add(url);
+                            fallbackSources.push({ title, url });
+                          }
+                        }
+                      }
+                      if (fallbackSources.length > 0) {
+                        ensureStreamHeaders();
+                        res.write(JSON.stringify({ type: 'sources', sources: fallbackSources }) + '\n');
+                      }
                       ensureStreamHeaders();
-                      res.write(JSON.stringify({ type: 'sources', sources: fallbackSources }) + '\n');
+                      res.write(JSON.stringify({ type: 'done' }) + '\n');
+                      res.end();
+                      return;
                     }
-                    ensureStreamHeaders();
-                    res.write(JSON.stringify({ type: 'done' }) + '\n');
-                    res.end();
-                    return;
+                  } catch (fallbackErr: any) {
+                    lastErr = fallbackErr;
                   }
-                } catch (fallbackErr: any) {
-                  lastErr = fallbackErr;
+                  break;
                 }
-                break;
-              }
 
-              throw error;
+                throw error;
+              }
             }
+            if (abortModelLoop) break;
           }
-          if (abortModelLoop) break;
         }
       }
 
