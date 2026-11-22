@@ -452,6 +452,16 @@ async function startServer() {
     res.json(resolved);
   });
 
+  app.get('/api/web-search', async (req: Request, res: Response) => {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    if (!q.trim()) {
+      res.status(400).json({ error: 'Missing query parameter q' });
+      return;
+    }
+    const result = await fetchLiveWebSearchContext(q);
+    res.json(result);
+  });
+
   app.post('/api/stt', async (req: Request, res: Response) => {
     try {
       const { audioBase64, audioMimeType, mimeType: altMimeType, customApiKey, customApiKeys } = req.body as {

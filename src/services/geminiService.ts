@@ -1086,6 +1086,133 @@ async function resolveYouTubeVideoForApk(query: string): Promise<{ videoId: stri
   return null;
 }
 
+function buildApkCleanWebSearchQuery(rawQuery: string): string {
+  const expanded = rawQuery
+    .replace(/\bmancity\b/gi, 'Manchester City')
+    .replace(/\bman\s*city\b/gi, 'Manchester City')
+    .replace(/\bmanutd\b/gi, 'Manchester United')
+    .replace(/\bbarca\b/gi, 'Barcelona');
+  const stopWords = new Set([
+    'wampaye', 'ampaye', 'mbonera', 'mbwira', 'shaka', 'kuri', 'internet', 'google',
+    'amakuru', 'agezweho', 'mashya', 'mwikipe', 'ikipe', 'ya', 'yo', 'za', 'mu', 'muri',
+    'ubu', 'uyu', 'munsi', 'niba', 'hari', 'icyo', 'uko', 'bimeze', 'please', 'tell',
+    'me', 'about', 'what', 'is', 'are', 'the', 'in', 'on', 'for', 'of', 'latest', 'news',
+    'current', 'today', 'now', 'give', 'search', 'online', 'live',
+  ]);
+  const tokens = expanded
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !stopWords.has(w.toLowerCase()));
+  return tokens.length > 0 ? tokens.join(' ').slice(0, 120) : expanded.trim().slice(0, 120);
+}
+
+function parseRssXmlForApk(xml: string, cleanQuery: string): {
+  contextText: string;
+  sources: GroundingSource[];
+} {
+  if (!xml || !xml.includes('<item')) return { contextText: '', sources: [] };
+  const items: Array<{ title: string; url: string; pubDate: string; sourceName: string }> = [];
+
+  try {
+    if (typeof DOMParser !== 'undefined') {
+      const doc = new DOMParser().parseFromString(xml, 'text/xml');
+      const nodes = Array.from(doc.querySelectorAll('item')).slice(0, 6);
+      for (const node of nodes) {
+        const title = node.querySelector('title')?.textContent?.trim() || '';
+        const link = node.querySelector('link')?.textContent?.trim() || '';
+        const pubDate = node.querySelector('pubDate')?.textContent?.trim() || '';
+        const sourceEl = node.querySelector('source');
+        const sourceName = sourceEl?.textContent?.trim() || '';
+        const sourceUrl = sourceEl?.getAttribute('url')?.trim() || '';
+        const url = link || sourceUrl;
+        if (title && url) {
+          items.push({ title, url, pubDate, sourceName });
+        }
+      }
+    }
+  } catch {}
+
+  if (items.length === 0) return { contextText: '', sources: [] };
+
+  const lines = items.map((it, idx) =>
+    `${idx + 1}. "${it.title}"${it.sourceName ? ` (${it.sourceName})` : ''}${it.pubDate ? ` [${it.pubDate}]` : ''} — ${it.url}`
+  );
+  const contextText = `[LIVE INTERNET NEWS & WEB SEARCH RESULTS FOR "${cleanQuery}"]:\nUse these verified, up-to-date real-time articles below to answer the user's question accurately in their language. Do NOT say you lack live internet access — summarize the latest developments directly from these current articles:\n${lines.join('\n')}`;
+  const sources: GroundingSource[] = items.map((it) => ({
+    title: it.sourceName ? `${it.sourceName}: ${it.title}` : it.title,
+    url: it.url,
+  }));
+  return { contextText, sources };
+}
+
+async function fetchLiveWebSearchForApk(rawQuery: string): Promise<{
+  contextText: string;
+  sources: GroundingSource[];
+}> {
+  const cleanQuery = buildApkCleanWebSearchQuery(rawQuery);
+  if (!cleanQuery) return { contextText: '', sources: [] };
+
+  // 1. Native Android bridge RSS fetch (zero CORS, works even if backend is unreachable)
+  try {
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.fetchWebNewsRss) {
+      const xml = String(bridge.fetchWebNewsRss(cleanQuery) || '');
+      const parsed = parseRssXmlForApk(xml, cleanQuery);
+      if (parsed.contextText) return parsed;
+    }
+  } catch {}
+
+  // 2. Production backend /api/web-search fallback
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(`${PRODUCTION_BACKEND_URL}/api/web-search?q=${encodeURIComponent(rawQuery)}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data?.contextText) {
+        return {
+          contextText: String(data.contextText),
+          sources: Array.isArray(data.sources) ? data.sources : [],
+        };
+      }
+    }
+  } catch {}
+
+  // 3. CORS-enabled Wikipedia Search API fallback
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const wikiRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQuery)}&srlimit=5&format=json&origin=*`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timer);
+    if (wikiRes.ok) {
+      const wikiJson = await wikiRes.json().catch(() => null);
+      const searchHits: any[] = wikiJson?.query?.search || [];
+      if (searchHits.length > 0) {
+        const sources: GroundingSource[] = searchHits.map((hit) => ({
+          title: `Wikipedia: ${String(hit.title || cleanQuery)}`,
+          url: `https://en.wikipedia.org/wiki/${encodeURIComponent(String(hit.title || '').replace(/\s+/g, '_'))}`,
+        }));
+        const lines = searchHits.map((hit, idx) => {
+          const snippet = String(hit.snippet || '').replace(/<[^>]+>/g, '').trim();
+          return `${idx + 1}. "${hit.title}": ${snippet} — ${sources[idx].url}`;
+        });
+        return {
+          contextText: `[WEB REFERENCE RESULTS FOR "${cleanQuery}"]:\n${lines.join('\n')}`,
+          sources,
+        };
+      }
+    }
+  } catch {}
+
+  return { contextText: '', sources: [] };
+}
+
 function buildApkSystemInstruction(
   userName: string,
   hasAudioAttachment: boolean,
@@ -1392,89 +1519,153 @@ export async function sendMessageToGemini(
 
   const executeDirectApkGemini = async (requestContents: any[], includeAudioFlag: boolean) => {
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms);
-    const apkModels = selectedModel === 'Kevin 1.3 Lite'
-      ? ['gemini-2.5-flash', 'gemini-3.1-flash-lite']
-      : ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+    const latestUserText = Array.isArray(requestContents) && requestContents.length > 0
+      ? ((requestContents[requestContents.length - 1] as any)?.parts || [])
+          .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+          .join(' ')
+          .trim()
+      : '';
+    const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps)\b/i.test(latestUserText);
+    const shouldTryWebSearch = Boolean(
+      latestUserText
+      && !includeAudioFlag
+      && !isExplicitDeviceCommand
+      && /\b(news|amakuru|agezweho|ubu|weather|score|match|price|current|latest|internet|google|search|shaka|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|ikipe|perezida|uri he|amakuru mashya|mancity|man city|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr)\b/i.test(latestUserText)
+    );
+
+    const phases: Array<'search' | 'rss_text' | 'device'> = shouldTryWebSearch
+      ? ['search', 'rss_text']
+      : ['device'];
     const invalidKeys = new Set<string>();
     let lastDirectErr: unknown = null;
+    let rssCache: { contextText: string; sources: GroundingSource[] } | null = null;
 
-    for (const modelName of apkModels) {
-      for (const currentKey of customApiKeys) {
-        if (invalidKeys.has(currentKey)) continue;
-        try {
-          const directRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                systemInstruction: { parts: [{ text: apkSystemInstruction }] },
-                contents: requestContents,
-                tools: [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }],
-              }),
+    for (const phase of phases) {
+      let phaseContents = requestContents;
+      let phaseSources: GroundingSource[] = [];
+
+      if (phase === 'rss_text') {
+        if (!rssCache) {
+          rssCache = await fetchLiveWebSearchForApk(latestUserText);
+        }
+        if (rssCache.contextText) {
+          phaseSources = rssCache.sources;
+          phaseContents = [
+            ...requestContents,
+            { role: 'user', parts: [{ text: rssCache.contextText }] },
+          ];
+        }
+      }
+
+      const apkModels = phase === 'search'
+        ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']
+        : selectedModel === 'Kevin 1.3 Lite'
+          ? ['gemini-2.5-flash', 'gemini-3.1-flash-lite']
+          : ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+
+      for (const modelName of apkModels) {
+        for (const currentKey of customApiKeys) {
+          if (invalidKeys.has(currentKey)) continue;
+          try {
+            const payloadBody: Record<string, any> = {
+              systemInstruction: { parts: [{ text: apkSystemInstruction }] },
+              contents: phaseContents,
+            };
+            if (phase === 'search') {
+              payloadBody.tools = [{ google_search: {} }];
+            } else if (phase === 'device') {
+              payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
             }
-          );
 
-          const json = await directRes.json().catch(() => null);
-          if (!directRes.ok) {
-            const apiErrMsg = json?.error?.message || `HTTP ${directRes.status}`;
-            const lowerErr = apiErrMsg.toLowerCase();
-            if (directRes.status === 401 || directRes.status === 403 || lowerErr.includes('api key not valid') || lowerErr.includes('api_key_invalid')) {
-              invalidKeys.add(currentKey);
-            }
-            lastDirectErr = new Error(apiErrMsg);
-            continue;
-          }
-
-          const responseParts: any[] = json?.candidates?.[0]?.content?.parts || [];
-          let streamedText = '';
-          const streamedActions: DeviceAction[] = [];
-          const directSources: GroundingSource[] = [];
-
-          // Extract grounding chunks if available
-          const gChunks = json?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-          for (const gc of gChunks) {
-            const uri = gc?.web?.uri || gc?.maps?.uri;
-            const title = gc?.web?.title || gc?.maps?.title || uri;
-            if (uri && !directSources.some(s => s.url === uri)) {
-              directSources.push({ title, url: uri });
-            }
-          }
-
-          for (const part of responseParts) {
-            if (part?.text) {
-              streamedText += part.text;
-              onChunk?.(part.text);
-            } else if (part?.functionCall?.name) {
-              const fcName = String(part.functionCall.name);
-              const fcArgs = { ...(part.functionCall.args || {}) };
-              if (fcName === 'open_youtube' && typeof fcArgs.query === 'string' && fcArgs.query.trim()) {
-                const resolved = await resolveYouTubeVideoForApk(fcArgs.query);
-                if (resolved) {
-                  fcArgs.videoId = resolved.videoId;
-                  fcArgs.videoTitle = resolved.title;
-                  fcArgs.channel = resolved.channel;
-                }
+            const directRes = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payloadBody),
               }
-              const action = executeDeviceAction(fcName, fcArgs);
-              if (action) streamedActions.push(action);
+            );
+
+            const json = await directRes.json().catch(() => null);
+            if (!directRes.ok) {
+              const apiErrMsg = json?.error?.message || `HTTP ${directRes.status}`;
+              const lowerErr = apiErrMsg.toLowerCase();
+              if (directRes.status === 401 || directRes.status === 403 || lowerErr.includes('api key not valid') || lowerErr.includes('api_key_invalid')) {
+                invalidKeys.add(currentKey);
+              }
+              lastDirectErr = new Error(apiErrMsg);
+              continue;
             }
-          }
 
-          if (directSources.length === 0) {
-            const mdSources = extractMarkdownUrls(streamedText);
-            directSources.push(...mdSources);
-          }
+            const responseParts: any[] = json?.candidates?.[0]?.content?.parts || [];
+            let streamedText = '';
+            const streamedActions: DeviceAction[] = [];
+            const directSources: GroundingSource[] = [...phaseSources];
 
-          if (directSources.length > 0) {
-            onSources?.(directSources);
-          }
+            // Extract grounding chunks if available
+            const gChunks = json?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            for (const gc of gChunks) {
+              const uri = gc?.web?.uri || gc?.maps?.uri;
+              const title = gc?.web?.title || gc?.maps?.title || uri;
+              if (uri && !directSources.some(s => s.url === uri)) {
+                directSources.push({ title, url: uri });
+              }
+            }
 
-          if (streamedText || streamedActions.length > 0) {
-            return { streamedText, streamedActions, streamedSources: directSources };
+            for (const part of responseParts) {
+              if (part?.text) {
+                streamedText += part.text;
+              } else if (part?.functionCall?.name) {
+                const fcName = String(part.functionCall.name);
+                const fcArgs = { ...(part.functionCall.args || {}) };
+                if (fcName === 'open_app' && String(fcArgs.app_name || '').toLowerCase().includes('google search')) {
+                  continue;
+                }
+                if (fcName === 'open_youtube' && typeof fcArgs.query === 'string' && fcArgs.query.trim()) {
+                  const resolved = await resolveYouTubeVideoForApk(fcArgs.query);
+                  if (resolved) {
+                    fcArgs.videoId = resolved.videoId;
+                    fcArgs.videoTitle = resolved.title;
+                    fcArgs.channel = resolved.channel;
+                  }
+                }
+                const action = executeDeviceAction(fcName, fcArgs);
+                if (action) streamedActions.push(action);
+              }
+            }
+
+            if (directSources.length === 0) {
+              const mdSources = extractMarkdownUrls(streamedText);
+              directSources.push(...mdSources);
+            }
+
+            // If Gemini Search Grounding returned text without any sources and claimed it cannot browse live, fall through to rss_text
+            if (phase === 'search' && directSources.length === 0) {
+              const lowerReply = streamedText.toLowerCase();
+              const looksUngrounded = lowerReply.includes('live search')
+                || lowerReply.includes('real-time')
+                || lowerReply.includes('ntabwo mbasha gushakisha')
+                || lowerReply.includes('cannot access')
+                || lowerReply.includes("don't have access");
+              if (looksUngrounded) {
+                continue;
+              }
+            }
+
+            if (streamedText) {
+              onChunk?.(streamedText);
+            }
+
+            if (directSources.length > 0) {
+              onSources?.(directSources);
+            }
+
+            if (streamedText || streamedActions.length > 0) {
+              return { streamedText, streamedActions, streamedSources: directSources };
+            }
+          } catch (directErr: any) {
+            lastDirectErr = directErr;
           }
-        } catch (directErr: any) {
-          lastDirectErr = directErr;
         }
       }
     }
