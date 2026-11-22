@@ -20,6 +20,7 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
 
@@ -37,6 +38,7 @@ import com.getcapacitor.Logger;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginLoadException;
 import com.getcapacitor.PluginManager;
+import com.getcapacitor.WebViewListener;
 
 import org.json.JSONObject;
 
@@ -153,6 +155,18 @@ public class KevinAssistantActivity extends AppCompatActivity {
                         request.grant(request.getResources());
                     } catch (Throwable ignored) {}
                 });
+            }
+        });
+
+        bridge.addWebViewListener(new WebViewListener() {
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        recreate();
+                    }
+                });
+                return true;
             }
         });
 

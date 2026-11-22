@@ -7,11 +7,18 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.provider.ContactsContract;
 import android.provider.Settings;
 import android.telephony.SmsManager;
 import android.text.TextUtils;
+import android.util.Base64;
 import android.view.accessibility.AccessibilityManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
@@ -23,6 +30,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -468,6 +479,214 @@ public class KevinAgentBridge {
         } finally {
             if (conn != null) {
                 conn.disconnect();
+            }
+        }
+    }
+
+    private File resolveLocalImageFile(String uriOrPath) {
+        if (TextUtils.isEmpty(uriOrPath)) return null;
+        String candidate = uriOrPath.trim();
+        if (candidate.startsWith("https://localhost/_capacitor_file_")) {
+            candidate = Uri.decode(candidate.substring("https://localhost/_capacitor_file_".length()));
+        } else if (candidate.startsWith("http://localhost/_capacitor_file_")) {
+            candidate = Uri.decode(candidate.substring("http://localhost/_capacitor_file_".length()));
+        } else if (candidate.startsWith("file://")) {
+            String path = Uri.parse(candidate).getPath();
+            if (!TextUtils.isEmpty(path)) {
+                candidate = path;
+            }
+        }
+        if (candidate.startsWith("content://")) {
+            return null;
+        }
+        File f = new File(candidate);
+        if (f.exists() && f.isFile()) {
+            return f;
+        }
+        String decoded = Uri.decode(candidate);
+        File decodedFile = new File(decoded);
+        if (decodedFile.exists() && decodedFile.isFile()) {
+            return decodedFile;
+        }
+        return null;
+    }
+
+    private InputStream openImageInputStream(String uriOrPath, File localFile) {
+        try {
+            if (localFile != null) {
+                return new FileInputStream(localFile);
+            }
+            if (!TextUtils.isEmpty(uriOrPath) && uriOrPath.trim().startsWith("content://")) {
+                return activity.getContentResolver().openInputStream(Uri.parse(uriOrPath.trim()));
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private int readExifOrientation(String uriOrPath, File localFile) {
+        try (InputStream is = openImageInputStream(uriOrPath, localFile)) {
+            if (is == null) return ExifInterface.ORIENTATION_NORMAL;
+            ExifInterface exif = new ExifInterface(is);
+            return exif.getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+            );
+        } catch (Throwable ignored) {
+            return ExifInterface.ORIENTATION_NORMAL;
+        }
+    }
+
+    @JavascriptInterface
+    public String readAndCompressImage(String uriOrPath, int maxDim, int quality) {
+        if (TextUtils.isEmpty(uriOrPath)) return "";
+        int targetMax = (maxDim >= 320 && maxDim <= 1920) ? maxDim : 1280;
+        int safeQuality = (quality >= 40 && quality <= 95) ? quality : 82;
+
+        File localFile = resolveLocalImageFile(uriOrPath);
+        if (localFile == null && !uriOrPath.trim().startsWith("content://")) {
+            return "";
+        }
+
+        Bitmap decoded = null;
+        Bitmap transformed = null;
+        Bitmap opaque = null;
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            try (InputStream is = openImageInputStream(uriOrPath, localFile)) {
+                if (is == null) return "";
+                BitmapFactory.decodeStream(is, null, bounds);
+            }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                return "";
+            }
+
+            int orientation = readExifOrientation(uriOrPath, localFile);
+
+            int inSampleSize = 1;
+            while ((bounds.outWidth / inSampleSize) > targetMax * 2
+                    || (bounds.outHeight / inSampleSize) > targetMax * 2) {
+                inSampleSize *= 2;
+            }
+
+            BitmapFactory.Options decodeOpts = new BitmapFactory.Options();
+            decodeOpts.inSampleSize = inSampleSize;
+            decodeOpts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+
+            try (InputStream is = openImageInputStream(uriOrPath, localFile)) {
+                if (is == null) return "";
+                decoded = BitmapFactory.decodeStream(is, null, decodeOpts);
+            } catch (OutOfMemoryError oom) {
+                decodeOpts.inSampleSize = Math.max(2, inSampleSize * 2);
+                decodeOpts.inPreferredConfig = Bitmap.Config.RGB_565;
+                try (InputStream isRetry = openImageInputStream(uriOrPath, localFile)) {
+                    if (isRetry != null) {
+                        decoded = BitmapFactory.decodeStream(isRetry, null, decodeOpts);
+                    }
+                }
+            }
+
+            if (decoded == null) {
+                return "";
+            }
+
+            int w = decoded.getWidth();
+            int h = decoded.getHeight();
+            float scale = Math.min(1.0f, (float) targetMax / Math.max(w, h));
+
+            Matrix matrix = new Matrix();
+            boolean hasTransform = scale < 0.999f;
+            if (hasTransform) {
+                matrix.postScale(scale, scale);
+            }
+            switch (orientation) {
+                case ExifInterface.ORIENTATION_ROTATE_90:
+                    matrix.postRotate(90f);
+                    hasTransform = true;
+                    break;
+                case ExifInterface.ORIENTATION_ROTATE_180:
+                    matrix.postRotate(180f);
+                    hasTransform = true;
+                    break;
+                case ExifInterface.ORIENTATION_ROTATE_270:
+                    matrix.postRotate(270f);
+                    hasTransform = true;
+                    break;
+                case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                    matrix.postScale(-1f, 1f);
+                    hasTransform = true;
+                    break;
+                case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                    matrix.postScale(1f, -1f);
+                    hasTransform = true;
+                    break;
+                case ExifInterface.ORIENTATION_TRANSPOSE:
+                    matrix.postRotate(90f);
+                    matrix.postScale(-1f, 1f);
+                    hasTransform = true;
+                    break;
+                case ExifInterface.ORIENTATION_TRANSVERSE:
+                    matrix.postRotate(270f);
+                    matrix.postScale(-1f, 1f);
+                    hasTransform = true;
+                    break;
+                default:
+                    break;
+            }
+
+            if (hasTransform) {
+                transformed = Bitmap.createBitmap(decoded, 0, 0, w, h, matrix, true);
+                if (transformed != decoded) {
+                    decoded.recycle();
+                    decoded = null;
+                }
+            } else {
+                transformed = decoded;
+                decoded = null;
+            }
+
+            Bitmap outputBitmap = transformed;
+            if (transformed.hasAlpha()) {
+                opaque = Bitmap.createBitmap(
+                        transformed.getWidth(),
+                        transformed.getHeight(),
+                        Bitmap.Config.ARGB_8888
+                );
+                Canvas canvas = new Canvas(opaque);
+                canvas.drawColor(Color.WHITE);
+                canvas.drawBitmap(transformed, 0f, 0f, null);
+                transformed.recycle();
+                transformed = null;
+                outputBitmap = opaque;
+            }
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            outputBitmap.compress(Bitmap.CompressFormat.JPEG, safeQuality, baos);
+            if (baos.size() > 1_500_000) {
+                baos.reset();
+                outputBitmap.compress(Bitmap.CompressFormat.JPEG, Math.min(safeQuality, 70), baos);
+            }
+
+            byte[] jpegBytes = baos.toByteArray();
+            if (jpegBytes.length == 0) {
+                return "";
+            }
+            String b64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP);
+            JSONObject out = new JSONObject();
+            out.put("base64", "data:image/jpeg;base64," + b64);
+            out.put("sizeKb", Math.max(1, Math.round(jpegBytes.length / 1024.0f)));
+            return out.toString();
+        } catch (Throwable ignored) {
+            return "";
+        } finally {
+            if (decoded != null && !decoded.isRecycled()) {
+                decoded.recycle();
+            }
+            if (transformed != null && !transformed.isRecycled()) {
+                transformed.recycle();
+            }
+            if (opaque != null && !opaque.isRecycled()) {
+                opaque.recycle();
             }
         }
     }

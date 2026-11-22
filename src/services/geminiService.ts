@@ -418,6 +418,33 @@ export function resolveContactMatches(query: string): SavedContact[] {
   return allMatches.slice(0, 8);
 }
 
+export function readNativeCompressedImage(
+  uriOrPath: string,
+  options?: { name?: string; maxDim?: number; quality?: number }
+): AttachmentItem | null {
+  if (typeof window === 'undefined' || !uriOrPath) return null;
+  const bridge = (window as any).KevinAgentBridge;
+  if (!bridge?.readAndCompressImage) return null;
+  try {
+    const rawJson = bridge.readAndCompressImage(
+      uriOrPath,
+      options?.maxDim ?? 1280,
+      options?.quality ?? 82
+    );
+    if (!rawJson) return null;
+    const parsed = JSON.parse(rawJson) as { base64?: string; sizeKb?: number };
+    if (!parsed?.base64 || !cleanBase64(parsed.base64)) return null;
+    return {
+      base64: parsed.base64,
+      mimeType: 'image/jpeg',
+      name: options?.name || `image_${Date.now()}.jpg`,
+      size: `${Math.max(1, parsed.sizeKb || 1)} KB`,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function compressImageToAttachment(
   file: Blob,
   options?: { name?: string; mimeType?: string; maxDim?: number; quality?: number }
@@ -440,8 +467,49 @@ export async function compressImageToAttachment(
 
   let dataUrl = '';
   let finalMime = origType;
+  const needsHeavyResize =
+    file.size > 350 * 1024 || origType === 'image/heic' || origType === 'image/heif';
 
-  if (typeof document !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+  // Fast low-memory downsampled decode (avoids 100MB-400MB full RGBA allocation in WebView)
+  if (needsHeavyResize && typeof document !== 'undefined' && typeof createImageBitmap === 'function') {
+    let bitmap: ImageBitmap | null = null;
+    try {
+      bitmap = await createImageBitmap(file, {
+        resizeWidth: Math.min(maxDim, 1024),
+        resizeQuality: 'medium',
+      });
+      const srcW = bitmap.width || 0;
+      const srcH = bitmap.height || 0;
+      if (srcW > 0 && srcH > 0) {
+        const scale = Math.min(1, maxDim / Math.max(srcW, srcH));
+        const targetW = Math.max(1, Math.round(srcW * scale));
+        const targetH = Math.max(1, Math.round(srcH * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, targetW, targetH);
+          ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+          finalMime = 'image/jpeg';
+          canvas.width = 0;
+          canvas.height = 0;
+        }
+      }
+    } catch {
+      // Fallback below
+    } finally {
+      try {
+        bitmap?.close();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  if (!dataUrl && typeof document !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
     const objectUrl = URL.createObjectURL(file);
     try {
       const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -459,7 +527,7 @@ export async function compressImageToAttachment(
         const targetH = Math.max(1, Math.round(srcH * scale));
 
         // Re-encode if image is larger than maxDim or file is > 350KB to avoid WebView OOM / quota crash
-        if (scale < 1 || file.size > 350 * 1024 || origType === 'image/heic' || origType === 'image/heif') {
+        if (scale < 1 || needsHeavyResize) {
           const canvas = document.createElement('canvas');
           canvas.width = targetW;
           canvas.height = targetH;

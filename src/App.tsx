@@ -8,7 +8,7 @@ import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settin
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
@@ -1006,6 +1006,19 @@ export default function App() {
         return;
       }
 
+      if (photo.path || photo.webPath) {
+        const nativeAtt = readNativeCompressedImage(photo.path || photo.webPath || '', {
+          name: 'camera_photo.jpg',
+          maxDim: 1280,
+          quality: 82,
+        });
+        if (nativeAtt) {
+          setAttachedImages(prev => [...prev, nativeAtt]);
+          setAttachmentPopupOpen(false);
+          return;
+        }
+      }
+
       if (photo.webPath) {
         const blob = await (await fetch(photo.webPath)).blob();
         const compressed = await compressImageToAttachment(blob, {
@@ -1047,6 +1060,19 @@ export default function App() {
       for (let index = 0; index < results.length; index++) {
         const item = results[index];
         try {
+          if (item.type && String(item.type).toLowerCase().includes('video')) continue;
+
+          const itemName = `gallery_image_${Date.now()}_${index + 1}.jpg`;
+          const nativeCompressed = readNativeCompressedImage(item.uri || item.webPath || '', {
+            name: itemName,
+            maxDim: 1280,
+            quality: 82,
+          });
+          if (nativeCompressed) {
+            selectedImages.push(nativeCompressed);
+            continue;
+          }
+
           let blob: Blob | null = null;
           if (item.webPath) {
             const response = await fetch(item.webPath);
@@ -1068,7 +1094,7 @@ export default function App() {
 
           const mimeType = blob.type || 'image/jpeg';
           const compressed = await compressImageToAttachment(blob, {
-            name: `gallery_image_${Date.now()}_${index + 1}.jpg`,
+            name: itemName,
             mimeType,
             maxDim: 1280,
             quality: 0.82,

@@ -23745,7 +23745,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-71O8fQha.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-Ws2HSPY8.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -24283,7 +24283,7 @@ const AGENT_PERMISSIONS_STORAGE_KEY = "kevin_ai_agent_permissions";
 const AGENT_OUTBOX_STORAGE_KEY = "kevin_ai_agent_outbox";
 const CONTACTS_STORAGE_KEY = "kevin_ai_contacts";
 const DEFAULT_AGENT_PERMISSIONS = {
-  autoSend: false,
+  autoSend: true,
   autoCall: true,
   autoPlayYouTube: true,
   whatsappAutoReply: false,
@@ -24591,6 +24591,134 @@ function resolveContactMatches(query) {
   if (exactMatches.length === 1) return exactMatches;
   return allMatches.slice(0, 8);
 }
+function readNativeCompressedImage(uriOrPath, options) {
+  if (typeof window === "undefined" || !uriOrPath) return null;
+  const bridge = window.KevinAgentBridge;
+  if (!(bridge == null ? void 0 : bridge.readAndCompressImage)) return null;
+  try {
+    const rawJson = bridge.readAndCompressImage(
+      uriOrPath,
+      (options == null ? void 0 : options.maxDim) ?? 1280,
+      (options == null ? void 0 : options.quality) ?? 82
+    );
+    if (!rawJson) return null;
+    const parsed = JSON.parse(rawJson);
+    if (!(parsed == null ? void 0 : parsed.base64) || !cleanBase64(parsed.base64)) return null;
+    return {
+      base64: parsed.base64,
+      mimeType: "image/jpeg",
+      name: (options == null ? void 0 : options.name) || `image_${Date.now()}.jpg`,
+      size: `${Math.max(1, parsed.sizeKb || 1)} KB`
+    };
+  } catch {
+    return null;
+  }
+}
+async function compressImageToAttachment(file, options) {
+  const maxDim = (options == null ? void 0 : options.maxDim) ?? 1280;
+  const quality = (options == null ? void 0 : options.quality) ?? 0.82;
+  const fileName = (options == null ? void 0 : options.name) || (file instanceof File ? file.name : "") || `image_${Date.now()}.jpg`;
+  const origType = (options == null ? void 0 : options.mimeType) || file.type || "image/jpeg";
+  const readAsDataUrlSafe = (blob) => new Promise((resolve, reject2) => {
+    const reader2 = new FileReader();
+    reader2.onload = () => typeof reader2.result === "string" ? resolve(reader2.result) : reject2(new Error("The selected image could not be read."));
+    reader2.onerror = () => reject2(reader2.error || new Error("The selected image could not be read."));
+    reader2.readAsDataURL(blob);
+  });
+  let dataUrl = "";
+  let finalMime = origType;
+  const needsHeavyResize = file.size > 350 * 1024 || origType === "image/heic" || origType === "image/heif";
+  if (needsHeavyResize && typeof document !== "undefined" && typeof createImageBitmap === "function") {
+    let bitmap = null;
+    try {
+      bitmap = await createImageBitmap(file, {
+        resizeWidth: Math.min(maxDim, 1024),
+        resizeQuality: "medium"
+      });
+      const srcW = bitmap.width || 0;
+      const srcH = bitmap.height || 0;
+      if (srcW > 0 && srcH > 0) {
+        const scale2 = Math.min(1, maxDim / Math.max(srcW, srcH));
+        const targetW = Math.max(1, Math.round(srcW * scale2));
+        const targetH = Math.max(1, Math.round(srcH * scale2));
+        const canvas = document.createElement("canvas");
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, targetW, targetH);
+          ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+          dataUrl = canvas.toDataURL("image/jpeg", quality);
+          finalMime = "image/jpeg";
+          canvas.width = 0;
+          canvas.height = 0;
+        }
+      }
+    } catch {
+    } finally {
+      try {
+        bitmap == null ? void 0 : bitmap.close();
+      } catch {
+      }
+    }
+  }
+  if (!dataUrl && typeof document !== "undefined" && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject2) => {
+        const image2 = new Image();
+        image2.onload = () => resolve(image2);
+        image2.onerror = () => reject2(new Error("Image decode failed"));
+        image2.src = objectUrl;
+      });
+      const srcW = img.naturalWidth || img.width || 0;
+      const srcH = img.naturalHeight || img.height || 0;
+      if (srcW > 0 && srcH > 0) {
+        const scale2 = Math.min(1, maxDim / Math.max(srcW, srcH));
+        const targetW = Math.max(1, Math.round(srcW * scale2));
+        const targetH = Math.max(1, Math.round(srcH * scale2));
+        if (scale2 < 1 || needsHeavyResize) {
+          const canvas = document.createElement("canvas");
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+            dataUrl = canvas.toDataURL("image/jpeg", quality);
+            finalMime = "image/jpeg";
+            canvas.width = 0;
+            canvas.height = 0;
+          }
+        }
+      }
+    } catch {
+    } finally {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch {
+      }
+    }
+  }
+  if (!dataUrl) {
+    if (file.size > 4e6) {
+      throw new Error("Ifoto ni nini cyane ku buryo itabashije guhindurwa.");
+    }
+    dataUrl = await readAsDataUrlSafe(file);
+  }
+  if (!cleanBase64(dataUrl)) {
+    throw new Error("The selected image could not be encoded.");
+  }
+  const approxBytes = Math.round(cleanBase64(dataUrl).length * 3 / 4);
+  return {
+    base64: dataUrl,
+    mimeType: finalMime,
+    name: fileName,
+    size: `${Math.max(1, Math.round(approxBytes / 1024))} KB`
+  };
+}
 function loadChatHistory(fallback) {
   if (typeof window === "undefined") return fallback;
   try {
@@ -24601,12 +24729,47 @@ function loadChatHistory(fallback) {
     return fallback;
   }
 }
+function stripHeavyMediaFromSessions(history, stripAllImages) {
+  if (!Array.isArray(history)) return history;
+  return history.map((session, sIdx) => {
+    if (!session || typeof session !== "object") return session;
+    const msgs = Array.isArray(session.messages) ? session.messages : [];
+    const prunedMsgs = msgs.map((msg, mIdx) => {
+      if (!msg || typeof msg !== "object") return msg;
+      const hasLargeDataImage = typeof msg.image === "string" && msg.image.startsWith("data:") && msg.image.length > 4096;
+      const isRecent = sIdx === 0 && mIdx >= Math.max(0, msgs.length - 4);
+      if (hasLargeDataImage && (stripAllImages || !isRecent)) {
+        const { image: _dropped, ...rest2 } = msg;
+        return rest2;
+      }
+      return msg;
+    });
+    return { ...session, messages: prunedMsgs };
+  });
+}
 function saveChatHistory(history) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(history));
-  } catch (error) {
-    console.error("Unable to save Kevin AI chat history.", error);
+    const raw = JSON.stringify(history);
+    if (raw.length <= 2e6) {
+      window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, raw);
+      return;
+    }
+    const recentOnly = JSON.stringify(stripHeavyMediaFromSessions(history, false));
+    if (recentOnly.length <= 24e5) {
+      window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, recentOnly);
+      return;
+    }
+    const textOnly = JSON.stringify(stripHeavyMediaFromSessions(history, true));
+    window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, textOnly);
+  } catch {
+    try {
+      window.localStorage.removeItem("kevin_ai_chats");
+      const textOnly = JSON.stringify(stripHeavyMediaFromSessions(history, true));
+      window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, textOnly);
+    } catch (innerErr) {
+      console.error("Unable to save Kevin AI chat history.", innerErr);
+    }
   }
 }
 function runDeviceAction(action, forceExecute = false) {
@@ -35971,7 +36134,7 @@ function le() {
     });
   }
   function n() {
-    return (i$1.DOMPurify ? Promise.resolve(i$1.DOMPurify) : __vitePreload(() => import("./purify.es-1bRnnZmV.js"), true ? [] : void 0)).catch(function(t2) {
+    return (i$1.DOMPurify ? Promise.resolve(i$1.DOMPurify) : __vitePreload(() => import("./purify.es-DVnfmSz6.js"), true ? [] : void 0)).catch(function(t2) {
       return Promise.reject(new Error("Could not load dompurify: " + t2));
     }).then(function(t2) {
       return t2.default ? t2.default : t2;
@@ -36673,7 +36836,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-Dy8oX6MK.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-BFEagnSg.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -101232,11 +101395,28 @@ const MarkdownRenderer = ({ content: content2 }) => {
   ) });
 };
 const createVoiceRecordingSession$1 = async () => {
-  var _a2;
+  var _a2, _b2, _c;
   if (!((_a2 = navigator.mediaDevices) == null ? void 0 : _a2.getUserMedia) || typeof MediaRecorder === "undefined") {
     throw new Error("Audio recording is not supported on this device.");
   }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const agentBridge = window.KevinAgentBridge;
+  if (agentBridge == null ? void 0 : agentBridge.pauseWakeWord) {
+    try {
+      agentBridge.pauseWakeWord();
+      await new Promise((resolve) => setTimeout(resolve, 140));
+    } catch {
+    }
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    try {
+      (_b2 = agentBridge == null ? void 0 : agentBridge.resumeWakeWord) == null ? void 0 : _b2.call(agentBridge);
+    } catch {
+    }
+    throw err;
+  }
   const supportedMimeType = [
     "audio/webm;codecs=opus",
     "audio/webm",
@@ -101250,6 +101430,10 @@ const createVoiceRecordingSession$1 = async () => {
     recorder = new MediaRecorder(stream, supportedMimeType ? { mimeType: supportedMimeType } : void 0);
   } catch (err) {
     stream.getTracks().forEach((track) => track.stop());
+    try {
+      (_c = agentBridge == null ? void 0 : agentBridge.resumeWakeWord) == null ? void 0 : _c.call(agentBridge);
+    } catch {
+    }
     throw err instanceof Error ? err : new Error("This device cannot record audio.");
   }
   const chunks = [];
@@ -101263,7 +101447,14 @@ const createVoiceRecordingSession$1 = async () => {
     rejectStop = reject2;
   });
   const recorderMimeType = (recorder.mimeType || supportedMimeType || "audio/webm").split(";")[0];
-  const cleanup = () => stream.getTracks().forEach((track) => track.stop());
+  const cleanup = () => {
+    var _a3;
+    stream.getTracks().forEach((track) => track.stop());
+    try {
+      (_a3 = agentBridge == null ? void 0 : agentBridge.resumeWakeWord) == null ? void 0 : _a3.call(agentBridge);
+    } catch {
+    }
+  };
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data);
   };
@@ -101307,12 +101498,6 @@ const createVoiceRecordingSession$1 = async () => {
     }
   };
 };
-const blobToDataUrl = (blob) => new Promise((resolve, reject2) => {
-  const reader2 = new FileReader();
-  reader2.onload = () => typeof reader2.result === "string" ? resolve(reader2.result) : reject2(new Error("Could not read file."));
-  reader2.onerror = () => reject2(reader2.error || new Error("Could not read file."));
-  reader2.readAsDataURL(blob);
-});
 const blobToRawBase64 = (blob) => new Promise((resolve, reject2) => {
   const reader2 = new FileReader();
   reader2.onloadend = () => {
@@ -101362,6 +101547,11 @@ function AssistantOverlay({
   const isLiveScreenRef = reactExports.useRef(false);
   const cleanFrameWaitersRef = reactExports.useRef([]);
   const sendingLockRef = reactExports.useRef(false);
+  const lastWakeIdRef = reactExports.useRef(0);
+  const wakeHandlersRef = reactExports.useRef({
+    handleSend: async () => void 0,
+    startVoiceRecording: async () => void 0
+  });
   const showAudioStatus = (msg) => {
     setAudioStatusNote(msg);
     if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
@@ -101469,9 +101659,38 @@ function AssistantOverlay({
     };
     window.addEventListener("screenCaptured", onNativeFrame);
     window.addEventListener("screenSharingState", onNativeState);
+    const processWakeWordDetail = (detail) => {
+      if (!detail) return;
+      const wakeId = typeof detail.id === "number" ? detail.id : Date.now();
+      if (wakeId && lastWakeIdRef.current === wakeId) return;
+      lastWakeIdRef.current = wakeId;
+      try {
+        delete window.__kevinPendingWakeWord;
+      } catch {
+        window.__kevinPendingWakeWord = void 0;
+      }
+      const cmd = (detail.command || "").trim();
+      if (cmd) {
+        void wakeHandlersRef.current.handleSend(cmd);
+      } else {
+        showAudioStatus("🎙️ Ndakumva! Mbwira icyo ushaka...");
+        setTimeout(() => {
+          void wakeHandlersRef.current.startVoiceRecording();
+        }, 250);
+      }
+    };
+    const onWakeWord = (event) => {
+      processWakeWordDetail(event.detail);
+    };
+    window.addEventListener("kevinWakeWordTriggered", onWakeWord);
+    const pendingWake = window.__kevinPendingWakeWord;
+    if (pendingWake) {
+      processWakeWordDetail(pendingWake);
+    }
     return () => {
       window.removeEventListener("screenCaptured", onNativeFrame);
       window.removeEventListener("screenSharingState", onNativeState);
+      window.removeEventListener("kevinWakeWordTriggered", onWakeWord);
     };
   }, []);
   const handleDismiss = () => {
@@ -101749,19 +101968,23 @@ function AssistantOverlay({
       await startVoiceRecording();
     }
   };
+  wakeHandlersRef.current = {
+    handleSend: (overrideText) => handleSend(overrideText),
+    startVoiceRecording
+  };
   const handleImagePick = async (e) => {
     var _a2, _b2;
     const file = (_a2 = e.target.files) == null ? void 0 : _a2[0];
     e.target.value = "";
     if (!file) return;
     try {
-      const dataUrl = await blobToDataUrl(file);
-      if (!cleanBase64(dataUrl)) return;
-      setAttachedImage({
-        base64: dataUrl,
+      const compressed = await compressImageToAttachment(file, {
+        name: file.name,
         mimeType: file.type || "image/jpeg",
-        name: file.name
+        maxDim: 1280,
+        quality: 0.82
       });
+      setAttachedImage(compressed);
       (_b2 = textareaRef.current) == null ? void 0 : _b2.focus();
     } catch {
       setErrorMsg("Ifoto ntiyashoboye gusomwa.");
@@ -102336,7 +102559,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-B8wkvIVs.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-DOzqKFfr.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -102558,28 +102781,36 @@ const downloadImage = async (url, filename = "kevin_ai_image.jpg", onSuccess) =>
   }
 };
 const createImageAttachment = async (file) => {
-  const dataUrl = await new Promise((resolve, reject2) => {
-    const reader2 = new FileReader();
-    reader2.onload = () => typeof reader2.result === "string" ? resolve(reader2.result) : reject2(new Error("The selected image could not be read."));
-    reader2.onerror = () => reject2(reader2.error || new Error("The selected image could not be read."));
-    reader2.readAsDataURL(file);
-  });
-  if (!cleanBase64(dataUrl)) {
-    throw new Error("The selected image could not be encoded.");
-  }
-  return {
-    base64: dataUrl,
-    mimeType: file.type || "image/jpeg",
+  return compressImageToAttachment(file, {
     name: file.name,
-    size: `${Math.round(file.size / 1024)} KB`
-  };
+    mimeType: file.type || "image/jpeg",
+    maxDim: 1280,
+    quality: 0.82
+  });
 };
 const createVoiceRecordingSession = async () => {
-  var _a2;
+  var _a2, _b2, _c;
   if (!((_a2 = navigator.mediaDevices) == null ? void 0 : _a2.getUserMedia) || typeof MediaRecorder === "undefined") {
     throw new Error("Audio recording is not supported on this device.");
   }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const agentBridge = window.KevinAgentBridge;
+  if (agentBridge == null ? void 0 : agentBridge.pauseWakeWord) {
+    try {
+      agentBridge.pauseWakeWord();
+      await new Promise((resolve) => setTimeout(resolve, 140));
+    } catch {
+    }
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    try {
+      (_b2 = agentBridge == null ? void 0 : agentBridge.resumeWakeWord) == null ? void 0 : _b2.call(agentBridge);
+    } catch {
+    }
+    throw err;
+  }
   const supportedMimeType = [
     "audio/webm;codecs=opus",
     "audio/webm",
@@ -102590,6 +102821,10 @@ const createVoiceRecordingSession = async () => {
   ].find((type) => MediaRecorder.isTypeSupported(type)) || "";
   if (!supportedMimeType) {
     stream.getTracks().forEach((track) => track.stop());
+    try {
+      (_c = agentBridge == null ? void 0 : agentBridge.resumeWakeWord) == null ? void 0 : _c.call(agentBridge);
+    } catch {
+    }
     throw new Error("This device cannot record audio.");
   }
   const recorder = new MediaRecorder(stream, supportedMimeType ? { mimeType: supportedMimeType } : void 0);
@@ -102604,7 +102839,14 @@ const createVoiceRecordingSession = async () => {
     rejectStop = reject2;
   });
   const recorderMimeType = (recorder.mimeType || supportedMimeType || "audio/webm").split(";")[0];
-  const cleanup = () => stream.getTracks().forEach((track) => track.stop());
+  const cleanup = () => {
+    var _a3;
+    stream.getTracks().forEach((track) => track.stop());
+    try {
+      (_a3 = agentBridge == null ? void 0 : agentBridge.resumeWakeWord) == null ? void 0 : _a3.call(agentBridge);
+    } catch {
+    }
+  };
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data);
   };
@@ -102858,14 +103100,16 @@ function App() {
   });
   reactExports.useEffect(() => {
     saveChatHistory(sessions);
-    localStorage.setItem("kevin_ai_chats", JSON.stringify(sessions));
   }, [sessions]);
   reactExports.useEffect(() => {
     const current = sessions.find((s2) => s2.id === currentSessionId);
     if (current) {
       setMessages(current.messages);
     }
-    localStorage.setItem("kevin_current_session_id", currentSessionId.toString());
+    try {
+      localStorage.setItem("kevin_current_session_id", currentSessionId.toString());
+    } catch {
+    }
   }, [currentSessionId]);
   const [input, setInput] = reactExports.useState("");
   const [screenSharingActive, setScreenSharingActive] = reactExports.useState(false);
@@ -103313,9 +103557,21 @@ function App() {
     event.target.value = "";
     if (files2.length === 0) return;
     try {
-      const selectedImages = await Promise.all(files2.map(createImageAttachment));
-      setAttachedImages((prev) => [...prev, ...selectedImages]);
-      setAttachmentPopupOpen(false);
+      const selectedImages = [];
+      for (const file of files2) {
+        try {
+          const att = await createImageAttachment(file);
+          selectedImages.push(att);
+        } catch (itemErr) {
+          console.warn("Skipping unreadable gallery file:", itemErr);
+        }
+      }
+      if (selectedImages.length > 0) {
+        setAttachedImages((prev) => [...prev, ...selectedImages]);
+        setAttachmentPopupOpen(false);
+      } else {
+        showToastMessage("Ifoto yahiswemo ntiyabashije gufunguka.");
+      }
     } catch (error) {
       console.error("Gallery image attachment failed:", error);
       showToastMessage("One or more selected images could not be attached.");
@@ -103334,16 +103590,57 @@ function App() {
         correctOrientation: true,
         saveToGallery: false
       });
-      const base64 = cleanBase64(photo.base64String || "");
-      if (!base64) return;
-      const attachment = {
-        base64: `data:image/jpeg;base64,${base64}`,
-        mimeType: "image/jpeg",
-        name: "camera_photo.jpg",
-        size: "Image"
-      };
-      setAttachedImages((prev) => [...prev, attachment]);
-      setAttachmentPopupOpen(false);
+      const rawBase64 = cleanBase64(photo.base64String || "");
+      const mime = photo.format ? `image/${photo.format === "jpg" ? "jpeg" : photo.format}` : "image/jpeg";
+      if (rawBase64) {
+        const approxBytes = Math.round(rawBase64.length * 3 / 4);
+        const rawDataUrl = `data:${mime};base64,${rawBase64}`;
+        if (approxBytes > 350 * 1024) {
+          const blob = await (await fetch(rawDataUrl)).blob();
+          const compressed = await compressImageToAttachment(blob, {
+            name: "camera_photo.jpg",
+            mimeType: mime,
+            maxDim: 1280,
+            quality: 0.82
+          });
+          setAttachedImages((prev) => [...prev, compressed]);
+        } else {
+          setAttachedImages((prev) => [
+            ...prev,
+            {
+              base64: rawDataUrl,
+              mimeType: mime,
+              name: "camera_photo.jpg",
+              size: `${Math.max(1, Math.round(approxBytes / 1024))} KB`
+            }
+          ]);
+        }
+        setAttachmentPopupOpen(false);
+        return;
+      }
+      if (photo.path || photo.webPath) {
+        const nativeAtt = readNativeCompressedImage(photo.path || photo.webPath || "", {
+          name: "camera_photo.jpg",
+          maxDim: 1280,
+          quality: 82
+        });
+        if (nativeAtt) {
+          setAttachedImages((prev) => [...prev, nativeAtt]);
+          setAttachmentPopupOpen(false);
+          return;
+        }
+      }
+      if (photo.webPath) {
+        const blob = await (await fetch(photo.webPath)).blob();
+        const compressed = await compressImageToAttachment(blob, {
+          name: "camera_photo.jpg",
+          mimeType: blob.type || mime,
+          maxDim: 1280,
+          quality: 0.82
+        });
+        setAttachedImages((prev) => [...prev, compressed]);
+        setAttachmentPopupOpen(false);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("User cancelled") || message.includes("cancelled")) return;
@@ -103360,30 +103657,69 @@ function App() {
     try {
       const { results: results2 } = await Camera.chooseFromGallery({
         allowMultipleSelection: true,
-        quality: 90
+        quality: 82,
+        targetWidth: 1280,
+        targetHeight: 1280,
+        correctOrientation: true
       });
       if (!results2 || results2.length === 0) return;
-      const selectedImages = await Promise.all(
-        results2.map(async (item, index2) => {
-          const response = await fetch(item.webPath);
-          if (!response.ok) {
-            throw new Error("Failed to read selected image");
+      const selectedImages = [];
+      for (let index2 = 0; index2 < results2.length; index2++) {
+        const item = results2[index2];
+        try {
+          if (item.type && String(item.type).toLowerCase().includes("video")) continue;
+          const itemName = `gallery_image_${Date.now()}_${index2 + 1}.jpg`;
+          const nativeCompressed = readNativeCompressedImage(item.uri || item.webPath || "", {
+            name: itemName,
+            maxDim: 1280,
+            quality: 82
+          });
+          if (nativeCompressed) {
+            selectedImages.push(nativeCompressed);
+            continue;
           }
-          const blob = await response.blob();
+          let blob = null;
+          if (item.webPath) {
+            const response = await fetch(item.webPath);
+            if (response.ok) {
+              blob = await response.blob();
+            }
+          }
+          if (!blob && item.thumbnail) {
+            const thumbUrl = item.thumbnail.startsWith("data:") ? item.thumbnail : `data:image/jpeg;base64,${item.thumbnail}`;
+            const thumbRes = await fetch(thumbUrl);
+            if (thumbRes.ok) {
+              blob = await thumbRes.blob();
+            }
+          }
+          if (!blob || !blob.size) continue;
+          if (blob.type && blob.type.startsWith("video/")) continue;
           const mimeType = blob.type || "image/jpeg";
-          const file = new File(
-            [blob],
-            `gallery_image_${Date.now()}_${index2 + 1}.jpg`,
-            { type: mimeType }
-          );
-          return createImageAttachment(file);
-        })
-      );
-      setAttachedImages((prev) => [...prev, ...selectedImages]);
-      setAttachmentPopupOpen(false);
+          const compressed = await compressImageToAttachment(blob, {
+            name: itemName,
+            mimeType,
+            maxDim: 1280,
+            quality: 0.82
+          });
+          selectedImages.push(compressed);
+        } catch (itemErr) {
+          console.warn("Gallery item processing skipped:", itemErr);
+        }
+      }
+      if (selectedImages.length > 0) {
+        setAttachedImages((prev) => [...prev, ...selectedImages]);
+        setAttachmentPopupOpen(false);
+      } else {
+        showToastMessage("Ntihashoboye gukururwa ifoto muri gallery. Ongera ugerageze.");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/cancel|cancelled|canceled/i.test(message)) return;
+      if (/plugin|not implemented|not available/i.test(message)) {
+        const picker = document.getElementById("kevin-multi-picker");
+        picker == null ? void 0 : picker.click();
+        return;
+      }
       console.error("Modern Photo Picker error:", error);
       showToastMessage("Could not select images. Please try again.");
     }
@@ -103460,9 +103796,6 @@ function App() {
     window.addEventListener("show-toast", handleToast);
     return () => window.removeEventListener("show-toast", handleToast);
   }, []);
-  reactExports.useEffect(() => {
-    localStorage.setItem("kevin_ai_chats", JSON.stringify(sessions));
-  }, [sessions]);
   const updateSessionMessages = (newMessages) => {
     setMessages(newMessages);
     setSessions((prev) => prev.map((s2) => {
@@ -105344,6 +105677,28 @@ Click the **${docName}** file below to download and view the complete document.`
                   }
                 )
               ] }),
+              nativeAgentStatus.isAndroid && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-900 dark:text-[#e9edef]", children: "🎙️ “Hi Kevin” Voice Wake Word" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0]", children: "Iyo uvuze “Hi Kevin”, Assistant AI ihita ifunguka ako kanya nta gukanda ahandi." })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    role: "switch",
+                    "aria-checked": Boolean(nativeAgentStatus.wakeWordEnabled),
+                    onClick: () => {
+                      var _a3, _b3;
+                      const next = !nativeAgentStatus.wakeWordEnabled;
+                      (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.setWakeWordEnabled) == null ? void 0 : _b3.call(_a3, next);
+                      setNativeAgentStatus(getNativeAgentStatus());
+                    },
+                    className: `w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${nativeAgentStatus.wakeWordEnabled ? "bg-[#00a884]" : "bg-gray-300 dark:bg-gray-700"}`,
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `w-5 h-5 rounded-full bg-white shadow transition-transform ${nativeAgentStatus.wakeWordEnabled ? "translate-x-5" : "translate-x-0"}` })
+                  }
+                )
+              ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-900 dark:text-[#e9edef]", children: "💬 WhatsApp Auto-Reply Agent" }),
@@ -105450,7 +105805,8 @@ Click the **${docName}** file below to download and view the complete document.`
                   }
                 )
               ] }),
-              (!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission) && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              !nativeAgentStatus.hasAccessibility && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-amber-800 dark:text-amber-200", children: "Kanda “Accessibility: Fungura” wemerere “Kevin AI Full Agent” kugira ngo ubutumwa bwa WhatsApp buhite bukanda Send ako kanya." }),
+              (!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission || !nativeAgentStatus.hasMicPermission) && /* @__PURE__ */ jsxRuntimeExports.jsx(
                 "button",
                 {
                   type: "button",
@@ -105459,7 +105815,7 @@ Click the **${docName}** file below to download and view the complete document.`
                     return (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.requestAgentPermissions) == null ? void 0 : _b3.call(_a3);
                   },
                   className: "w-full py-2 rounded-lg bg-[#00a884] hover:bg-[#075E54] text-white text-xs font-bold cursor-pointer",
-                  children: "Saba Permissions (SMS, Direct Call & Contacts)"
+                  children: "Saba Permissions (SMS, Direct Call, Contacts & Mic)"
                 }
               )
             ] }),
@@ -105774,8 +106130,38 @@ Click the **${docName}** file below to download and view the complete document.`
     )
   ] });
 }
+class AppErrorBoundary extends reactExports.Component {
+  constructor() {
+    super(...arguments);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error("Kevin AI UI error:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-screen flex flex-col items-center justify-center p-6 bg-[#f0f2f5] dark:bg-[#111b21] text-center", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-sm w-full rounded-2xl bg-white dark:bg-[#202c33] p-6 shadow-lg border border-gray-200 dark:border-[#2f3b43] space-y-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-lg font-bold text-[#075E54] dark:text-[#00FF88]", children: "Kevin AI" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-gray-600 dark:text-[#d1d7db]", children: "Habaye akabazo gato mu gufungura dosiye cyangwa ifoto. Kanda hasi wongere ufungure neza." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: () => window.location.reload(),
+            className: "w-full py-2.5 px-4 rounded-xl bg-[#00a884] hover:bg-[#075E54] text-white font-semibold text-sm cursor-pointer",
+            children: "Ongera ufungure Kevin AI"
+          }
+        )
+      ] }) });
+    }
+    return this.props.children;
+  }
+}
 clientExports.createRoot(document.getElementById("root")).render(
-  /* @__PURE__ */ jsxRuntimeExports.jsx(reactExports.StrictMode, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(App, {}) })
+  /* @__PURE__ */ jsxRuntimeExports.jsx(reactExports.StrictMode, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(AppErrorBoundary, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(App, {}) }) })
 );
 export {
   Encoding as E,

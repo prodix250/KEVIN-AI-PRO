@@ -8,12 +8,15 @@ import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebView;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
+import com.getcapacitor.WebViewListener;
 
 import org.json.JSONObject;
 
@@ -67,6 +70,18 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 request.grant(request.getResources());
+            }
+        });
+
+        getBridge().addWebViewListener(new WebViewListener() {
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        recreate();
+                    }
+                });
+                return true;
             }
         });
 
