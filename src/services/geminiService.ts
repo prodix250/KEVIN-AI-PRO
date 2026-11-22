@@ -418,6 +418,94 @@ export function resolveContactMatches(query: string): SavedContact[] {
   return allMatches.slice(0, 8);
 }
 
+export async function compressImageToAttachment(
+  file: Blob,
+  options?: { name?: string; mimeType?: string; maxDim?: number; quality?: number }
+): Promise<AttachmentItem> {
+  const maxDim = options?.maxDim ?? 1280;
+  const quality = options?.quality ?? 0.82;
+  const fileName = options?.name || (file instanceof File ? file.name : '') || `image_${Date.now()}.jpg`;
+  const origType = options?.mimeType || file.type || 'image/jpeg';
+
+  const readAsDataUrlSafe = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () =>
+        typeof reader.result === 'string'
+          ? resolve(reader.result)
+          : reject(new Error('The selected image could not be read.'));
+      reader.onerror = () => reject(reader.error || new Error('The selected image could not be read.'));
+      reader.readAsDataURL(blob);
+    });
+
+  let dataUrl = '';
+  let finalMime = origType;
+
+  if (typeof document !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('Image decode failed'));
+        image.src = objectUrl;
+      });
+
+      const srcW = img.naturalWidth || img.width || 0;
+      const srcH = img.naturalHeight || img.height || 0;
+      if (srcW > 0 && srcH > 0) {
+        const scale = Math.min(1, maxDim / Math.max(srcW, srcH));
+        const targetW = Math.max(1, Math.round(srcW * scale));
+        const targetH = Math.max(1, Math.round(srcH * scale));
+
+        // Re-encode if image is larger than maxDim or file is > 350KB to avoid WebView OOM / quota crash
+        if (scale < 1 || file.size > 350 * 1024 || origType === 'image/heic' || origType === 'image/heif') {
+          const canvas = document.createElement('canvas');
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+            dataUrl = canvas.toDataURL('image/jpeg', quality);
+            finalMime = 'image/jpeg';
+            canvas.width = 0;
+            canvas.height = 0;
+          }
+        }
+      }
+    } catch {
+      // Fallback below if canvas decode fails
+    } finally {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  if (!dataUrl) {
+    if (file.size > 4_000_000) {
+      throw new Error('Ifoto ni nini cyane ku buryo itabashije guhindurwa.');
+    }
+    dataUrl = await readAsDataUrlSafe(file);
+  }
+
+  if (!cleanBase64(dataUrl)) {
+    throw new Error('The selected image could not be encoded.');
+  }
+
+  const approxBytes = Math.round((cleanBase64(dataUrl).length * 3) / 4);
+  return {
+    base64: dataUrl,
+    mimeType: finalMime,
+    name: fileName,
+    size: `${Math.max(1, Math.round(approxBytes / 1024))} KB`,
+  };
+}
+
 export function loadChatHistory<T>(fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   try {
@@ -429,12 +517,48 @@ export function loadChatHistory<T>(fallback: T): T {
   }
 }
 
+function stripHeavyMediaFromSessions(history: unknown, stripAllImages: boolean): unknown {
+  if (!Array.isArray(history)) return history;
+  return history.map((session, sIdx) => {
+    if (!session || typeof session !== 'object') return session;
+    const msgs = Array.isArray((session as any).messages) ? (session as any).messages : [];
+    const prunedMsgs = msgs.map((msg: any, mIdx: number) => {
+      if (!msg || typeof msg !== 'object') return msg;
+      const hasLargeDataImage = typeof msg.image === 'string' && msg.image.startsWith('data:') && msg.image.length > 4096;
+      const isRecent = sIdx === 0 && mIdx >= Math.max(0, msgs.length - 4);
+      if (hasLargeDataImage && (stripAllImages || !isRecent)) {
+        const { image: _dropped, ...rest } = msg;
+        return rest;
+      }
+      return msg;
+    });
+    return { ...(session as any), messages: prunedMsgs };
+  });
+}
+
 export function saveChatHistory(history: unknown): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(history));
-  } catch (error) {
-    console.error('Unable to save Kevin AI chat history.', error);
+    const raw = JSON.stringify(history);
+    if (raw.length <= 2_000_000) {
+      window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, raw);
+      return;
+    }
+    const recentOnly = JSON.stringify(stripHeavyMediaFromSessions(history, false));
+    if (recentOnly.length <= 2_400_000) {
+      window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, recentOnly);
+      return;
+    }
+    const textOnly = JSON.stringify(stripHeavyMediaFromSessions(history, true));
+    window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, textOnly);
+  } catch {
+    try {
+      window.localStorage.removeItem('kevin_ai_chats');
+      const textOnly = JSON.stringify(stripHeavyMediaFromSessions(history, true));
+      window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, textOnly);
+    } catch (innerErr) {
+      console.error('Unable to save Kevin AI chat history.', innerErr);
+    }
   }
 }
 

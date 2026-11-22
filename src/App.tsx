@@ -8,7 +8,7 @@ import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settin
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
@@ -43,23 +43,12 @@ const downloadImage = async (url: string, filename = 'kevin_ai_image.jpg', onSuc
 };
 
 const createImageAttachment = async (file: File): Promise<AttachmentItem> => {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => typeof reader.result === 'string'
-      ? resolve(reader.result)
-      : reject(new Error('The selected image could not be read.'));
-    reader.onerror = () => reject(reader.error || new Error('The selected image could not be read.'));
-    reader.readAsDataURL(file);
-  });
-  if (!cleanBase64(dataUrl)) {
-    throw new Error('The selected image could not be encoded.');
-  }
-  return {
-    base64: dataUrl,
-    mimeType: file.type || 'image/jpeg',
+  return compressImageToAttachment(file, {
     name: file.name,
-    size: `${Math.round(file.size / 1024)} KB`,
-  };
+    mimeType: file.type || 'image/jpeg',
+    maxDim: 1280,
+    quality: 0.82,
+  });
 };
 
 type VoiceRecordingSession = {
@@ -428,7 +417,6 @@ export default function App() {
 
   useEffect(() => {
     saveChatHistory(sessions);
-    localStorage.setItem('kevin_ai_chats', JSON.stringify(sessions));
   }, [sessions]);
 
   useEffect(() => {
@@ -436,7 +424,11 @@ export default function App() {
     if (current) {
       setMessages(current.messages);
     }
-    localStorage.setItem('kevin_current_session_id', currentSessionId.toString());
+    try {
+      localStorage.setItem('kevin_current_session_id', currentSessionId.toString());
+    } catch {
+      // ignore storage errors
+    }
   }, [currentSessionId]);
   const [input, setInput] = useState('');
   const [screenSharingActive, setScreenSharingActive] = useState(false);
@@ -944,9 +936,21 @@ export default function App() {
     if (files.length === 0) return;
 
     try {
-      const selectedImages = await Promise.all(files.map(createImageAttachment));
-      setAttachedImages(prev => [...prev, ...selectedImages]);
-      setAttachmentPopupOpen(false);
+      const selectedImages: AttachmentItem[] = [];
+      for (const file of files) {
+        try {
+          const att = await createImageAttachment(file);
+          selectedImages.push(att);
+        } catch (itemErr) {
+          console.warn('Skipping unreadable gallery file:', itemErr);
+        }
+      }
+      if (selectedImages.length > 0) {
+        setAttachedImages(prev => [...prev, ...selectedImages]);
+        setAttachmentPopupOpen(false);
+      } else {
+        showToastMessage('Ifoto yahiswemo ntiyabashije gufunguka.');
+      }
     } catch (error) {
       console.error('Gallery image attachment failed:', error);
       showToastMessage('One or more selected images could not be attached.');
@@ -972,16 +976,47 @@ export default function App() {
         correctOrientation: true,
         saveToGallery: false,
       });
-      const base64 = cleanBase64(photo.base64String || '');
-      if (!base64) return;
-      const attachment: AttachmentItem = {
-        base64: `data:image/jpeg;base64,${base64}`,
-        mimeType: 'image/jpeg',
-        name: 'camera_photo.jpg',
-        size: 'Image',
-      };
-      setAttachedImages(prev => [...prev, attachment]);
-      setAttachmentPopupOpen(false);
+      const rawBase64 = cleanBase64(photo.base64String || '');
+      const mime = photo.format ? `image/${photo.format === 'jpg' ? 'jpeg' : photo.format}` : 'image/jpeg';
+
+      if (rawBase64) {
+        const approxBytes = Math.round((rawBase64.length * 3) / 4);
+        const rawDataUrl = `data:${mime};base64,${rawBase64}`;
+        if (approxBytes > 350 * 1024) {
+          const blob = await (await fetch(rawDataUrl)).blob();
+          const compressed = await compressImageToAttachment(blob, {
+            name: 'camera_photo.jpg',
+            mimeType: mime,
+            maxDim: 1280,
+            quality: 0.82,
+          });
+          setAttachedImages(prev => [...prev, compressed]);
+        } else {
+          setAttachedImages(prev => [
+            ...prev,
+            {
+              base64: rawDataUrl,
+              mimeType: mime,
+              name: 'camera_photo.jpg',
+              size: `${Math.max(1, Math.round(approxBytes / 1024))} KB`,
+            },
+          ]);
+        }
+        setAttachmentPopupOpen(false);
+        return;
+      }
+
+      if (photo.webPath) {
+        const blob = await (await fetch(photo.webPath)).blob();
+        const compressed = await compressImageToAttachment(blob, {
+          name: 'camera_photo.jpg',
+          mimeType: blob.type || mime,
+          maxDim: 1280,
+          quality: 0.82,
+        });
+        setAttachedImages(prev => [...prev, compressed]);
+        setAttachmentPopupOpen(false);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('User cancelled') || message.includes('cancelled')) return;
@@ -994,50 +1029,75 @@ export default function App() {
   };
 
   const handleGalleryClick = async (event?: React.MouseEvent) => {
-  event?.preventDefault();
-  event?.stopPropagation();
+    event?.preventDefault();
+    event?.stopPropagation();
 
-  try {
-    const { results } = await CapCamera.chooseFromGallery({
-      allowMultipleSelection: true,
-      quality: 90,
-    });
+    try {
+      const { results } = await CapCamera.chooseFromGallery({
+        allowMultipleSelection: true,
+        quality: 82,
+        targetWidth: 1280,
+        targetHeight: 1280,
+        correctOrientation: true,
+      });
 
-    if (!results || results.length === 0) return;
+      if (!results || results.length === 0) return;
 
-    const selectedImages = await Promise.all(
-      results.map(async (item, index) => {
-        const response = await fetch(item.webPath);
+      const selectedImages: AttachmentItem[] = [];
+      for (let index = 0; index < results.length; index++) {
+        const item = results[index];
+        try {
+          let blob: Blob | null = null;
+          if (item.webPath) {
+            const response = await fetch(item.webPath);
+            if (response.ok) {
+              blob = await response.blob();
+            }
+          }
+          if (!blob && item.thumbnail) {
+            const thumbUrl = item.thumbnail.startsWith('data:')
+              ? item.thumbnail
+              : `data:image/jpeg;base64,${item.thumbnail}`;
+            const thumbRes = await fetch(thumbUrl);
+            if (thumbRes.ok) {
+              blob = await thumbRes.blob();
+            }
+          }
+          if (!blob || !blob.size) continue;
+          if (blob.type && blob.type.startsWith('video/')) continue;
 
-        if (!response.ok) {
-          throw new Error('Failed to read selected image');
+          const mimeType = blob.type || 'image/jpeg';
+          const compressed = await compressImageToAttachment(blob, {
+            name: `gallery_image_${Date.now()}_${index + 1}.jpg`,
+            mimeType,
+            maxDim: 1280,
+            quality: 0.82,
+          });
+          selectedImages.push(compressed);
+        } catch (itemErr) {
+          console.warn('Gallery item processing skipped:', itemErr);
         }
+      }
 
-        const blob = await response.blob();
-        const mimeType = blob.type || 'image/jpeg';
+      if (selectedImages.length > 0) {
+        setAttachedImages(prev => [...prev, ...selectedImages]);
+        setAttachmentPopupOpen(false);
+      } else {
+        showToastMessage('Ntihashoboye gukururwa ifoto muri gallery. Ongera ugerageze.');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/cancel|cancelled|canceled/i.test(message)) return;
+      if (/plugin|not implemented|not available/i.test(message)) {
+        const picker = document.getElementById('kevin-multi-picker') as HTMLInputElement | null;
+        picker?.click();
+        return;
+      }
 
-        const file = new File(
-          [blob],
-          `gallery_image_${Date.now()}_${index + 1}.jpg`,
-          { type: mimeType }
-        );
-
-        return createImageAttachment(file);
-      })
-    );
-
-    setAttachedImages(prev => [...prev, ...selectedImages]);
-    setAttachmentPopupOpen(false);
-
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    if (/cancel|cancelled|canceled/i.test(message)) return;
-
-    console.error('Modern Photo Picker error:', error);
-    showToastMessage('Could not select images. Please try again.');
-  }
-};
+      console.error('Modern Photo Picker error:', error);
+      showToastMessage('Could not select images. Please try again.');
+    }
+  };
 
   const stateRef = useRef({
     drawerOpen,
@@ -1114,10 +1174,6 @@ export default function App() {
     window.addEventListener('show-toast', handleToast);
     return () => window.removeEventListener('show-toast', handleToast);
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('kevin_ai_chats', JSON.stringify(sessions));
-  }, [sessions]);
 
   const updateSessionMessages = (newMessages: Message[]) => {
     setMessages(newMessages);

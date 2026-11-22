@@ -8,6 +8,7 @@ import {
   DeviceAction,
   AgentPermissions,
   cleanBase64,
+  compressImageToAttachment,
   getAgentPermissions,
   saveAgentPermissions,
   runDeviceAction,
@@ -675,13 +676,13 @@ export default function AssistantOverlay({
     e.target.value = '';
     if (!file) return;
     try {
-      const dataUrl = await blobToDataUrl(file);
-      if (!cleanBase64(dataUrl)) return;
-      setAttachedImage({
-        base64: dataUrl,
-        mimeType: file.type || 'image/jpeg',
+      const compressed = await compressImageToAttachment(file, {
         name: file.name,
+        mimeType: file.type || 'image/jpeg',
+        maxDim: 1280,
+        quality: 0.82,
       });
+      setAttachedImage(compressed);
       textareaRef.current?.focus();
     } catch {
       setErrorMsg('Ifoto ntiyashoboye gusomwa.');
