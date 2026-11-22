@@ -669,8 +669,20 @@ Listen very carefully to this audio recording:
       let lastErr: unknown = null;
       let streamStarted = false;
       const modelsToTry = selectedModel === 'Prodix pro'
-        ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']
-        : ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+        ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
+        : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen'];
+
+      const latestUserText = Array.isArray(contents) && contents.length > 0
+        ? ((contents[contents.length - 1] as any)?.parts || [])
+            .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+            .join(' ')
+            .trim()
+        : '';
+      const shouldTryWebSearch = Boolean(
+        latestUserText
+        && !hasAudioAttachment
+        && /\b(news|amakuru|weather|score|match|price|current|latest|internet|google|search|shaka kuri internet|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|perezida|uri he|amakuru mashya)\b/i.test(latestUserText)
+      );
 
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       const firstModelTimeoutMs = hasAudioAttachment ? 9500 : 5500;
@@ -739,65 +751,63 @@ Listen very carefully to this audio recording:
 
           for (let attempt = 0; attempt < maxAttempts; attempt++) {
             try {
-              let streamPromise: Promise<any>;
-              try {
-                streamPromise = ai.models.generateContentStream({
-                  model: modelName,
-                  contents: contents as any,
-                  config: {
-                    systemInstruction,
-                    tools: [
-                      { googleSearch: {} },
-                      { functionDeclarations: deviceActionDeclarations },
-                    ],
-                    toolConfig: { includeServerSideToolInvocations: true },
-                    ...modelThinkingConfig,
-                  },
-                });
-                streamPromise.catch(() => {});
-              } catch {
-                streamPromise = ai.models.generateContentStream({
-                  model: modelName,
-                  contents: contents as any,
-                  config: {
-                    systemInstruction,
-                    tools: [{ functionDeclarations: deviceActionDeclarations }],
-                    ...modelThinkingConfig,
-                  },
-                });
-                streamPromise.catch(() => {});
-              }
-
-              const responseStream = !isLastAttemptOverall
-                ? await Promise.race([
-                    streamPromise,
-                    new Promise<never>((_, reject) =>
-                      setTimeout(() => reject(new Error('503 Model response timed out during high demand')), firstModelTimeoutMs)
-                    ),
-                  ])
-                : await streamPromise;
-
               const seenSourceUrls = new Set<string>();
               const collectedSources: Array<{ title: string; url: string }> = [];
               let accumulatedText = '';
 
-              for await (const chunk of responseStream) {
-                const functionCalls = (chunk as any).functionCalls || [];
-                const candidate = (chunk as any).candidates?.[0];
-                const gm = candidate?.groundingMetadata || (chunk as any).groundingMetadata;
-                const gChunks = gm?.groundingChunks || [];
-                for (const gc of gChunks) {
-                  const uri = gc?.web?.uri || gc?.maps?.uri;
-                  const title = gc?.web?.title || gc?.maps?.title || uri;
-                  if (uri && !seenSourceUrls.has(uri)) {
-                    seenSourceUrls.add(uri);
-                    collectedSources.push({ title, url: uri });
+              const consumeStream = async (useSearchTool: boolean) => {
+                const streamPromise = ai.models.generateContentStream({
+                  model: modelName,
+                  contents: contents as any,
+                  config: {
+                    systemInstruction,
+                    tools: useSearchTool
+                      ? [{ googleSearch: {} }, { functionDeclarations: deviceActionDeclarations }]
+                      : [{ functionDeclarations: deviceActionDeclarations }],
+                    ...(useSearchTool ? { toolConfig: { includeServerSideToolInvocations: true } } : {}),
+                    ...modelThinkingConfig,
+                  },
+                });
+                streamPromise.catch(() => {});
+
+                const responseStream = !isLastAttemptOverall
+                  ? await Promise.race([
+                      streamPromise,
+                      new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error('503 Model response timed out during high demand')), firstModelTimeoutMs)
+                      ),
+                    ])
+                  : await streamPromise;
+
+                for await (const chunk of responseStream) {
+                  const functionCalls = (chunk as any).functionCalls || [];
+                  const candidate = (chunk as any).candidates?.[0];
+                  const gm = candidate?.groundingMetadata || (chunk as any).groundingMetadata;
+                  const gChunks = gm?.groundingChunks || [];
+                  for (const gc of gChunks) {
+                    const uri = gc?.web?.uri || gc?.maps?.uri;
+                    const title = gc?.web?.title || gc?.maps?.title || uri;
+                    if (uri && !seenSourceUrls.has(uri)) {
+                      seenSourceUrls.add(uri);
+                      collectedSources.push({ title, url: uri });
+                    }
                   }
+                  if (chunk.text) {
+                    accumulatedText += chunk.text;
+                  }
+                  await writePayloadChunk(functionCalls, chunk.text);
                 }
-                if (chunk.text) {
-                  accumulatedText += chunk.text;
+              };
+
+              if (shouldTryWebSearch) {
+                try {
+                  await consumeStream(true);
+                } catch (searchErr) {
+                  if (streamStarted) throw searchErr;
+                  await consumeStream(false);
                 }
-                await writePayloadChunk(functionCalls, chunk.text);
+              } else {
+                await consumeStream(false);
               }
 
               if (collectedSources.length === 0 && accumulatedText) {
