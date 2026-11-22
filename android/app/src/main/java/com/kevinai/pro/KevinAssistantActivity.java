@@ -59,6 +59,8 @@ public class KevinAssistantActivity extends AppCompatActivity {
     private boolean waitingForInitialCleanCapture = false;
     private boolean cleanCapturePending = false;
     private int activityDepth = 0;
+    private long pendingWakeId = 0L;
+    private String pendingWakeCommand = null;
 
     private final Runnable cleanCaptureWatchdog = () -> finishCleanBehindCapture(null);
 
@@ -100,6 +102,15 @@ public class KevinAssistantActivity extends AppCompatActivity {
 
         try {
             getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true);
+                setTurnScreenOn(true);
+            } else {
+                getWindow().addFlags(
+                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                );
+            }
         } catch (Throwable ignored) {}
 
         FrameLayout root = new FrameLayout(this);
@@ -197,26 +208,36 @@ public class KevinAssistantActivity extends AppCompatActivity {
     }
 
     private void handleWakeWordIntent(Intent intent) {
-        if (intent == null || bridge == null || bridge.getWebView() == null) return;
+        if (intent == null) return;
         if (!intent.getBooleanExtra(KevinWakeWordService.EXTRA_WAKE_WORD_TRIGGERED, false)) return;
         final String command = intent.getStringExtra(KevinWakeWordService.EXTRA_WAKE_COMMAND);
         intent.removeExtra(KevinWakeWordService.EXTRA_WAKE_WORD_TRIGGERED);
         intent.removeExtra(KevinWakeWordService.EXTRA_WAKE_COMMAND);
+
+        try {
+            android.app.NotificationManager nm = getSystemService(android.app.NotificationManager.class);
+            if (nm != null) {
+                nm.cancel(KevinWakeWordService.TRIGGER_NOTIFICATION_ID);
+            }
+        } catch (Throwable ignored) {}
+
         final long wakeId = System.currentTimeMillis();
-        final String quotedCmd = JSONObject.quote(command != null ? command : "");
+        pendingWakeId = wakeId;
+        pendingWakeCommand = command != null ? command : "";
+
+        if (bridge == null || bridge.getWebView() == null) return;
+        final String quotedCmd = JSONObject.quote(pendingWakeCommand);
         final String js = "try{window.__kevinPendingWakeWord={id:" + wakeId + ",command:" + quotedCmd
                 + "};window.dispatchEvent(new CustomEvent('kevinWakeWordTriggered',{detail:{id:"
                 + wakeId + ",command:" + quotedCmd + "}}));}catch(e){}";
-        mainHandler.postDelayed(() -> {
-            if (bridge != null && bridge.getWebView() != null) {
-                bridge.getWebView().evaluateJavascript(js, null);
-            }
-        }, 400L);
-        mainHandler.postDelayed(() -> {
-            if (bridge != null && bridge.getWebView() != null) {
-                bridge.getWebView().evaluateJavascript(js, null);
-            }
-        }, 1150L);
+        long[] delays = new long[] { 350L, 950L, 1900L };
+        for (long delay : delays) {
+            mainHandler.postDelayed(() -> {
+                if (bridge != null && bridge.getWebView() != null) {
+                    bridge.getWebView().evaluateJavascript(js, null);
+                }
+            }, delay);
+        }
     }
 
     private void requestMissingRuntimePermissions() {
@@ -417,6 +438,23 @@ public class KevinAssistantActivity extends AppCompatActivity {
         public void openFullApp() {
             runOnUiThread(KevinAssistantActivity.this::openFullApp);
         }
+
+        @JavascriptInterface
+        public String consumePendingWakeWord() {
+            if (pendingWakeId == 0L) return "";
+            try {
+                JSONObject obj = new JSONObject();
+                obj.put("id", pendingWakeId);
+                obj.put("command", pendingWakeCommand != null ? pendingWakeCommand : "");
+                pendingWakeId = 0L;
+                pendingWakeCommand = null;
+                return obj.toString();
+            } catch (Exception e) {
+                pendingWakeId = 0L;
+                pendingWakeCommand = null;
+                return "";
+            }
+        }
     }
 
     private final class ScreenCaptureBridge {
@@ -464,6 +502,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        KevinWakeWordService.setOverlayVisible(true);
         KevinWakeWordService.pauseListening(this);
         ScreenCaptureService.setSuppressOverlayFrames(true);
         if (bridge != null) {
@@ -475,6 +514,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        KevinWakeWordService.setOverlayVisible(false);
         cancelCleanCaptureAndRestore();
         ScreenCaptureService.setSuppressOverlayFrames(false);
         if (bridge != null) {
@@ -485,6 +525,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
+        KevinWakeWordService.setOverlayVisible(false);
         if (isFinishing()) {
             KevinWakeWordService.resumeListening(this);
         }
@@ -500,6 +541,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         waitingForInitialCleanCapture = false;
+        KevinWakeWordService.setOverlayVisible(false);
         cancelCleanCaptureAndRestore();
         ScreenCaptureService.setSuppressOverlayFrames(false);
         KevinWakeWordService.resumeListening(this);

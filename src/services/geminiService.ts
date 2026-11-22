@@ -30,6 +30,9 @@ export interface NativeAgentStatus {
   autoSendEnabled?: boolean;
   whatsappAutoReplyEnabled?: boolean;
   wakeWordEnabled?: boolean;
+  wakeWordActive?: boolean;
+  hasOverlayPermission?: boolean;
+  speechRecognizerAvailable?: boolean;
 }
 
 export interface AgentOutboxItem {

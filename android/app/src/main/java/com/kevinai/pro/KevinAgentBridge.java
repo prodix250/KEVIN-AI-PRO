@@ -14,8 +14,10 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.media.ExifInterface;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.ContactsContract;
 import android.provider.Settings;
+import android.speech.SpeechRecognizer;
 import android.telephony.SmsManager;
 import android.text.TextUtils;
 import android.util.Base64;
@@ -103,6 +105,9 @@ public class KevinAgentBridge {
             obj.put("autoSendEnabled", KevinAgentPrefs.isAutoSendEnabled(activity));
             obj.put("whatsappAutoReplyEnabled", KevinAgentPrefs.isWhatsAppAutoReplyEnabled(activity));
             obj.put("wakeWordEnabled", KevinAgentPrefs.isWakeWordEnabled(activity));
+            obj.put("wakeWordActive", KevinWakeWordService.isRunning);
+            obj.put("hasOverlayPermission", Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(activity));
+            obj.put("speechRecognizerAvailable", SpeechRecognizer.isRecognitionAvailable(activity));
             return obj.toString();
         } catch (Exception e) {
             return "{\"isAndroid\":true}";
@@ -165,6 +170,29 @@ public class KevinAgentBridge {
     @JavascriptInterface
     public void resumeWakeWord() {
         KevinWakeWordService.resumeListening(activity);
+    }
+
+    @JavascriptInterface
+    public void openOverlayPermissionSettings() {
+        activity.runOnUiThread(() -> {
+            try {
+                Intent intent = new Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + activity.getPackageName())
+                );
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(intent);
+            } catch (Exception e) {
+                try {
+                    Intent fallback = new Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:" + activity.getPackageName())
+                    );
+                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    activity.startActivity(fallback);
+                } catch (Exception ignored) {}
+            }
+        });
     }
 
     @JavascriptInterface

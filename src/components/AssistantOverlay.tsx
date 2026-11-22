@@ -35,7 +35,11 @@ type VoiceRecordingSession = {
   cancel: () => void;
 };
 
-const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => {
+const createVoiceRecordingSession = async (options?: {
+  autoStopOnSilence?: boolean;
+  onAutoSilence?: () => void;
+  onNoSpeechTimeout?: () => void;
+}): Promise<VoiceRecordingSession> => {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
     throw new Error('Audio recording is not supported on this device.');
   }
@@ -75,6 +79,73 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
     throw err instanceof Error ? err : new Error('This device cannot record audio.');
   }
 
+  let vadInterval: ReturnType<typeof setInterval> | null = null;
+  let audioCtx: AudioContext | null = null;
+  let vadTriggered = false;
+
+  const stopVad = () => {
+    if (vadInterval) {
+      clearInterval(vadInterval);
+      vadInterval = null;
+    }
+    if (audioCtx) {
+      try {
+        void audioCtx.close();
+      } catch {
+        // ignore
+      }
+      audioCtx = null;
+    }
+  };
+
+  if (options?.autoStopOnSilence) {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        audioCtx = new AudioCtx();
+        if (audioCtx.state === 'suspended') {
+          void audioCtx.resume();
+        }
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 512;
+        source.connect(analyser);
+        const samples = new Uint8Array(analyser.fftSize);
+        const startedAt = Date.now();
+        let heardSpeech = false;
+        let lastSpeechAt = startedAt;
+
+        vadInterval = setInterval(() => {
+          if (vadTriggered) return;
+          const now = Date.now();
+          const elapsed = now - startedAt;
+          analyser.getByteTimeDomainData(samples);
+          let sumSq = 0;
+          for (let i = 0; i < samples.length; i++) {
+            const norm = (samples[i] - 128) / 128;
+            sumSq += norm * norm;
+          }
+          const rms = Math.sqrt(sumSq / samples.length);
+          if (elapsed > 350 && rms > 0.02) {
+            heardSpeech = true;
+            lastSpeechAt = now;
+          }
+          if (heardSpeech && (now - lastSpeechAt >= 1300 || elapsed >= 14500)) {
+            vadTriggered = true;
+            stopVad();
+            options.onAutoSilence?.();
+          } else if (!heardSpeech && elapsed >= 7500) {
+            vadTriggered = true;
+            stopVad();
+            options.onNoSpeechTimeout?.();
+          }
+        }, 120);
+      }
+    } catch {
+      stopVad();
+    }
+  }
+
   const chunks: Blob[] = [];
   let cancelled = false;
   let settled = false;
@@ -87,6 +158,7 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
   });
   const recorderMimeType = (recorder.mimeType || supportedMimeType || 'audio/webm').split(';')[0];
   const cleanup = () => {
+    stopVad();
     stream.getTracks().forEach((track) => track.stop());
     try { agentBridge?.resumeWakeWord?.(); } catch { /* ignore */ }
   };
@@ -115,6 +187,7 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
   return {
     mimeType: recorderMimeType,
     stop: () => {
+      stopVad();
       if (recorder.state === 'inactive') {
         return Promise.resolve(new Blob(chunks, { type: recorderMimeType }));
       }
@@ -125,6 +198,7 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
       return stopped;
     },
     cancel: () => {
+      stopVad();
       cancelled = true;
       if (recorder.state === 'inactive') {
         cleanup();
@@ -202,7 +276,7 @@ export default function AssistantOverlay({
   const lastWakeIdRef = useRef<number>(0);
   const wakeHandlersRef = useRef<{
     handleSend: (overrideText?: string) => Promise<void>;
-    startVoiceRecording: () => Promise<void>;
+    startVoiceRecording: (autoStopOnSilence?: boolean) => Promise<void>;
   }>({
     handleSend: async () => undefined,
     startVoiceRecording: async () => undefined,
@@ -332,10 +406,10 @@ export default function AssistantOverlay({
       if (cmd) {
         void wakeHandlersRef.current.handleSend(cmd);
       } else {
-        showAudioStatus('🎙️ Ndakumva! Mbwira icyo ushaka...');
+        showAudioStatus('🎙️ Ndakumva! Vuga icyo ushaka...');
         setTimeout(() => {
-          void wakeHandlersRef.current.startVoiceRecording();
-        }, 250);
+          void wakeHandlersRef.current.startVoiceRecording(true);
+        }, 200);
       }
     };
 
@@ -346,6 +420,15 @@ export default function AssistantOverlay({
     const pendingWake = (window as any).__kevinPendingWakeWord;
     if (pendingWake) {
       processWakeWordDetail(pendingWake);
+    } else {
+      try {
+        const nativePending = (window as any).KevinOverlayBridge?.consumePendingWakeWord?.();
+        if (nativePending) {
+          processWakeWordDetail(JSON.parse(nativePending) as { id?: number; command?: string });
+        }
+      } catch {
+        // ignore
+      }
     }
 
     return () => {
@@ -561,12 +644,32 @@ export default function AssistantOverlay({
     }
   };
 
+  const cancelRecording = (customMessage?: string) => {
+    if (voiceRecordingRef.current) {
+      voiceRecordingRef.current.cancel();
+      resetVoiceRecordingState();
+      showAudioStatus(customMessage || 'Amajwi yasibwe.');
+    }
+  };
+
   // Chat-identical audio recording controls
-  const startVoiceRecording = async () => {
+  const startVoiceRecording = async (autoStopOnSilence = false) => {
     if (voiceRecordingRef.current) return;
     try {
       setErrorMsg(null);
-      const recording = await createVoiceRecordingSession();
+      const recording = await createVoiceRecordingSession(
+        autoStopOnSilence
+          ? {
+              autoStopOnSilence: true,
+              onAutoSilence: () => {
+                void finishVoiceRecording();
+              },
+              onNoSpeechTimeout: () => {
+                cancelRecording('🎙️ Nta jwi ryumvikanye. Kanda mic wongere uvuge.');
+              },
+            }
+          : undefined
+      );
       voiceRecordingRef.current = recording;
       setIsRecording(true);
       setRecordingSec(0);
@@ -576,14 +679,6 @@ export default function AssistantOverlay({
     } catch (error) {
       resetVoiceRecordingState();
       setErrorMsg(error instanceof Error ? error.message : 'Emerera Kevin AI gukoresha Microphone.');
-    }
-  };
-
-  const cancelRecording = () => {
-    if (voiceRecordingRef.current) {
-      voiceRecordingRef.current.cancel();
-      resetVoiceRecordingState();
-      showAudioStatus('Amajwi yasibwe.');
     }
   };
 
@@ -668,7 +763,7 @@ export default function AssistantOverlay({
 
   wakeHandlersRef.current = {
     handleSend: (overrideText?: string) => handleSend(overrideText),
-    startVoiceRecording,
+    startVoiceRecording: (autoStopOnSilence = false) => startVoiceRecording(autoStopOnSilence),
   };
 
   const handleImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1057,7 +1152,7 @@ export default function AssistantOverlay({
                   <div className="flex items-center gap-2 text-red-500 min-w-0">
                     <button
                       type="button"
-                      onClick={cancelRecording}
+                      onClick={() => cancelRecording()}
                       className="p-1 rounded-full hover:bg-red-50 dark:hover:bg-red-950/40 text-gray-500 hover:text-red-500 cursor-pointer shrink-0"
                       title="Siba amajwi"
                     >

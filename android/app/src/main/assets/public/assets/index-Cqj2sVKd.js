@@ -23745,7 +23745,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-LBSvqTJK.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-BHvRvPwy.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -36837,7 +36837,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-DbWfCavl.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-CCvqGPJG.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -101395,7 +101395,7 @@ const MarkdownRenderer = ({ content: content2 }) => {
     }
   ) });
 };
-const createVoiceRecordingSession$1 = async () => {
+const createVoiceRecordingSession$1 = async (options) => {
   var _a2, _b2, _c;
   if (!((_a2 = navigator.mediaDevices) == null ? void 0 : _a2.getUserMedia) || typeof MediaRecorder === "undefined") {
     throw new Error("Audio recording is not supported on this device.");
@@ -101437,6 +101437,69 @@ const createVoiceRecordingSession$1 = async () => {
     }
     throw err instanceof Error ? err : new Error("This device cannot record audio.");
   }
+  let vadInterval = null;
+  let audioCtx = null;
+  let vadTriggered = false;
+  const stopVad = () => {
+    if (vadInterval) {
+      clearInterval(vadInterval);
+      vadInterval = null;
+    }
+    if (audioCtx) {
+      try {
+        void audioCtx.close();
+      } catch {
+      }
+      audioCtx = null;
+    }
+  };
+  if (options == null ? void 0 : options.autoStopOnSilence) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        audioCtx = new AudioCtx();
+        if (audioCtx.state === "suspended") {
+          void audioCtx.resume();
+        }
+        const source2 = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 512;
+        source2.connect(analyser);
+        const samples = new Uint8Array(analyser.fftSize);
+        const startedAt = Date.now();
+        let heardSpeech = false;
+        let lastSpeechAt = startedAt;
+        vadInterval = setInterval(() => {
+          var _a3, _b3;
+          if (vadTriggered) return;
+          const now2 = Date.now();
+          const elapsed = now2 - startedAt;
+          analyser.getByteTimeDomainData(samples);
+          let sumSq = 0;
+          for (let i = 0; i < samples.length; i++) {
+            const norm = (samples[i] - 128) / 128;
+            sumSq += norm * norm;
+          }
+          const rms = Math.sqrt(sumSq / samples.length);
+          if (elapsed > 350 && rms > 0.02) {
+            heardSpeech = true;
+            lastSpeechAt = now2;
+          }
+          if (heardSpeech && (now2 - lastSpeechAt >= 1300 || elapsed >= 14500)) {
+            vadTriggered = true;
+            stopVad();
+            (_a3 = options.onAutoSilence) == null ? void 0 : _a3.call(options);
+          } else if (!heardSpeech && elapsed >= 7500) {
+            vadTriggered = true;
+            stopVad();
+            (_b3 = options.onNoSpeechTimeout) == null ? void 0 : _b3.call(options);
+          }
+        }, 120);
+      }
+    } catch {
+      stopVad();
+    }
+  }
   const chunks = [];
   let cancelled = false;
   let settled = false;
@@ -101450,6 +101513,7 @@ const createVoiceRecordingSession$1 = async () => {
   const recorderMimeType = (recorder.mimeType || supportedMimeType || "audio/webm").split(";")[0];
   const cleanup = () => {
     var _a3;
+    stopVad();
     stream.getTracks().forEach((track) => track.stop());
     try {
       (_a3 = agentBridge == null ? void 0 : agentBridge.resumeWakeWord) == null ? void 0 : _a3.call(agentBridge);
@@ -101479,6 +101543,7 @@ const createVoiceRecordingSession$1 = async () => {
   return {
     mimeType: recorderMimeType,
     stop: () => {
+      stopVad();
       if (recorder.state === "inactive") {
         return Promise.resolve(new Blob(chunks, { type: recorderMimeType }));
       }
@@ -101489,6 +101554,7 @@ const createVoiceRecordingSession$1 = async () => {
       return stopped;
     },
     cancel: () => {
+      stopVad();
       cancelled = true;
       if (recorder.state === "inactive") {
         cleanup();
@@ -101630,9 +101696,10 @@ function AssistantOverlay({
     };
   }, [isOpen]);
   reactExports.useEffect(() => {
+    var _a2, _b2;
     const onNativeFrame = (event) => {
-      var _a2;
-      const b64 = (_a2 = event.detail) == null ? void 0 : _a2.base64Image;
+      var _a3;
+      const b64 = (_a3 = event.detail) == null ? void 0 : _a3.base64Image;
       if (!b64) return;
       const dataUrl = b64.startsWith("data:") ? b64 : `data:image/jpeg;base64,${b64}`;
       liveFrameRef.current = dataUrl;
@@ -101649,8 +101716,8 @@ function AssistantOverlay({
       }
     };
     const onNativeState = (event) => {
-      var _a2;
-      const active = Boolean((_a2 = event.detail) == null ? void 0 : _a2.active);
+      var _a3;
+      const active = Boolean((_a3 = event.detail) == null ? void 0 : _a3.active);
       isLiveScreenRef.current = active;
       setIsLiveScreen(active);
       if (!active) {
@@ -101674,10 +101741,10 @@ function AssistantOverlay({
       if (cmd) {
         void wakeHandlersRef.current.handleSend(cmd);
       } else {
-        showAudioStatus("🎙️ Ndakumva! Mbwira icyo ushaka...");
+        showAudioStatus("🎙️ Ndakumva! Vuga icyo ushaka...");
         setTimeout(() => {
-          void wakeHandlersRef.current.startVoiceRecording();
-        }, 250);
+          void wakeHandlersRef.current.startVoiceRecording(true);
+        }, 200);
       }
     };
     const onWakeWord = (event) => {
@@ -101687,6 +101754,14 @@ function AssistantOverlay({
     const pendingWake = window.__kevinPendingWakeWord;
     if (pendingWake) {
       processWakeWordDetail(pendingWake);
+    } else {
+      try {
+        const nativePending = (_b2 = (_a2 = window.KevinOverlayBridge) == null ? void 0 : _a2.consumePendingWakeWord) == null ? void 0 : _b2.call(_a2);
+        if (nativePending) {
+          processWakeWordDetail(JSON.parse(nativePending));
+        }
+      } catch {
+      }
     }
     return () => {
       window.removeEventListener("screenCaptured", onNativeFrame);
@@ -101872,11 +101947,28 @@ function AssistantOverlay({
       setIsLoading(false);
     }
   };
-  const startVoiceRecording = async () => {
+  const cancelRecording = (customMessage) => {
+    if (voiceRecordingRef.current) {
+      voiceRecordingRef.current.cancel();
+      resetVoiceRecordingState();
+      showAudioStatus(customMessage || "Amajwi yasibwe.");
+    }
+  };
+  const startVoiceRecording = async (autoStopOnSilence = false) => {
     if (voiceRecordingRef.current) return;
     try {
       setErrorMsg(null);
-      const recording = await createVoiceRecordingSession$1();
+      const recording = await createVoiceRecordingSession$1(
+        autoStopOnSilence ? {
+          autoStopOnSilence: true,
+          onAutoSilence: () => {
+            void finishVoiceRecording();
+          },
+          onNoSpeechTimeout: () => {
+            cancelRecording("🎙️ Nta jwi ryumvikanye. Kanda mic wongere uvuge.");
+          }
+        } : void 0
+      );
       voiceRecordingRef.current = recording;
       setIsRecording(true);
       setRecordingSec(0);
@@ -101886,13 +101978,6 @@ function AssistantOverlay({
     } catch (error) {
       resetVoiceRecordingState();
       setErrorMsg(error instanceof Error ? error.message : "Emerera Kevin AI gukoresha Microphone.");
-    }
-  };
-  const cancelRecording = () => {
-    if (voiceRecordingRef.current) {
-      voiceRecordingRef.current.cancel();
-      resetVoiceRecordingState();
-      showAudioStatus("Amajwi yasibwe.");
     }
   };
   const transcribeRecordingToInput = async () => {
@@ -101971,7 +102056,7 @@ function AssistantOverlay({
   };
   wakeHandlersRef.current = {
     handleSend: (overrideText) => handleSend(overrideText),
-    startVoiceRecording
+    startVoiceRecording: (autoStopOnSilence = false) => startVoiceRecording(autoStopOnSilence)
   };
   const handleImagePick = async (e) => {
     var _a2, _b2;
@@ -102306,7 +102391,7 @@ function AssistantOverlay({
                     "button",
                     {
                       type: "button",
-                      onClick: cancelRecording,
+                      onClick: () => cancelRecording(),
                       className: "p-1 rounded-full hover:bg-red-50 dark:hover:bg-red-950/40 text-gray-500 hover:text-red-500 cursor-pointer shrink-0",
                       title: "Siba amajwi",
                       children: /* @__PURE__ */ jsxRuntimeExports.jsx(X$1, { size: 16 })
@@ -102560,7 +102645,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-BS7YySuY.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-Dq859Vb3.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -105678,25 +105763,52 @@ Click the **${docName}** file below to download and view the complete document.`
                   }
                 )
               ] }),
-              nativeAgentStatus.isAndroid && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-900 dark:text-[#e9edef]", children: "🎙️ “Hi Kevin” Voice Wake Word" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0]", children: "Iyo uvuze “Hi Kevin”, Assistant AI ihita ifunguka ako kanya nta gukanda ahandi." })
+              nativeAgentStatus.isAndroid && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-900 dark:text-[#e9edef]", children: "🎙️ “Hi Kevin” Voice Wake Word" }),
+                      nativeAgentStatus.wakeWordEnabled && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "span",
+                        {
+                          className: `text-[10px] font-bold px-2 py-0.5 rounded-full ${nativeAgentStatus.wakeWordActive ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/20 text-amber-700 dark:text-amber-300"}`,
+                          children: nativeAgentStatus.wakeWordActive ? "Irumva (Active)" : "Ikeneye Mic"
+                        }
+                      )
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0]", children: "Iyo uvuze “Hi Kevin”, Assistant AI ihita ifunguka igahita yumva icyo uyisaba." })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "button",
+                    {
+                      type: "button",
+                      role: "switch",
+                      "aria-checked": Boolean(nativeAgentStatus.wakeWordEnabled),
+                      onClick: () => {
+                        var _a3, _b3;
+                        const next = !nativeAgentStatus.wakeWordEnabled;
+                        (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.setWakeWordEnabled) == null ? void 0 : _b3.call(_a3, next);
+                        const updatedStatus = getNativeAgentStatus();
+                        setNativeAgentStatus(updatedStatus);
+                        if (next && updatedStatus.hasOverlayPermission === false) {
+                          showToastMessage('Emerera "Display over other apps" hasi kugira ngo Hi Kevin ifunguke muri apps zose.');
+                        }
+                      },
+                      className: `w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${nativeAgentStatus.wakeWordEnabled ? "bg-[#00a884]" : "bg-gray-300 dark:bg-gray-700"}`,
+                      children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `w-5 h-5 rounded-full bg-white shadow transition-transform ${nativeAgentStatus.wakeWordEnabled ? "translate-x-5" : "translate-x-0"}` })
+                    }
+                  )
                 ] }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                nativeAgentStatus.wakeWordEnabled && nativeAgentStatus.hasOverlayPermission === false && /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "button",
                   {
                     type: "button",
-                    role: "switch",
-                    "aria-checked": Boolean(nativeAgentStatus.wakeWordEnabled),
                     onClick: () => {
                       var _a3, _b3;
-                      const next = !nativeAgentStatus.wakeWordEnabled;
-                      (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.setWakeWordEnabled) == null ? void 0 : _b3.call(_a3, next);
-                      setNativeAgentStatus(getNativeAgentStatus());
+                      return (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.openOverlayPermissionSettings) == null ? void 0 : _b3.call(_a3);
                     },
-                    className: `w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${nativeAgentStatus.wakeWordEnabled ? "bg-[#00a884]" : "bg-gray-300 dark:bg-gray-700"}`,
-                    children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `w-5 h-5 rounded-full bg-white shadow transition-transform ${nativeAgentStatus.wakeWordEnabled ? "translate-x-5" : "translate-x-0"}` })
+                    className: "w-full py-1.5 px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-[11px] font-bold text-left cursor-pointer",
+                    children: "🪟 Kanda hano wemerere “Display over other apps” kugira ngo Hi Kevin ihite ifunguka hejuru ya apps zose"
                   }
                 )
               ] }),

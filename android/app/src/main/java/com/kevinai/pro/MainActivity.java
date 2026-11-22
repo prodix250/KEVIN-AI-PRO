@@ -106,7 +106,14 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
+        KevinWakeWordService.setMainVisible(true);
         KevinWakeWordService.syncWithPreferences(this);
+    }
+
+    @Override
+    public void onPause() {
+        KevinWakeWordService.setMainVisible(false);
+        super.onPause();
     }
 
     @Override
