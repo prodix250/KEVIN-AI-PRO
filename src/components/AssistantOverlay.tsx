@@ -37,6 +37,7 @@ type VoiceRecordingSession = {
 
 const createVoiceRecordingSession = async (options?: {
   autoStopOnSilence?: boolean;
+  skipWakePauseDelay?: boolean;
   onAutoSilence?: () => void;
   onNoSpeechTimeout?: () => void;
 }): Promise<VoiceRecordingSession> => {
@@ -48,7 +49,9 @@ const createVoiceRecordingSession = async (options?: {
   if (agentBridge?.pauseWakeWord) {
     try {
       agentBridge.pauseWakeWord();
-      await new Promise((resolve) => setTimeout(resolve, 220));
+      if (!options?.skipWakePauseDelay) {
+        await new Promise((resolve) => setTimeout(resolve, 180));
+      }
     } catch {
       // ignore
     }
@@ -138,7 +141,7 @@ const createVoiceRecordingSession = async (options?: {
             sumSq += norm * norm;
           }
           const rms = Math.sqrt(sumSq / samples.length);
-          if (elapsed > 450 && rms > 0.032) {
+          if (elapsed > 350 && rms > 0.02) {
             speechConsecutive++;
             if (speechConsecutive >= 2) {
               heardSpeech = true;
@@ -147,7 +150,7 @@ const createVoiceRecordingSession = async (options?: {
           } else {
             speechConsecutive = 0;
           }
-          if (heardSpeech && (now - lastSpeechAt >= 1350 || elapsed >= 15000)) {
+          if (heardSpeech && (now - lastSpeechAt >= 1250 || elapsed >= 15000)) {
             vadTriggered = true;
             stopVad();
             options.onAutoSilence?.();
@@ -291,12 +294,17 @@ export default function AssistantOverlay({
   const cleanFrameWaitersRef = useRef<Array<(frame: string) => void>>([]);
   const sendingLockRef = useRef(false);
   const lastWakeIdRef = useRef<number>(0);
+  const isOpenRef = useRef<boolean>(isOpen);
+  isOpenRef.current = isOpen;
+  const pendingAutoListenAfterWakeRef = useRef<boolean>(false);
   const wakeHandlersRef = useRef<{
     handleSend: (overrideText?: string) => Promise<void>;
-    startVoiceRecording: (autoStopOnSilence?: boolean) => Promise<void>;
+    startVoiceRecording: (autoStopOnSilence?: boolean, skipWakePauseDelay?: boolean) => Promise<void>;
+    stopStreamCleanly: () => void;
   }>({
     handleSend: async () => undefined,
     startVoiceRecording: async () => undefined,
+    stopStreamCleanly: () => undefined,
   });
 
   const showAudioStatus = (msg: string) => {
@@ -363,11 +371,22 @@ export default function AssistantOverlay({
   useEffect(() => {
     if (isOpen) {
       setPerms(getAgentPermissions());
-      setTimeout(() => textareaRef.current?.focus(), 180);
+      if (pendingAutoListenAfterWakeRef.current) {
+        pendingAutoListenAfterWakeRef.current = false;
+        setTimeout(() => {
+          void wakeHandlersRef.current.startVoiceRecording(true, true);
+        }, 40);
+      } else {
+        setTimeout(() => textareaRef.current?.focus(), 180);
+      }
     } else {
+      pendingAutoListenAfterWakeRef.current = false;
       stopStreamCleanly();
       stopLiveScreen();
     }
+  }, [isOpen]);
+
+  useEffect(() => {
     return () => {
       if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
       stopStreamCleanly();
@@ -377,7 +396,7 @@ export default function AssistantOverlay({
         submittedAudioUrlRef.current = null;
       }
     };
-  }, [isOpen]);
+  }, []);
 
   useEffect(() => {
     const onNativeFrame = (event: Event) => {
@@ -419,6 +438,12 @@ export default function AssistantOverlay({
       } catch {
         (window as any).__kevinPendingWakeWord = undefined;
       }
+      try {
+        (window as any).KevinOverlayBridge?.consumePendingWakeWord?.();
+      } catch {
+        // ignore
+      }
+      wakeHandlersRef.current.stopStreamCleanly();
       const cmd = (detail.command || '').trim();
       const meaningfulWords = cmd
         .replace(/[^a-zA-Z0-9\u00C0-\u024F\s]/g, ' ')
@@ -428,10 +453,20 @@ export default function AssistantOverlay({
       if (cmd && meaningfulWords.length >= 2) {
         void wakeHandlersRef.current.handleSend(cmd);
       } else {
+        setSubmittedPrompt('');
+        setReplyText('');
+        setAction(null);
+        setErrorMsg(null);
+        setSources([]);
+        setShowSources(false);
         showAudioStatus('🎙️ Ndakumva! Vuga icyo ushaka...');
-        setTimeout(() => {
-          void wakeHandlersRef.current.startVoiceRecording(true);
-        }, 220);
+        if (isOpenRef.current || isDedicatedOverlay) {
+          setTimeout(() => {
+            void wakeHandlersRef.current.startVoiceRecording(true, true);
+          }, 50);
+        } else {
+          pendingAutoListenAfterWakeRef.current = true;
+        }
       }
     };
 
@@ -675,7 +710,7 @@ export default function AssistantOverlay({
   };
 
   // Chat-identical audio recording controls
-  const startVoiceRecording = async (autoStopOnSilence = false) => {
+  const startVoiceRecording = async (autoStopOnSilence = false, skipWakePauseDelay = false) => {
     if (voiceRecordingRef.current) return;
     try {
       setErrorMsg(null);
@@ -683,6 +718,7 @@ export default function AssistantOverlay({
         autoStopOnSilence
           ? {
               autoStopOnSilence: true,
+              skipWakePauseDelay,
               onAutoSilence: () => {
                 void finishVoiceRecording();
               },
@@ -690,7 +726,9 @@ export default function AssistantOverlay({
                 cancelRecording('🎙️ Nta jwi ryumvikanye. Kanda mic wongere uvuge.');
               },
             }
-          : undefined
+          : skipWakePauseDelay
+            ? { skipWakePauseDelay: true }
+            : undefined
       );
       voiceRecordingRef.current = recording;
       setIsRecording(true);
@@ -756,30 +794,25 @@ export default function AssistantOverlay({
       }
 
       let transcript = '';
-      let sttSucceeded = false;
       setIsTranscribing(true);
       try {
         transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
-        sttSucceeded = true;
       } catch (sttErr) {
         console.warn('STT fallback to multimodal audio:', sttErr);
       } finally {
         setIsTranscribing(false);
       }
 
-      if (sttSucceeded && !transcript.trim() && audioBlob.size < 4500) {
-        showAudioStatus('🎙️ Sinabashije kumva neza icyo uvuze. Ongera uvuge hafi ya mic.');
-        return;
-      }
-
       const audioUrl = URL.createObjectURL(audioBlob);
       const cleanTranscript = transcript.trim();
-      if (cleanTranscript) {
-        await handleSend(cleanTranscript, undefined, undefined, undefined, cleanTranscript, audioUrl);
-      } else {
-        const prompt = 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.';
-        await handleSend(prompt, audioBase64, recording.mimeType, undefined, '🎤 Voice Note', audioUrl);
-      }
+      await handleSend(
+        cleanTranscript || '🎤 Voice Note',
+        audioBase64,
+        recording.mimeType,
+        undefined,
+        cleanTranscript || '🎤 Voice Note',
+        audioUrl
+      );
     } catch (error) {
       setErrorMsg(error instanceof Error ? error.message : 'Unable to process the voice message.');
     } finally {
@@ -799,7 +832,9 @@ export default function AssistantOverlay({
 
   wakeHandlersRef.current = {
     handleSend: (overrideText?: string) => handleSend(overrideText),
-    startVoiceRecording: (autoStopOnSilence = false) => startVoiceRecording(autoStopOnSilence),
+    startVoiceRecording: (autoStopOnSilence = false, skipWakePauseDelay = false) =>
+      startVoiceRecording(autoStopOnSilence, skipWakePauseDelay),
+    stopStreamCleanly,
   };
 
   const handleImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {

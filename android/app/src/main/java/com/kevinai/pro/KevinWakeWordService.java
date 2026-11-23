@@ -64,6 +64,7 @@ public class KevinWakeWordService extends Service {
     public static final String ACTION_STOP = "com.kevinai.pro.action.STOP_WAKE_WORD";
     public static final String ACTION_PAUSE = "com.kevinai.pro.action.PAUSE_WAKE_WORD";
     public static final String ACTION_RESUME = "com.kevinai.pro.action.RESUME_WAKE_WORD";
+    public static final String ACTION_WAKE_WORD_IN_APP = "com.kevinai.pro.action.WAKE_WORD_IN_APP";
 
     public static final String EXTRA_WAKE_WORD_TRIGGERED = "kevin_wake_word_triggered";
     public static final String EXTRA_WAKE_COMMAND = "kevin_wake_command";
@@ -76,16 +77,21 @@ public class KevinWakeWordService extends Service {
 
     private static final int SAMPLE_RATE = 16000;
     private static final int FRAME_SAMPLES = 640; // 40ms @ 16kHz
-    private static final int PRE_ROLL_FRAMES = 12; // 480ms pre-roll
-    private static final int MAX_SPEECH_FRAMES = 75; // 3.0s max utterance
-    private static final int END_SILENCE_FRAMES = 11; // 440ms silence
+    private static final int PRE_ROLL_FRAMES = 7; // 280ms pre-roll
+    private static final int MAX_SPEECH_FRAMES = 44; // 1.76s max utterance
+    private static final int END_SILENCE_FRAMES = 5; // 200ms silence -> fast trigger
+    private static final long MAX_WAKE_CLIP_AGE_MS = 4200L; // Never trigger overlay from stale clips
 
     private static final Pattern WAKE_PATTERN = Pattern.compile(
-            "(?:^|\\s)(?:hi|hey|hello|ok|okay)\\s+(?:kevin|keven|kevine)(?:[,.!?\\s]*(.*))?$",
+            "(?:^|\\s)(?:hi|hey|hello|ok|okay|hai|hay|ai|ay|ei|eh)\\s+(?:kevin|keven|kevine|kiven|kebin|kevini|cavin|kevi)(?:[,.!?\\s]*(.*))?$",
             Pattern.CASE_INSENSITIVE
     );
     private static final Pattern STRICT_GEMINI_WAKE_PATTERN = Pattern.compile(
-            "(?:^|\\s)(?:hi|hey|hello|ok|okay|hai|hay)\\s+(?:kevin|keven|kevine)\\b",
+            "(?:^|\\s)(?:hi|hey|hello|ok|okay|hai|hay|ai|ay|ei|eh)\\s+(?:kevin|keven|kevine|kiven|kebin|kevini|cavin|kevi)\\b",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern KEVIN_NAME_PATTERN = Pattern.compile(
+            "\\b(?:kevin|keven|kevine|kiven|kebin|kevini|cavin|kevi)\\b",
             Pattern.CASE_INSENSITIVE
     );
 
@@ -411,7 +417,7 @@ public class KevinWakeWordService extends Service {
         ArrayDeque<short[]> preRoll = new ArrayDeque<>(PRE_ROLL_FRAMES + 2);
         List<short[]> speechFrames = new ArrayList<>();
 
-        double noiseFloor = 130.0;
+        double noiseFloor = 90.0;
         boolean inSpeech = false;
         int startStreak = 0;
         int silenceStreak = 0;
@@ -450,23 +456,24 @@ public class KevinWakeWordService extends Service {
             System.arraycopy(frame, 0, copy, 0, read);
 
             if (!inSpeech) {
-                noiseFloor = noiseFloor * 0.95 + Math.min(rms, 650.0) * 0.05;
-                if (noiseFloor < 75.0) noiseFloor = 75.0;
+                noiseFloor = noiseFloor * 0.94 + Math.min(rms, 260.0) * 0.06;
+                if (noiseFloor < 45.0) noiseFloor = 45.0;
+                if (noiseFloor > 220.0) noiseFloor = 220.0;
 
                 if (preRoll.size() >= PRE_ROLL_FRAMES) {
                     preRoll.pollFirst();
                 }
                 preRoll.addLast(copy);
 
-                double startThresh = Math.max(320.0, noiseFloor * 2.55);
+                double startThresh = Math.max(145.0, noiseFloor * 2.1);
                 if (rms > startThresh) {
                     startStreak++;
-                    if (startStreak >= 3) {
+                    if (startStreak >= 2) {
                         inSpeech = true;
                         speechFrames.clear();
                         speechFrames.addAll(preRoll);
                         speechFrames.add(copy);
-                        voicedFrames = 3;
+                        voicedFrames = 2;
                         silenceStreak = 0;
                         peakRms = rms;
                     }
@@ -475,7 +482,7 @@ public class KevinWakeWordService extends Service {
                 }
             } else {
                 speechFrames.add(copy);
-                double keepThresh = Math.max(240.0, noiseFloor * 1.9);
+                double keepThresh = Math.max(110.0, noiseFloor * 1.6);
                 if (rms > keepThresh) {
                     voicedFrames++;
                     silenceStreak = 0;
@@ -490,16 +497,17 @@ public class KevinWakeWordService extends Service {
                     silenceStreak = 0;
 
                     long now = System.currentTimeMillis();
-                    if (voicedFrames >= 8
-                            && peakRms >= 380.0
-                            && (now - lastCheckSentAt >= 850L)
+                    if (voicedFrames >= 5
+                            && peakRms >= 175.0
+                            && (now - lastCheckSentAt >= 450L)
                             && checkInFlight.compareAndSet(false, true)) {
                         lastCheckSentAt = now;
+                        final long capturedAtMs = now;
                         final byte[] wavBytes = encodePcmToWav(speechFrames);
                         speechFrames.clear();
                         wakeCheckExecutor.execute(() -> {
                             try {
-                                inspectWavForWakeWord(wavBytes);
+                                inspectWavForWakeWord(wavBytes, capturedAtMs);
                             } finally {
                                 checkInFlight.set(false);
                             }
@@ -513,14 +521,23 @@ public class KevinWakeWordService extends Service {
 
         stopAudioCaptureSync();
         if (!isPaused && !isOverlayVisible && KevinAgentPrefs.isWakeWordEnabled(this) && isRunning) {
-            scheduleRestart(600L);
+            scheduleRestart(450L);
         }
     }
 
     private byte[] encodePcmToWav(List<short[]> chunks) {
         int totalSamples = 0;
+        int maxAbs = 1;
         for (short[] c : chunks) {
             totalSamples += c.length;
+            for (short s : c) {
+                int abs = Math.abs((int) s);
+                if (abs > maxAbs) maxAbs = abs;
+            }
+        }
+        double gain = 1.0;
+        if (maxAbs > 220 && maxAbs < 7500) {
+            gain = Math.min(4.0, 12000.0 / maxAbs);
         }
         int dataSize = totalSamples * 2;
         ByteArrayOutputStream out = new ByteArrayOutputStream(44 + dataSize);
@@ -543,8 +560,11 @@ public class KevinWakeWordService extends Service {
 
             for (short[] c : chunks) {
                 for (short s : c) {
-                    out.write(s & 0xFF);
-                    out.write((s >> 8) & 0xFF);
+                    int scaled = gain > 1.01 ? (int) Math.round(s * gain) : (int) s;
+                    if (scaled > 32767) scaled = 32767;
+                    else if (scaled < -32768) scaled = -32768;
+                    out.write(scaled & 0xFF);
+                    out.write((scaled >> 8) & 0xFF);
                 }
             }
         } catch (Exception ignored) {}
@@ -563,21 +583,30 @@ public class KevinWakeWordService extends Service {
         out.write((v >> 8) & 0xFF);
     }
 
-    private void inspectWavForWakeWord(byte[] wavBytes) {
+    private void inspectWavForWakeWord(byte[] wavBytes, long capturedAtMs) {
         if (wavBytes == null || wavBytes.length < 1000 || isPaused || isOverlayVisible) {
             return;
         }
+        long deadlineMs = capturedAtMs + MAX_WAKE_CLIP_AGE_MS;
+        if (System.currentTimeMillis() > deadlineMs) {
+            return;
+        }
+
         String audioBase64 = Base64.encodeToString(wavBytes, Base64.NO_WRAP);
         List<String> userKeys = KevinAgentPrefs.getApiKeysList(this);
 
         WakeCheckResult result = null;
-        if (!userKeys.isEmpty()) {
-            result = callGeminiDirectWakeCheck(audioBase64, userKeys);
+        if (!userKeys.isEmpty() && System.currentTimeMillis() < deadlineMs - 500L) {
+            result = callGeminiDirectWakeCheck(audioBase64, userKeys, deadlineMs);
+        }
+        if (result == null && System.currentTimeMillis() < deadlineMs - 900L) {
+            result = callBackendWakeCheck(audioBase64, userKeys, deadlineMs);
         }
         if (result == null) {
-            result = callBackendWakeCheck(audioBase64, userKeys);
+            return;
         }
-        if (result == null) {
+        if (System.currentTimeMillis() - capturedAtMs > MAX_WAKE_CLIP_AGE_MS) {
+            lastDiagnostic = "Clip ishaje yirengagijwe";
             return;
         }
 
@@ -590,7 +619,11 @@ public class KevinWakeWordService extends Service {
 
         String matchedCommand = extractWakeCommandFromText(result.transcript);
         String normalizedTranscript = normalizeTranscript(result.transcript);
-        boolean strictGeminiMatch = result.wake && STRICT_GEMINI_WAKE_PATTERN.matcher(normalizedTranscript).find();
+        boolean strictGeminiMatch = result.wake && (
+                STRICT_GEMINI_WAKE_PATTERN.matcher(normalizedTranscript).find()
+                        || KEVIN_NAME_PATTERN.matcher(normalizedTranscript).find()
+                        || TextUtils.isEmpty(normalizedTranscript)
+        );
         boolean triggered = matchedCommand != null || strictGeminiMatch;
         if (triggered) {
             String cmd = !TextUtils.isEmpty(result.command)
@@ -620,116 +653,114 @@ public class KevinWakeWordService extends Service {
         }
     }
 
-    private WakeCheckResult callGeminiDirectWakeCheck(String audioBase64, List<String> keys) {
+    private WakeCheckResult callGeminiDirectWakeCheck(String audioBase64, List<String> keys, long deadlineMs) {
         String[] models = new String[] {
-                "gemini-3.5-flash-lite",
-                "gemini-3.1-flash-lite",
                 "gemini-4-hydrogen",
-                "gemini-2.5-flash"
+                "gemini-3.5-flash-lite"
         };
         String prompt = "Listen strictly to this short audio clip. "
-                + "Set \"wake\":true ONLY if the speaker clearly and intentionally calls the assistant by saying \"Hi Kevin\", \"Hey Kevin\", \"Hello Kevin\", or \"OK Kevin\". "
-                + "Do NOT trigger on ambient Kinyarwanda conversation, background TV/music, breathing, coughs, random noise, or someone just mentioning the name Kevin inside a sentence without saying Hi/Hey/Hello/OK Kevin. "
+                + "Set \"wake\":true ONLY if the speaker clearly calls the assistant by saying \"Hi Kevin\", \"Hey Kevin\", \"Hello Kevin\", or \"OK Kevin\" (including slight accent variations). "
+                + "Do NOT trigger on ambient Kinyarwanda conversation, background TV/music, breathing, coughs, random noise, or someone mentioning Kevin inside an ordinary sentence without Hi/Hey/Hello/OK. "
                 + "Return ONLY raw JSON: {\"wake\":true|false,\"command\":\"\",\"transcript\":\"exact words heard\"}. "
                 + "Leave \"command\" empty unless a clear full request (at least 2 words) immediately follows \"Hi Kevin\". "
                 + "If unsure, noisy, or silent, return {\"wake\":false,\"command\":\"\",\"transcript\":\"\"}.";
 
         for (String model : models) {
             for (int i = 0; i < Math.min(keys.size(), 2); i++) {
+                long remaining = deadlineMs - System.currentTimeMillis();
+                if (remaining < 900L) return null;
+
                 String key = keys.get(i);
-                boolean omitThinkingConfig = false;
-                for (int attempt = 0; attempt < 2; attempt++) {
-                    HttpURLConnection conn = null;
-                    try {
-                        URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
-                                + model + ":generateContent?key=" + URLEncoder.encode(key, "UTF-8"));
-                        conn = (HttpURLConnection) url.openConnection();
-                        conn.setRequestMethod("POST");
-                        conn.setConnectTimeout(3000);
-                        conn.setReadTimeout(4500);
-                        conn.setRequestProperty("Content-Type", "application/json");
-                        conn.setDoOutput(true);
+                HttpURLConnection conn = null;
+                try {
+                    URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
+                            + model + ":generateContent?key=" + URLEncoder.encode(key, "UTF-8"));
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setConnectTimeout((int) Math.min(1400L, Math.max(700L, remaining / 2)));
+                    conn.setReadTimeout((int) Math.min(2300L, Math.max(900L, remaining)));
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setDoOutput(true);
 
-                        JSONObject inlineData = new JSONObject();
-                        inlineData.put("mimeType", "audio/wav");
-                        inlineData.put("data", audioBase64);
+                    JSONObject inlineData = new JSONObject();
+                    inlineData.put("mimeType", "audio/wav");
+                    inlineData.put("data", audioBase64);
 
-                        JSONObject audioPart = new JSONObject();
-                        audioPart.put("inlineData", inlineData);
+                    JSONObject audioPart = new JSONObject();
+                    audioPart.put("inlineData", inlineData);
 
-                        JSONObject textPart = new JSONObject();
-                        textPart.put("text", prompt);
+                    JSONObject textPart = new JSONObject();
+                    textPart.put("text", prompt);
 
-                        JSONArray parts = new JSONArray();
-                        parts.put(audioPart);
-                        parts.put(textPart);
+                    JSONArray parts = new JSONArray();
+                    parts.put(audioPart);
+                    parts.put(textPart);
 
-                        JSONObject content = new JSONObject();
-                        content.put("parts", parts);
+                    JSONObject content = new JSONObject();
+                    content.put("parts", parts);
 
-                        JSONArray contents = new JSONArray();
-                        contents.put(content);
+                    JSONArray contents = new JSONArray();
+                    contents.put(content);
 
-                        JSONObject body = new JSONObject();
-                        body.put("contents", contents);
+                    JSONObject body = new JSONObject();
+                    body.put("contents", contents);
 
-                        JSONObject genConfig = new JSONObject();
-                        genConfig.put("temperature", 0.1);
-                        genConfig.put("maxOutputTokens", 120);
-                        if (!omitThinkingConfig) {
-                            if (model.startsWith("gemini-2.5")) {
-                                genConfig.put("thinkingConfig", new JSONObject().put("thinkingBudget", 0));
-                            } else if (model.contains("gemini-4")) {
-                                genConfig.put("thinkingConfig", new JSONObject().put("thinkingLevel", "LOW"));
-                            }
-                        }
-                        body.put("generationConfig", genConfig);
-
-                        try (OutputStream os = conn.getOutputStream()) {
-                            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
-                        }
-
-                        int code = conn.getResponseCode();
-                        if (code >= 200 && code < 300) {
-                            String respStr = readHttpStream(conn);
-                            JSONObject root = new JSONObject(respStr);
-                            JSONArray candidates = root.optJSONArray("candidates");
-                            if (candidates != null && candidates.length() > 0) {
-                                JSONObject cand = candidates.getJSONObject(0);
-                                JSONObject candContent = cand.optJSONObject("content");
-                                JSONArray respParts = candContent != null ? candContent.optJSONArray("parts") : null;
-                                if (respParts != null && respParts.length() > 0) {
-                                    String rawText = respParts.getJSONObject(0).optString("text", "").trim();
-                                    return parseWakeJson(rawText);
-                                }
-                            }
-                            break;
-                        } else if (code == 400 && !omitThinkingConfig) {
-                            omitThinkingConfig = true;
-                        } else {
-                            break;
-                        }
-                    } catch (Throwable t) {
-                        lastDiagnostic = "Direct check wait: " + t.getClass().getSimpleName();
-                        break;
-                    } finally {
-                        if (conn != null) conn.disconnect();
+                    JSONObject genConfig = new JSONObject();
+                    genConfig.put("temperature", 0.0);
+                    genConfig.put("maxOutputTokens", 90);
+                    genConfig.put("responseMimeType", "application/json");
+                    if (model.contains("gemini-4")) {
+                        genConfig.put("thinkingConfig", new JSONObject().put("thinkingLevel", "LOW"));
                     }
+                    body.put("generationConfig", genConfig);
+
+                    try (OutputStream os = conn.getOutputStream()) {
+                        os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                    }
+
+                    int code = conn.getResponseCode();
+                    if (code >= 200 && code < 300) {
+                        String respStr = readHttpStream(conn);
+                        JSONObject root = new JSONObject(respStr);
+                        JSONArray candidates = root.optJSONArray("candidates");
+                        if (candidates != null && candidates.length() > 0) {
+                            JSONObject cand = candidates.getJSONObject(0);
+                            JSONObject candContent = cand.optJSONObject("content");
+                            JSONArray respParts = candContent != null ? candContent.optJSONArray("parts") : null;
+                            if (respParts != null && respParts.length() > 0) {
+                                String rawText = respParts.getJSONObject(0).optString("text", "").trim();
+                                return parseWakeJson(rawText);
+                            }
+                        }
+                        break;
+                    } else if (code == 404 || code >= 500) {
+                        break;
+                    }
+                } catch (Throwable t) {
+                    lastDiagnostic = "Direct check wait: " + t.getClass().getSimpleName();
+                    if (t instanceof java.net.SocketTimeoutException) {
+                        break;
+                    }
+                } finally {
+                    if (conn != null) conn.disconnect();
                 }
             }
         }
         return null;
     }
 
-    private WakeCheckResult callBackendWakeCheck(String audioBase64, List<String> userKeys) {
+    private WakeCheckResult callBackendWakeCheck(String audioBase64, List<String> userKeys, long deadlineMs) {
+        long remaining = deadlineMs - System.currentTimeMillis();
+        if (remaining < 900L) return null;
+
         HttpURLConnection conn = null;
         try {
             String base = KevinAgentPrefs.getEffectiveBackendBaseUrl(this);
             String endpoint = base.endsWith("/") ? base + "api/wake-check" : base + "/api/wake-check";
             conn = (HttpURLConnection) new URL(endpoint).openConnection();
             conn.setRequestMethod("POST");
-            conn.setConnectTimeout(4000);
-            conn.setReadTimeout(6000);
+            conn.setConnectTimeout((int) Math.min(1500L, Math.max(700L, remaining / 2)));
+            conn.setReadTimeout((int) Math.min(2600L, Math.max(900L, remaining)));
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
 
@@ -1030,12 +1061,25 @@ public class KevinWakeWordService extends Service {
         stopAudioCaptureSync();
         destroyRecognizer();
 
+        if (isMainVisible) {
+            Intent inAppIntent = new Intent(ACTION_WAKE_WORD_IN_APP);
+            inAppIntent.setPackage(getPackageName());
+            if (!TextUtils.isEmpty(trailingCommand)) {
+                inAppIntent.putExtra(EXTRA_WAKE_COMMAND, trailingCommand);
+            }
+            sendBroadcast(inAppIntent);
+            mainHandler.removeCallbacks(launchVerifyRunnable);
+            mainHandler.postDelayed(launchVerifyRunnable, 4200L);
+            return;
+        }
+
         Intent assistIntent = new Intent(this, KevinAssistantActivity.class);
         assistIntent.addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK
                         | Intent.FLAG_ACTIVITY_SINGLE_TOP
                         | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                         | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_NO_ANIMATION
         );
         assistIntent.putExtra(EXTRA_WAKE_WORD_TRIGGERED, true);
         if (!TextUtils.isEmpty(trailingCommand)) {
@@ -1044,13 +1088,11 @@ public class KevinWakeWordService extends Service {
 
         boolean canDrawOverlays = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this);
 
-        if (canDrawOverlays || isMainVisible) {
+        if (canDrawOverlays) {
             try {
                 startActivity(assistIntent);
             } catch (Throwable ignored) {}
-        }
-
-        if (!canDrawOverlays && !isMainVisible) {
+        } else {
             try {
                 startActivity(assistIntent);
             } catch (Throwable ignored) {}
@@ -1083,7 +1125,7 @@ public class KevinWakeWordService extends Service {
         }
 
         mainHandler.removeCallbacks(launchVerifyRunnable);
-        mainHandler.postDelayed(launchVerifyRunnable, 2400L);
+        mainHandler.postDelayed(launchVerifyRunnable, 4200L);
     }
 
     private void stopWakeWordService() {

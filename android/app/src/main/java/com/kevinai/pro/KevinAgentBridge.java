@@ -191,6 +191,16 @@ public class KevinAgentBridge {
     }
 
     @JavascriptInterface
+    public void setInAppOverlayOpen(boolean open) {
+        KevinWakeWordService.setOverlayVisible(open);
+        if (open) {
+            KevinWakeWordService.pauseListening(activity);
+        } else {
+            KevinWakeWordService.resumeListening(activity);
+        }
+    }
+
+    @JavascriptInterface
     public void openOverlayPermissionSettings() {
         activity.runOnUiThread(() -> {
             try {

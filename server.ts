@@ -515,7 +515,22 @@ async function startServer() {
         return;
       }
 
-      const mimeType = (audioMimeType || altMimeType || 'audio/webm').split(';')[0].trim().toLowerCase();
+      const rawMime = (audioMimeType || altMimeType || 'audio/webm').split(';')[0].trim().toLowerCase();
+      const mimeType = rawMime === 'audio/x-wav' || rawMime === 'audio/wave'
+        ? 'audio/wav'
+        : rawMime === 'audio/mp3' || rawMime === 'audio/mpeg'
+          ? 'audio/mpeg'
+          : rawMime === 'audio/m4a' || rawMime === 'audio/x-m4a' || rawMime === 'audio/mp4'
+            ? 'audio/mp4'
+            : rawMime === 'audio/x-aac' || rawMime === 'audio/aac'
+              ? 'audio/aac'
+              : rawMime === 'audio/opus' || rawMime === 'audio/ogg'
+                ? 'audio/ogg'
+                : rawMime === 'audio/x-flac' || rawMime === 'audio/flac'
+                  ? 'audio/flac'
+                  : rawMime === 'video/webm' || rawMime === 'audio/webm'
+                    ? 'audio/webm'
+                    : rawMime;
       const availableKeys = getServerApiKeys(customApiKeys || customApiKey);
       if (availableKeys.length === 0) {
         res.status(500).json({ error: 'Nta Gemini API key yabonetse.' });
@@ -551,14 +566,14 @@ async function startServer() {
                     },
                   },
                   {
-                    text: `You are an expert native Rwandan speech recognition and transcription assistant specializing in Kinyarwanda, English, French, and Swahili.
-Listen carefully and accurately to this audio clip:
-1. If the speaker is speaking in Kinyarwanda (including natural Rwandan speech mixed with French/English nouns), transcribe verbatim in standard, authentic Kinyarwanda orthography (intego y'imyandikire y'Ikinyarwanda).
-   - Pay close attention to Rwandan words and prefixes (e.g., 'Muraho', 'Amakuru', 'Bite', 'Umeze ute', 'Nshaka ko...', 'Mbwira...', 'Sobanura...', 'Kora...', 'Mfasha...', 'Curanga indirimbo...', 'Hamagara...', 'Ohereza ubutumwa...', 'Reba muri WhatsApp...') and Rwandan names.
-   - NEVER mishear Kinyarwanda words as random English words or invent commands the speaker did not say.
+                    text: `You are an expert native Rwandan speech recognition and transcription assistant specializing in Kinyarwanda (Ikinyarwanda), plus English, French, and Swahili.
+Most speakers speak Kinyarwanda (or natural Kinyarwanda mixed with French/English nouns). Listen carefully and accurately:
+1. Transcribe verbatim in standard, authentic Rwandan Kinyarwanda orthography (intego y'imyandikire y'Ikinyarwanda) when spoken in Kinyarwanda.
+   - Pay close attention to Kinyarwanda phonetics, prefixes (n-, u-, a-, tu-, mu-, ba-, nda-, nshaka-, mbwira-, mfasha-, sobanura-, kora-, hamagara-, uhamagare-, uncurangire-, wohereze-, fungura-, funga-, subiza-, hagarika-), consonant clusters (cy, by, ry, ny, sh, shy, pf, ts, mp, mb, nd, ng, nj, nk, nt, bw, tw, rw, mw, kw, gw), and Rwandan personal/place/artist names.
+   - NEVER mishear or twist Kinyarwanda speech into unrelated English or Swahili words, and NEVER invent commands the speaker did not say.
 2. If the speaker is speaking English, French, or Swahili, transcribe verbatim in that exact language.
-3. Output ONLY the exact transcribed spoken words. Do NOT add quotes, explanations, punctuation-only replies, or timestamps.
-4. If the audio is silent, static, background noise, or unintelligible mumbling, return strictly an empty string "".`,
+3. Output ONLY the exact transcribed spoken words. Do NOT add quotes, brackets, explanations, or timestamps.
+4. If the audio is completely silent or pure background noise, return strictly an empty string "".`,
                   },
                 ],
               },
@@ -573,7 +588,7 @@ Listen carefully and accurately to this audio clip:
             const response = await Promise.race([
               sttPromise,
               new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('503 STT timed out')), 9000)
+                setTimeout(() => reject(new Error('503 STT timed out')), 11000)
               ),
             ]);
 
@@ -632,12 +647,16 @@ Listen carefully and accurately to this audio clip:
         return;
       }
 
-      const wakeModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen', 'gemini-3.5-transcribe', 'gemini-2.5-flash'];
+      const wakeModels = ['gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+      const routeDeadlineMs = Date.now() + 5000;
       let lastErr: unknown = null;
       const invalidKeys = new Set<string>();
 
       for (const model of wakeModels) {
+        if (Date.now() >= routeDeadlineMs - 600) break;
         for (let keyIdx = 0; keyIdx < availableKeys.length; keyIdx++) {
+          const remainingMs = routeDeadlineMs - Date.now();
+          if (remainingMs < 600) break;
           const key = availableKeys[keyIdx];
           if (invalidKeys.has(key)) continue;
 
@@ -650,6 +669,7 @@ Listen carefully and accurately to this audio clip:
           });
 
           try {
+            const perCallTimeoutMs = Math.min(2400, Math.max(800, remainingMs));
             const wakePromise = ai.models.generateContent({
               model,
               contents: {
@@ -662,7 +682,7 @@ Listen carefully and accurately to this audio clip:
                   },
                   {
                     text: `Listen strictly to this short audio clip.
-Set "wake":true ONLY if the speaker clearly and intentionally calls the assistant by saying "Hi Kevin", "Hey Kevin", "Hello Kevin", or "OK Kevin".
+Set "wake":true ONLY if the speaker clearly calls the assistant by saying "Hi Kevin", "Hey Kevin", "Hello Kevin", or "OK Kevin" (including slight accent variations).
 Do NOT trigger on ambient Kinyarwanda speech, background TV/music, breathing, noise, or mentioning the name Kevin casually inside a sentence without saying Hi/Hey/Hello/OK Kevin.
 Respond with ONLY a single raw JSON object (no markdown fences):
 {"wake":true|false,"command":"","transcript":"exact words heard"}
@@ -671,16 +691,21 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                   },
                 ],
               },
-              ...(model.startsWith('gemini-2.5-')
-                ? { config: { thinkingConfig: { thinkingBudget: 0 } } }
-                : {}),
+              config: {
+                temperature: 0,
+                maxOutputTokens: 90,
+                responseMimeType: 'application/json',
+                ...(model === 'gemini-4-hydrogen'
+                  ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                  : {}),
+              },
             });
             wakePromise.catch(() => {});
 
             const response = await Promise.race([
               wakePromise,
               new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('503 Wake check timed out')), 5500)
+                setTimeout(() => reject(new Error('503 Wake check timed out')), perCallTimeoutMs)
               ),
             ]);
 
@@ -692,7 +717,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
               parsed = { transcript: raw };
             }
 
-            const transcript = String(parsed.transcript || raw || '').trim();
+            const transcript = String(parsed.transcript ?? raw ?? '').trim();
             const norm = transcript
               .normalize('NFD')
               .replace(/[\u0300-\u036f]/g, '')
@@ -701,10 +726,11 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
               .replace(/\s+/g, ' ')
               .trim();
             const wakeMatch = norm.match(
-              /(?:^|\s)(?:hi|hey|hello|ok|okay)\s+(?:kevin|keven|kevine)(?:\s+(.*))?$/i
+              /(?:^|\s)(?:hi|hey|hello|ok|okay|hai|hay|ai|ay|ei|eh)\s+(?:kevin|keven|kevine|kiven|kebin|kevini|cavin|kevi)(?:\s+(.*))?$/i
             );
-            const hasStrictWakeName = /(?:^|\s)(?:hi|hey|hello|ok|okay|hai|hay)\s+(?:kevin|keven|kevine)\b/i.test(norm);
-            const isWake = Boolean(wakeMatch) || (Boolean(parsed.wake) && hasStrictWakeName);
+            const hasStrictWakeName = /(?:^|\s)(?:hi|hey|hello|ok|okay|hai|hay|ai|ay|ei|eh)\s+(?:kevin|keven|kevine|kiven|kebin|kevini|cavin|kevi)\b/i.test(norm)
+              || /\b(?:kevin|keven|kevine|kiven|kebin|kevini|cavin|kevi)\b/i.test(norm);
+            const isWake = Boolean(wakeMatch) || (Boolean(parsed.wake) && (hasStrictWakeName || norm.length === 0));
             const command = String(parsed.command || wakeMatch?.[1] || '').trim();
 
             res.json({ wake: isWake, command, transcript, model });
@@ -716,8 +742,17 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
             const combined = `${msg} ${readable}`;
             if (isInvalidApiKeyError(err, combined)) {
               invalidKeys.add(key);
+              continue;
             }
-            if (err?.status === 404 || combined.includes('NOT_FOUND')) {
+            if (
+              err?.status === 404 ||
+              err?.status === 503 ||
+              combined.includes('NOT_FOUND') ||
+              combined.includes('503') ||
+              combined.includes('UNAVAILABLE') ||
+              combined.toLowerCase().includes('high demand') ||
+              combined.toLowerCase().includes('timed out')
+            ) {
               break;
             }
           }
@@ -977,11 +1012,12 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
         ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions.trim()}\nFollow these instructions in addition to the core Kevin AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
         : '';
       const audioInstruction = hasAudioAttachment
-        ? `[VOICE NOTE & AUDIO PROCESSING CONTEXT]:
-- The user has sent a recorded voice message in audio format (often spoken in Kinyarwanda, or Kinyarwanda mixed with English/French).
-- Listen attentively to exact Kinyarwanda phonemes, prefixes, and Rwandan names without mishearing Kinyarwanda speech as unrelated English commands.
-- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: NEVER execute or call any device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera, open_app) UNLESS the user's voice message explicitly and unmistakably commanded that exact action (e.g., clearly saying "hamagara ...", "curanga ...", "ohereza SMS ...", "ohereza kuri WhatsApp ...").
-- If the audio is a greeting, a normal question, a conversation, or unclear/noisy, DO NOT trigger any tool — reply naturally in fluent, authentic Kinyarwanda (or ask the user to repeat clearly if noisy).
+        ? `[KINYARWANDA VOICE NOTE & AUDIO COMPREHENSION]:
+- The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, or Kinyarwanda mixed with French/English).
+- ALWAYS listen directly to the attached raw audio recording as your PRIMARY source of truth—even if a preliminary text transcript draft is also provided. If the preliminary transcript misheard any Kinyarwanda word, prefix, Rwandan name, or command, trust what you hear in the raw audio!
+- Pay close attention to authentic Kinyarwanda phonetics, prefixes, consonant clusters, and Rwandan names without mishearing Kinyarwanda speech as unrelated English words.
+- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: NEVER execute or call any device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera, open_app) UNLESS the user's voice message explicitly and unmistakably commanded that exact action in the audio.
+- If the audio is a greeting, a normal question, or a conversation, DO NOT trigger any tool — reply naturally in fluent, authentic Kinyarwanda. If the audio is completely silent or unintelligible, politely ask them in Kinyarwanda to repeat clearly.
 - NEVER invent a phone number, contact name, song, or message that was not clearly spoken.`
         : '';
       const latestUserText = Array.isArray(contents) && contents.length > 0
@@ -990,7 +1026,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
             .join(' ')
             .trim()
         : '';
-      const needsContacts = Boolean(hasAudioAttachment) || /\b(hamagara|terefone|call|dial|sms|message|ubutumwa|ohereza|send|whatsapp|wa|contact|nimero|number)\b/i.test(latestUserText);
+      const needsContacts = Boolean(hasAudioAttachment) || /(?:hamagar|terefon|oherez)|\b(call|dial|sms|message|ubutumwa|send|whatsapp|wa|contact|nimero|number)\b/i.test(latestUserText);
       const userQueryTokens = latestUserText
         .toLowerCase()
         .split(/\s+/)
@@ -1059,7 +1095,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       let lastErr: unknown = null;
       const chatModelErrors: string[] = [];
       let streamStarted = false;
-      const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
+      const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
       const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
       const shouldTryWebSearch = Boolean(
         latestUserText
@@ -1079,7 +1115,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
               : ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
 
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-      const firstModelTimeoutMs = shouldTryWebSearch ? 5000 : (hasAudioAttachment ? 8000 : 5000);
+      const firstModelTimeoutMs = shouldTryWebSearch ? 5000 : (hasAudioAttachment ? 10500 : 6500);
 
       const ensureStreamHeaders = () => {
         if (!streamStarted && !res.headersSent) {

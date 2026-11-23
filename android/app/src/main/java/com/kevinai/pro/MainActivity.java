@@ -32,19 +32,23 @@ public class MainActivity extends BridgeActivity {
             new android.content.BroadcastReceiver() {
                 @Override
                 public void onReceive(android.content.Context context, Intent intent) {
-                    if (ScreenCaptureService.ACTION_SCREEN_FRAME.equals(intent.getAction())) {
+                    String action = intent != null ? intent.getAction() : null;
+                    if (action == null) return;
+                    if (ScreenCaptureService.ACTION_SCREEN_FRAME.equals(action)) {
                         String frame = intent.getStringExtra(ScreenCaptureService.EXTRA_FRAME);
                         if (frame != null) {
                             dispatchScreenFrame(frame);
                         }
-                    } else if (ScreenCaptureService.ACTION_STOP.equals(intent.getAction())) {
+                    } else if (ScreenCaptureService.ACTION_STOP.equals(action)) {
                         dispatchScreenSharingState(false);
-                    } else if (KevinNotificationListenerService.ACTION_WHATSAPP_REPLIED.equals(intent.getAction())) {
+                    } else if (KevinNotificationListenerService.ACTION_WHATSAPP_REPLIED.equals(action)) {
                         dispatchWhatsAppAutoReply(
                                 intent.getStringExtra(KevinNotificationListenerService.EXTRA_SENDER),
                                 intent.getStringExtra(KevinNotificationListenerService.EXTRA_INCOMING),
                                 intent.getStringExtra(KevinNotificationListenerService.EXTRA_REPLY)
                         );
+                    } else if (KevinWakeWordService.ACTION_WAKE_WORD_IN_APP.equals(action)) {
+                        dispatchInAppWakeWord(intent.getStringExtra(KevinWakeWordService.EXTRA_WAKE_COMMAND));
                     }
                 }
             };
@@ -93,6 +97,7 @@ public class MainActivity extends BridgeActivity {
         filter.addAction(ScreenCaptureService.ACTION_SCREEN_FRAME);
         filter.addAction(ScreenCaptureService.ACTION_STOP);
         filter.addAction(KevinNotificationListenerService.ACTION_WHATSAPP_REPLIED);
+        filter.addAction(KevinWakeWordService.ACTION_WAKE_WORD_IN_APP);
         ContextCompat.registerReceiver(
                 this,
                 screenCaptureReceiver,
@@ -202,6 +207,18 @@ public class MainActivity extends BridgeActivity {
                 .putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data);
         ContextCompat.startForegroundService(this, serviceIntent);
         dispatchScreenSharingState(true);
+    }
+
+    private void dispatchInAppWakeWord(String trailingCommand) {
+        if (getBridge() == null || getBridge().getWebView() == null) return;
+        KevinWakeWordService.setOverlayVisible(true);
+        KevinWakeWordService.pauseListening(this);
+        long wakeId = System.currentTimeMillis();
+        String quotedCmd = JSONObject.quote(trailingCommand != null ? trailingCommand : "");
+        String js = "try{window.__kevinPendingWakeWord={id:" + wakeId + ",command:" + quotedCmd
+                + "};window.dispatchEvent(new CustomEvent('kevinWakeWordTriggered',{detail:{id:"
+                + wakeId + ",command:" + quotedCmd + "}}));}catch(e){}";
+        getBridge().getWebView().post(() -> getBridge().getWebView().evaluateJavascript(js, null));
     }
 
     private void dispatchWhatsAppAutoReply(String sender, String incoming, String reply) {

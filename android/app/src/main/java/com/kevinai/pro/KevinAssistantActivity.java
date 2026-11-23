@@ -230,10 +230,10 @@ public class KevinAssistantActivity extends AppCompatActivity {
         final String js = "try{window.__kevinPendingWakeWord={id:" + wakeId + ",command:" + quotedCmd
                 + "};window.dispatchEvent(new CustomEvent('kevinWakeWordTriggered',{detail:{id:"
                 + wakeId + ",command:" + quotedCmd + "}}));}catch(e){}";
-        long[] delays = new long[] { 350L, 950L, 1900L };
+        long[] delays = new long[] { 120L, 420L, 900L, 1600L, 2600L };
         for (long delay : delays) {
             mainHandler.postDelayed(() -> {
-                if (bridge != null && bridge.getWebView() != null) {
+                if (pendingWakeId == wakeId && bridge != null && bridge.getWebView() != null) {
                     bridge.getWebView().evaluateJavascript(js, null);
                 }
             }, delay);

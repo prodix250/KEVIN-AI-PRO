@@ -23767,7 +23767,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-BxJAu3SI.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-DGPhJr1O.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -24852,14 +24852,15 @@ function runDeviceAction(action, forceExecute = false) {
   if (action.name === "open_youtube") {
     const videoId = action.videoId || ((_a2 = action.args) == null ? void 0 : _a2.videoId);
     const query = ((_b2 = action.args) == null ? void 0 : _b2.query) || "";
-    if (bridge == null ? void 0 : bridge.playYouTube) {
+    const shouldAutoPlay = perms.autoPlayYouTube !== false || forceExecute;
+    if ((bridge == null ? void 0 : bridge.playYouTube) && shouldAutoPlay) {
       bridge.playYouTube(videoId || "", query);
       return true;
     }
-    if (action.embedUrl) {
+    if (action.embedUrl && shouldAutoPlay) {
       return true;
     }
-    const target = action.fallbackUrl || action.url;
+    const target = shouldAutoPlay ? action.url || action.fallbackUrl : action.fallbackUrl || action.url;
     if (target) {
       const link2 = document.createElement("a");
       link2.href = target;
@@ -25036,10 +25037,12 @@ function executeDeviceAction(name2, args) {
   const messageText = String(args.message || "");
   const rawContactName = args.contact_name ? String(args.contact_name) : void 0;
   const appName = String(args.app_name || "").toLowerCase();
-  getAgentPermissions();
+  const perms = getAgentPermissions();
+  let url;
   let fallbackUrl;
   let embedUrl;
   let videoId;
+  let channel;
   let label = name2;
   if (name2 === "make_call" || name2 === "send_sms" || name2 === "open_whatsapp") {
     let resolvedPhone = isLikelyPhoneNumber(rawPhoneNumber) ? sanitizePhoneNumber(rawPhoneNumber) : "";
@@ -25093,19 +25096,25 @@ function executeDeviceAction(name2, args) {
     const q2 = query || "trending music";
     const resolvedVideoId = typeof args.videoId === "string" && args.videoId.trim() ? args.videoId.trim() : void 0;
     const resolvedVideoTitle = typeof args.videoTitle === "string" && args.videoTitle.trim() ? args.videoTitle.trim() : q2;
+    const resolvedChannel = typeof args.channel === "string" && args.channel.trim() ? args.channel.trim() : void 0;
     videoId = resolvedVideoId || (q2.length === 11 && /^[a-zA-Z0-9_-]+$/.test(q2) ? q2 : void 0);
-    embedUrl = videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1` : void 0;
-    fallbackUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q2)}`;
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q2)}`;
+    const watchUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}&autoplay=1` : void 0;
+    embedUrl = videoId && perms.autoPlayYouTube !== false ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1` : void 0;
+    url = watchUrl || searchUrl;
+    fallbackUrl = searchUrl;
+    channel = resolvedChannel;
     label = `Curanga: ${resolvedVideoTitle}`;
     const actionObj = {
       name: name2,
       args,
       label,
-      url: fallbackUrl,
+      url,
       fallbackUrl,
       embedUrl,
       videoId,
       videoTitle: resolvedVideoTitle,
+      channel,
       status: "executed"
     };
     runDeviceAction(actionObj, false);
@@ -25390,10 +25399,15 @@ function cleanBase64(dataUrl) {
   }
 }
 const normalizeAudioMimeType = (mimeType) => {
-  const normalized = mimeType.split(";")[0].trim().toLowerCase();
+  const normalized = (mimeType || "").split(";")[0].trim().toLowerCase();
   if (normalized === "audio/x-wav" || normalized === "audio/wave") return "audio/wav";
-  if (normalized === "audio/mp3") return "audio/mpeg";
-  if (normalized === "audio/webm" || normalized === "audio/wav" || normalized === "audio/mp4" || normalized === "audio/aac" || normalized === "audio/ogg" || normalized === "audio/mpeg" || normalized === "audio/m4a") return normalized;
+  if (normalized === "audio/mp3" || normalized === "audio/mpeg") return "audio/mpeg";
+  if (normalized === "audio/m4a" || normalized === "audio/x-m4a" || normalized === "audio/mp4") return "audio/mp4";
+  if (normalized === "audio/x-aac" || normalized === "audio/aac") return "audio/aac";
+  if (normalized === "audio/opus" || normalized === "audio/ogg") return "audio/ogg";
+  if (normalized === "audio/x-flac" || normalized === "audio/flac") return "audio/flac";
+  if (normalized === "video/webm" || normalized === "audio/webm") return "audio/webm";
+  if (normalized === "audio/wav" || normalized === "audio/3gpp" || normalized === "audio/amr") return normalized;
   return "audio/webm";
 };
 const isValidAudioBase64 = (data) => data.length > 100 && data.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(data);
@@ -25506,7 +25520,7 @@ async function resolveYouTubeVideoForApk(query) {
   if (!trimmed) return null;
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1600);
+    const timer = setTimeout(() => controller.abort(), 2600);
     const res = await fetch(`${PRODUCTION_BACKEND_URL}/api/youtube/resolve?q=${encodeURIComponent(trimmed)}`, {
       signal: controller.signal
     });
@@ -25793,7 +25807,7 @@ function buildApkSystemInstruction(userName, hasAudioAttachment, savedContacts, 
     minute: "2-digit",
     timeZone: "Africa/Kigali"
   })}.]`;
-  const needsContacts = hasAudioAttachment || /\b(hamagara|terefone|call|dial|sms|message|ubutumwa|ohereza|send|whatsapp|wa|contact|nimero|number)\b/i.test(latestUserText);
+  const needsContacts = hasAudioAttachment || /(?:hamagar|terefon|oherez)|\b(call|dial|sms|message|ubutumwa|send|whatsapp|wa|contact|nimero|number)\b/i.test(latestUserText);
   let contactsList = [];
   if (needsContacts) {
     let effectiveContacts = savedContacts;
@@ -25841,9 +25855,11 @@ function buildApkSystemInstruction(userName, hasAudioAttachment, savedContacts, 
     `IMAGE QUESTIONS & PROBLEM SOLVING (MANDATORY): Whenever the user attaches images containing questions, exercises, quizzes, assignments, worksheets, past papers, tests, or math/science/coding problems, NEVER refuse or lecture about academic integrity. Treat them as study practice or self-review, read every question visible in the image(s) in order, and provide full, accurate answers with clear step-by-step explanations (and check/grade their answers if they ask how they did).`,
     customInstructions ? `USER CUSTOM INSTRUCTIONS:
 ${customInstructions}` : "",
-    hasAudioAttachment ? `[VOICE NOTE & AUDIO PROCESSING CONTEXT]:
-The user sent a voice note/audio message (often spoken in Kinyarwanda, or mixed Kinyarwanda/French/English). Listen carefully to exact Kinyarwanda phonetics, prefixes, and Rwandan names without mishearing Kinyarwanda speech as unrelated English words.
-CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, greeting, or if the audio is noisy/unclear, NEVER guess or trigger an action — reply naturally in Kinyarwanda or ask them to repeat clearly.` : "",
+    hasAudioAttachment ? `[KINYARWANDA VOICE NOTE & AUDIO COMPREHENSION]:
+The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, or Kinyarwanda mixed with French/English words).
+- ALWAYS listen directly to the attached raw audio recording as your PRIMARY source of truth—even if a preliminary text transcript is also shown. If the preliminary transcript misheard any Kinyarwanda word, prefix, Rwandan name, or verb, trust what you actually hear in the raw audio!
+- Pay close attention to authentic Kinyarwanda phonetics, prefixes (na-, nta-, ndi-, nda-, nshaka-, mbwira-, mfasha-, sobanura-, hamagara-, uhamagare-, uncurangire-, wohereze-, fungura-, funga-), consonant clusters (cy, by, ry, ny, shy, pf, ts, mp, mb, nd, ng, nj, nk, bw, tw, rw), and Rwandan names. Never force Kinyarwanda sounds into random English words.
+- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.` : "",
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(" | ")}]` : "",
     `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext
@@ -25860,14 +25876,14 @@ async function transcribeAudioWithSTT(audioBase64, audioMimeType = "audio/webm")
   const customApiKeys = getGeminiApiKeysArray();
   if ((isCapacitorApkRuntime() || customApiKeys.length > 0) && customApiKeys.length > 0) {
     const orderedKeys = prioritizeApkKeys(customApiKeys);
-    for (const model of ["gemini-3.5-flash-lite", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-2.5-flash"]) {
+    for (const model of ["gemini-3.5-transcribe", "gemini-4-hydrogen", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]) {
       let abortModel = false;
       for (const currentKey of orderedKeys) {
         if (apkDeadKeysSession.has(currentKey)) continue;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 7e3);
+        const timer = setTimeout(() => controller.abort(), 9e3);
         try {
-          const genConfig = getApkGenerationConfig(model, void 0, true);
+          const genConfig = model === "gemini-4-hydrogen" ? getApkGenerationConfig(model, void 0, true) : void 0;
           const bodyPayload = {
             contents: [
               {
@@ -25875,7 +25891,7 @@ async function transcribeAudioWithSTT(audioBase64, audioMimeType = "audio/webm")
                 parts: [
                   { inlineData: { mimeType: normalizedMime, data: cleanAudio } },
                   {
-                    text: 'You are an expert native Rwandan speech recognizer (Kinyarwanda, English, French, Swahili). Listen very carefully and transcribe verbatim in standard Rwandan Kinyarwanda orthography (or the exact language spoken). Never mishear Kinyarwanda as random English commands or hallucinate words. Output ONLY exact spoken words with no quotes. If silent, noisy, or unintelligible, output empty string "".'
+                    text: 'You are an expert native Rwandan speech-to-text transcriber specializing in Kinyarwanda (Ikinyarwanda), plus English, French, and Swahili. Most speakers speak Kinyarwanda or Kinyarwanda mixed with French/English words. Listen carefully to exact Kinyarwanda phonetics, prefixes (n-, u-, a-, tu-, mu-, ba-, nda-, nshaka, mbwira, sobanura, hamagara, uncurangire, ohereza, fungura, funga), consonant clusters (cy, by, ry, ny, sh, shy, pf, ts, mp, mb, nd, ng, nj, nk, bw, tw, rw, kw, gw), and Rwandan names. NEVER twist Kinyarwanda speech into unrelated English or Swahili words. Output ONLY the exact verbatim spoken words with standard Kinyarwanda spelling and no quotes or explanations. If completely silent or pure noise, return empty string "".'
                   }
                 ]
               }
@@ -25928,7 +25944,7 @@ async function transcribeAudioWithSTT(audioBase64, audioMimeType = "audio/webm")
   }
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 9e3);
+    const timer = setTimeout(() => controller.abort(), 11500);
     const res = await fetch(getEndpoint("/api/stt"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -26164,9 +26180,9 @@ async function sendMessageToGemini(history, latestMessage, onChunk, attachments,
     }
     return (_a2 = attachment.mimeType) == null ? void 0 : _a2.toLowerCase().startsWith("image/");
   });
-  const isGenericAudioPlaceholder = !(latestMessage == null ? void 0 : latestMessage.trim()) || latestMessage.trim() === "🎤 Voice Note" || latestMessage.trim() === "Voice command";
-  const prompt = isGenericAudioPlaceholder && hasAudioAttachment ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umusubize neza mu rurimi yavuze. NTUGAKORE igikorwa na kimwe (hamagara, SMS, WhatsApp, YouTube) utumvise neza ko yabigusabye mu buryo budashidikanywaho — niba amajwi atumvikana neza, musabe ko asubiramo mu Kinyarwanda." : hasAudioAttachment && (latestMessage == null ? void 0 : latestMessage.trim()) ? `[VERIFIED SPOKEN TRANSCRIPT]: "${latestMessage.trim()}"
-(Listen to the attached audio alongside this transcript in Kinyarwanda/English, answer helpfully in the same language, and ONLY execute a device action if it was clearly and explicitly requested.)` : (latestMessage == null ? void 0 : latestMessage.trim()) || (hasImageAttachment ? "Please read all questions, problems, or text shown in these images carefully and provide complete, accurate answers with clear explanations for each." : "");
+  const trimmedLatest = (latestMessage || "").trim();
+  const isGenericAudioPlaceholder = !trimmedLatest || trimmedLatest === "🎤 Voice Note" || trimmedLatest === "Voice command" || trimmedLatest.startsWith("🎤 ") || trimmedLatest.startsWith("Listen to the attached voice message");
+  const prompt = isGenericAudioPlaceholder && hasAudioAttachment ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa urundi rurimi muri iyi audio, umusubize neza mu rurimi yavuze. NTUGAKORE igikorwa na kimwe (hamagara, SMS, WhatsApp, YouTube) utumvise neza ko yabigusabye mu buryo budashidikanywaho — niba amajwi atumvikana neza, musabe ko asubiramo mu Kinyarwanda." : hasAudioAttachment && trimmedLatest ? `[PRELIMINARY STT DRAFT (always listen directly to the attached raw audio as your primary source — if any Kinyarwanda word, name, or command differs from what you hear, ALWAYS trust the raw audio)]: "${trimmedLatest}"` : trimmedLatest || (hasImageAttachment ? "Please read all questions, problems, or text shown in these images carefully and provide complete, accurate answers with clear explanations for each." : "");
   const parts = prompt ? [{ text: prompt }] : [];
   if (audioBase64 !== void 0) {
     const validatedAudio = cleanBase64(audioBase64);
@@ -26227,7 +26243,7 @@ ${att.textContent}` });
     var _a2, _b2, _c, _d, _e2, _f, _g, _h;
     const latestUserText = Array.isArray(requestContents) && requestContents.length > 0 ? (((_a2 = requestContents[requestContents.length - 1]) == null ? void 0 : _a2.parts) || []).map((p2) => typeof (p2 == null ? void 0 : p2.text) === "string" ? p2.text : "").join(" ").trim() : "";
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
-    const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
+    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
     const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText && !includeAudioFlag && !isExplicitDeviceCommand && !isAmakuruGreeting && /\b(news|amakuru|agezweho|bigezweho|ibigezweho|mashya|masha|weather|iteganyagihe|forecast|meteo|météo|score|scores|match|matches|umukino|imikino|results|standings|table|ranking|amanota|shampiyona|champiyona|premier league|champions league|la liga|afcon|world cup|price|igiciro|ibiciro|dollar|idorari|exchange rate|bitcoin|crypto|latest|recent|recently|update|updates|breaking|headlines|trending|tonight|last night|internet|google|search|shaka|online|live|president|perezida|minister|minisiteri|minisitiri|winner|who won|watsinze|yatsinze|batsinze|mancity|man city|manutd|man utd|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr|kiyovu|mukura|amavubi|actualites|actualités|nouvelles|igihe|kigalitoday|rba|bbc)\b/i.test(latestUserText)
@@ -26290,12 +26306,12 @@ ${rssCache.contextText}` }
               if (useTools) {
                 if (phase === "search") {
                   payloadBody.tools = [{ google_search: {} }];
-                } else if (phase === "device" && isExplicitDeviceCommand) {
+                } else if (phase === "device" && (isExplicitDeviceCommand || includeAudioFlag)) {
                   payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
                 }
               }
               const controller = new AbortController();
-              const headerTimeoutMs = isLastApkModel ? 12e3 : 7500;
+              const headerTimeoutMs = includeAudioFlag ? 10500 : isLastApkModel ? 12e3 : 7500;
               const timer = setTimeout(() => controller.abort(), headerTimeoutMs);
               const endpointUrl = useStreaming ? `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${encodeURIComponent(currentKey)}` : `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`;
               const res = await fetch(endpointUrl, {
@@ -26313,7 +26329,7 @@ ${rssCache.contextText}` }
             let clearTimer = null;
             try {
               const canStream = typeof ReadableStream !== "undefined" && typeof TextDecoder !== "undefined";
-              const wantsTools = phase === "search" || phase === "device" && isExplicitDeviceCommand;
+              const wantsTools = phase === "search" || phase === "device" && (isExplicitDeviceCommand || includeAudioFlag);
               let useTools = wantsTools;
               let useThinking = true;
               let callResult = await callStreamOrGenerate(useTools, useThinking, canStream);
@@ -37619,7 +37635,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-lJIrqCkU.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-ClUtHmmn.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -102186,7 +102202,9 @@ const createVoiceRecordingSession$1 = async (options) => {
   if (agentBridge == null ? void 0 : agentBridge.pauseWakeWord) {
     try {
       agentBridge.pauseWakeWord();
-      await new Promise((resolve) => setTimeout(resolve, 220));
+      if (!(options == null ? void 0 : options.skipWakePauseDelay)) {
+        await new Promise((resolve) => setTimeout(resolve, 180));
+      }
     } catch {
     }
   }
@@ -102275,7 +102293,7 @@ const createVoiceRecordingSession$1 = async (options) => {
             sumSq += norm * norm;
           }
           const rms = Math.sqrt(sumSq / samples.length);
-          if (elapsed > 450 && rms > 0.032) {
+          if (elapsed > 350 && rms > 0.02) {
             speechConsecutive++;
             if (speechConsecutive >= 2) {
               heardSpeech = true;
@@ -102284,7 +102302,7 @@ const createVoiceRecordingSession$1 = async (options) => {
           } else {
             speechConsecutive = 0;
           }
-          if (heardSpeech && (now2 - lastSpeechAt >= 1350 || elapsed >= 15e3)) {
+          if (heardSpeech && (now2 - lastSpeechAt >= 1250 || elapsed >= 15e3)) {
             vadTriggered = true;
             stopVad();
             (_a3 = options.onAutoSilence) == null ? void 0 : _a3.call(options);
@@ -102414,9 +102432,13 @@ function AssistantOverlay({
   const cleanFrameWaitersRef = reactExports.useRef([]);
   const sendingLockRef = reactExports.useRef(false);
   const lastWakeIdRef = reactExports.useRef(0);
+  const isOpenRef = reactExports.useRef(isOpen);
+  isOpenRef.current = isOpen;
+  const pendingAutoListenAfterWakeRef = reactExports.useRef(false);
   const wakeHandlersRef = reactExports.useRef({
     handleSend: async () => void 0,
-    startVoiceRecording: async () => void 0
+    startVoiceRecording: async () => void 0,
+    stopStreamCleanly: () => void 0
   });
   const showAudioStatus = (msg) => {
     setAudioStatusNote(msg);
@@ -102476,14 +102498,24 @@ function AssistantOverlay({
   reactExports.useEffect(() => {
     if (isOpen) {
       setPerms(getAgentPermissions());
-      setTimeout(() => {
-        var _a2;
-        return (_a2 = textareaRef.current) == null ? void 0 : _a2.focus();
-      }, 180);
+      if (pendingAutoListenAfterWakeRef.current) {
+        pendingAutoListenAfterWakeRef.current = false;
+        setTimeout(() => {
+          void wakeHandlersRef.current.startVoiceRecording(true, true);
+        }, 40);
+      } else {
+        setTimeout(() => {
+          var _a2;
+          return (_a2 = textareaRef.current) == null ? void 0 : _a2.focus();
+        }, 180);
+      }
     } else {
+      pendingAutoListenAfterWakeRef.current = false;
       stopStreamCleanly();
       stopLiveScreen();
     }
+  }, [isOpen]);
+  reactExports.useEffect(() => {
     return () => {
       if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
       stopStreamCleanly();
@@ -102493,7 +102525,7 @@ function AssistantOverlay({
         submittedAudioUrlRef.current = null;
       }
     };
-  }, [isOpen]);
+  }, []);
   reactExports.useEffect(() => {
     var _a2, _b2;
     const onNativeFrame = (event) => {
@@ -102527,6 +102559,7 @@ function AssistantOverlay({
     window.addEventListener("screenCaptured", onNativeFrame);
     window.addEventListener("screenSharingState", onNativeState);
     const processWakeWordDetail = (detail) => {
+      var _a3, _b3;
       if (!detail) return;
       const wakeId = typeof detail.id === "number" ? detail.id : Date.now();
       if (wakeId && lastWakeIdRef.current === wakeId) return;
@@ -102536,15 +102569,30 @@ function AssistantOverlay({
       } catch {
         window.__kevinPendingWakeWord = void 0;
       }
+      try {
+        (_b3 = (_a3 = window.KevinOverlayBridge) == null ? void 0 : _a3.consumePendingWakeWord) == null ? void 0 : _b3.call(_a3);
+      } catch {
+      }
+      wakeHandlersRef.current.stopStreamCleanly();
       const cmd = (detail.command || "").trim();
       const meaningfulWords = cmd.replace(/[^a-zA-Z0-9\u00C0-\u024F\s]/g, " ").trim().split(/\s+/).filter((w2) => w2.length >= 2);
       if (cmd && meaningfulWords.length >= 2) {
         void wakeHandlersRef.current.handleSend(cmd);
       } else {
+        setSubmittedPrompt("");
+        setReplyText("");
+        setAction(null);
+        setErrorMsg(null);
+        setSources([]);
+        setShowSources(false);
         showAudioStatus("🎙️ Ndakumva! Vuga icyo ushaka...");
-        setTimeout(() => {
-          void wakeHandlersRef.current.startVoiceRecording(true);
-        }, 220);
+        if (isOpenRef.current || isDedicatedOverlay) {
+          setTimeout(() => {
+            void wakeHandlersRef.current.startVoiceRecording(true, true);
+          }, 50);
+        } else {
+          pendingAutoListenAfterWakeRef.current = true;
+        }
       }
     };
     const onWakeWord = (event) => {
@@ -102754,20 +102802,21 @@ function AssistantOverlay({
       showAudioStatus(customMessage || "Amajwi yasibwe.");
     }
   };
-  const startVoiceRecording = async (autoStopOnSilence = false) => {
+  const startVoiceRecording = async (autoStopOnSilence = false, skipWakePauseDelay = false) => {
     if (voiceRecordingRef.current) return;
     try {
       setErrorMsg(null);
       const recording = await createVoiceRecordingSession$1(
         autoStopOnSilence ? {
           autoStopOnSilence: true,
+          skipWakePauseDelay,
           onAutoSilence: () => {
             void finishVoiceRecording();
           },
           onNoSpeechTimeout: () => {
             cancelRecording("🎙️ Nta jwi ryumvikanye. Kanda mic wongere uvuge.");
           }
-        } : void 0
+        } : skipWakePauseDelay ? { skipWakePauseDelay: true } : void 0
       );
       voiceRecordingRef.current = recording;
       setIsRecording(true);
@@ -102830,28 +102879,24 @@ function AssistantOverlay({
         return;
       }
       let transcript = "";
-      let sttSucceeded = false;
       setIsTranscribing(true);
       try {
         transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
-        sttSucceeded = true;
       } catch (sttErr) {
         console.warn("STT fallback to multimodal audio:", sttErr);
       } finally {
         setIsTranscribing(false);
       }
-      if (sttSucceeded && !transcript.trim() && audioBlob.size < 4500) {
-        showAudioStatus("🎙️ Sinabashije kumva neza icyo uvuze. Ongera uvuge hafi ya mic.");
-        return;
-      }
       const audioUrl = URL.createObjectURL(audioBlob);
       const cleanTranscript = transcript.trim();
-      if (cleanTranscript) {
-        await handleSend(cleanTranscript, void 0, void 0, void 0, cleanTranscript, audioUrl);
-      } else {
-        const prompt = "Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.";
-        await handleSend(prompt, audioBase64, recording.mimeType, void 0, "🎤 Voice Note", audioUrl);
-      }
+      await handleSend(
+        cleanTranscript || "🎤 Voice Note",
+        audioBase64,
+        recording.mimeType,
+        void 0,
+        cleanTranscript || "🎤 Voice Note",
+        audioUrl
+      );
     } catch (error) {
       setErrorMsg(error instanceof Error ? error.message : "Unable to process the voice message.");
     } finally {
@@ -102869,7 +102914,8 @@ function AssistantOverlay({
   };
   wakeHandlersRef.current = {
     handleSend: (overrideText) => handleSend(overrideText),
-    startVoiceRecording: (autoStopOnSilence = false) => startVoiceRecording(autoStopOnSilence)
+    startVoiceRecording: (autoStopOnSilence = false, skipWakePauseDelay = false) => startVoiceRecording(autoStopOnSilence, skipWakePauseDelay),
+    stopStreamCleanly
   };
   const handleImagePick = async (e) => {
     var _a2, _b2;
@@ -103484,7 +103530,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-X65aONCU.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-CBLvwWlb.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -104001,6 +104047,24 @@ function App() {
     };
   }, [isDedicatedAssistantOverlay]);
   reactExports.useEffect(() => {
+    if (isDedicatedAssistantOverlay) return;
+    const openOnWake = () => {
+      setShowAssistantOverlay(true);
+    };
+    window.addEventListener("kevinWakeWordTriggered", openOnWake);
+    return () => {
+      window.removeEventListener("kevinWakeWordTriggered", openOnWake);
+    };
+  }, [isDedicatedAssistantOverlay]);
+  reactExports.useEffect(() => {
+    var _a3, _b3;
+    if (isDedicatedAssistantOverlay) return;
+    try {
+      (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.setInAppOverlayOpen) == null ? void 0 : _b3.call(_a3, showAssistantOverlay);
+    } catch {
+    }
+  }, [showAssistantOverlay, isDedicatedAssistantOverlay]);
+  reactExports.useEffect(() => {
     const startTime = Date.now();
     const duration = 2200;
     const interval = setInterval(() => {
@@ -104482,23 +104546,17 @@ function App() {
         throw new Error("The recorded audio is empty or invalid. Please record your message again.");
       }
       let transcript = "";
-      let sttSucceeded = false;
       if (!assistantRequest) {
         setIsTranscribingSTT(true);
         try {
           transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
-          sttSucceeded = true;
         } catch (sttErr) {
           console.warn("STT fallback to multimodal audio:", sttErr);
         } finally {
           setIsTranscribingSTT(false);
         }
       }
-      if (!assistantRequest && sttSucceeded && !transcript.trim() && audioBlob.size < 4500) {
-        showToastMessage("🎙️ Sinabashije kumva neza icyo uvuze. Ongera uvuge neza hafi ya mic.");
-        return;
-      }
-      const prompt = transcript || "Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.";
+      const cleanTranscript = transcript.trim();
       if (assistantRequest) {
         const nativeBridge = window.KevinAssistantNative;
         const attachments = [audioBlob];
@@ -104511,21 +104569,19 @@ function App() {
         }
         const response = await sendMessageToGemini(
           [],
-          prompt,
+          cleanTranscript || "🎤 Voice Note",
           void 0,
           attachments,
-          "gemini-4-hydrogen"
+          "gemini-4-hydrogen",
+          void 0,
+          audioBase64,
+          recording.mimeType
         );
         (_a3 = nativeBridge == null ? void 0 : nativeBridge.onGeminiResponse) == null ? void 0 : _a3.call(nativeBridge, response);
         return;
       }
       const audioUrl = URL.createObjectURL(audioBlob);
-      const cleanTranscript = transcript.trim();
-      if (cleanTranscript) {
-        void handleSendMessage(cleanTranscript, void 0, void 0, void 0, audioUrl);
-      } else {
-        void handleSendMessage("🎤 Voice Note", audioBlob, audioBase64, recording.mimeType, audioUrl);
-      }
+      void handleSendMessage(cleanTranscript || "🎤 Voice Note", audioBlob, audioBase64, recording.mimeType, audioUrl);
     } catch (error) {
       console.error("Audio processing error:", error);
       const message = error instanceof Error ? error.message : "Unable to process the voice message.";
@@ -105932,12 +105988,13 @@ Click the **${docName}** file below to download and view the complete document.`
                       {
                         type: "button",
                         onClick: () => {
-                          if (message.action.name === "make_call") {
+                          var _a3;
+                          if (message.action.name === "make_call" || message.action.name === "open_youtube" && ((_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.playYouTube)) {
                             const updated = { ...message.action };
                             runDeviceAction(updated, true);
                             return;
                           }
-                          const target = message.action.fallbackUrl || message.action.url;
+                          const target = message.action.url || message.action.fallbackUrl;
                           const link2 = document.createElement("a");
                           link2.href = target;
                           link2.target = "_blank";

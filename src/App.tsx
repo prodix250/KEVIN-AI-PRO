@@ -389,6 +389,26 @@ export default function App() {
   }, [isDedicatedAssistantOverlay]);
 
   useEffect(() => {
+    if (isDedicatedAssistantOverlay) return;
+    const openOnWake = () => {
+      setShowAssistantOverlay(true);
+    };
+    window.addEventListener('kevinWakeWordTriggered', openOnWake);
+    return () => {
+      window.removeEventListener('kevinWakeWordTriggered', openOnWake);
+    };
+  }, [isDedicatedAssistantOverlay]);
+
+  useEffect(() => {
+    if (isDedicatedAssistantOverlay) return;
+    try {
+      (window as any).KevinAgentBridge?.setInAppOverlayOpen?.(showAssistantOverlay);
+    } catch {
+      // ignore
+    }
+  }, [showAssistantOverlay, isDedicatedAssistantOverlay]);
+
+  useEffect(() => {
     const startTime = Date.now();
     const duration = 2200;
 
@@ -938,12 +958,10 @@ export default function App() {
       }
 
       let transcript = '';
-      let sttSucceeded = false;
       if (!assistantRequest) {
         setIsTranscribingSTT(true);
         try {
           transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
-          sttSucceeded = true;
         } catch (sttErr) {
           console.warn('STT fallback to multimodal audio:', sttErr);
         } finally {
@@ -951,12 +969,7 @@ export default function App() {
         }
       }
 
-      if (!assistantRequest && sttSucceeded && !transcript.trim() && audioBlob.size < 4500) {
-        showToastMessage('🎙️ Sinabashije kumva neza icyo uvuze. Ongera uvuge neza hafi ya mic.');
-        return;
-      }
-
-      const prompt = transcript || 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.';
+      const cleanTranscript = transcript.trim();
 
       if (assistantRequest) {
         const nativeBridge = window.KevinAssistantNative;
@@ -970,22 +983,20 @@ export default function App() {
         }
         const response = await sendMessageToGemini(
           [],
-          prompt,
+          cleanTranscript || '🎤 Voice Note',
           undefined,
           attachments,
-          'gemini-4-hydrogen'
+          'gemini-4-hydrogen',
+          undefined,
+          audioBase64,
+          recording.mimeType
         );
         nativeBridge?.onGeminiResponse?.(response);
         return;
       }
 
       const audioUrl = URL.createObjectURL(audioBlob);
-      const cleanTranscript = transcript.trim();
-      if (cleanTranscript) {
-        void handleSendMessage(cleanTranscript, undefined, undefined, undefined, audioUrl);
-      } else {
-        void handleSendMessage('🎤 Voice Note', audioBlob, audioBase64, recording.mimeType, audioUrl);
-      }
+      void handleSendMessage(cleanTranscript || '🎤 Voice Note', audioBlob, audioBase64, recording.mimeType, audioUrl);
     } catch (error) {
       console.error("Audio processing error:", error);
       const message = error instanceof Error ? error.message : "Unable to process the voice message.";
@@ -2571,12 +2582,13 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => {
-                                if (message.action!.name === 'make_call') {
+                                if (message.action!.name === 'make_call'
+                                  || (message.action!.name === 'open_youtube' && (window as any).KevinAgentBridge?.playYouTube)) {
                                   const updated = { ...message.action! };
                                   runDeviceAction(updated, true);
                                   return;
                                 }
-                                const target = message.action!.fallbackUrl || message.action!.url!;
+                                const target = message.action!.url || message.action!.fallbackUrl!;
                                 const link = document.createElement('a');
                                 link.href = target;
                                 link.target = '_blank';

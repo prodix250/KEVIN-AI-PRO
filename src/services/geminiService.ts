@@ -734,14 +734,17 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
   if (action.name === 'open_youtube') {
     const videoId = action.videoId || action.args?.videoId;
     const query = action.args?.query || '';
-    if (bridge?.playYouTube) {
+    const shouldAutoPlay = perms.autoPlayYouTube !== false || forceExecute;
+    if (bridge?.playYouTube && shouldAutoPlay) {
       bridge.playYouTube(videoId || '', query);
       return true;
     }
-    if (action.embedUrl) {
+    if (action.embedUrl && shouldAutoPlay) {
       return true;
     }
-    const target = action.fallbackUrl || action.url;
+    const target = shouldAutoPlay
+      ? (action.url || action.fallbackUrl)
+      : (action.fallbackUrl || action.url);
     if (target) {
       const link = document.createElement('a');
       link.href = target;
@@ -1012,19 +1015,27 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
     const q = query || "trending music";
     const resolvedVideoId = typeof args.videoId === 'string' && args.videoId.trim() ? args.videoId.trim() : undefined;
     const resolvedVideoTitle = typeof args.videoTitle === 'string' && args.videoTitle.trim() ? args.videoTitle.trim() : q;
+    const resolvedChannel = typeof args.channel === 'string' && args.channel.trim() ? args.channel.trim() : undefined;
     videoId = resolvedVideoId || (q.length === 11 && /^[a-zA-Z0-9_-]+$/.test(q) ? q : undefined);
-    embedUrl = videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1` : undefined;
-    fallbackUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
+    const watchUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}&autoplay=1` : undefined;
+    embedUrl = videoId && perms.autoPlayYouTube !== false
+      ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1`
+      : undefined;
+    url = watchUrl || searchUrl;
+    fallbackUrl = searchUrl;
+    channel = resolvedChannel;
     label = `Curanga: ${resolvedVideoTitle}`;
     const actionObj: DeviceAction = {
       name,
       args,
       label,
-      url: fallbackUrl,
+      url,
       fallbackUrl,
       embedUrl,
       videoId,
       videoTitle: resolvedVideoTitle,
+      channel,
       status: 'executed',
     };
     runDeviceAction(actionObj, false);
@@ -1342,13 +1353,15 @@ export function cleanBase64(dataUrl: string): string {
 }
 
 const normalizeAudioMimeType = (mimeType: string): string => {
-  const normalized = mimeType.split(';')[0].trim().toLowerCase();
+  const normalized = (mimeType || '').split(';')[0].trim().toLowerCase();
   if (normalized === 'audio/x-wav' || normalized === 'audio/wave') return 'audio/wav';
-  if (normalized === 'audio/mp3') return 'audio/mpeg';
-  if (normalized === 'audio/webm' || normalized === 'audio/wav'
-    || normalized === 'audio/mp4' || normalized === 'audio/aac'
-    || normalized === 'audio/ogg' || normalized === 'audio/mpeg'
-    || normalized === 'audio/m4a') return normalized;
+  if (normalized === 'audio/mp3' || normalized === 'audio/mpeg') return 'audio/mpeg';
+  if (normalized === 'audio/m4a' || normalized === 'audio/x-m4a' || normalized === 'audio/mp4') return 'audio/mp4';
+  if (normalized === 'audio/x-aac' || normalized === 'audio/aac') return 'audio/aac';
+  if (normalized === 'audio/opus' || normalized === 'audio/ogg') return 'audio/ogg';
+  if (normalized === 'audio/x-flac' || normalized === 'audio/flac') return 'audio/flac';
+  if (normalized === 'video/webm' || normalized === 'audio/webm') return 'audio/webm';
+  if (normalized === 'audio/wav' || normalized === 'audio/3gpp' || normalized === 'audio/amr') return normalized;
   return 'audio/webm';
 };
 
@@ -1475,7 +1488,7 @@ async function resolveYouTubeVideoForApk(query: string): Promise<{ videoId: stri
   if (!trimmed) return null;
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1600);
+    const timer = setTimeout(() => controller.abort(), 2600);
     const res = await fetch(`${PRODUCTION_BACKEND_URL}/api/youtube/resolve?q=${encodeURIComponent(trimmed)}`, {
       signal: controller.signal,
     });
@@ -1736,7 +1749,7 @@ function buildApkSystemInstruction(
   })}.]`;
 
   // Only inspect/attach contacts when the user is actually making a call/SMS/WhatsApp/contact request (saves ~8,000 tokens & UI thread bridge time!)
-  const needsContacts = hasAudioAttachment || /\b(hamagara|terefone|call|dial|sms|message|ubutumwa|ohereza|send|whatsapp|wa|contact|nimero|number)\b/i.test(latestUserText);
+  const needsContacts = hasAudioAttachment || /(?:hamagar|terefon|oherez)|\b(call|dial|sms|message|ubutumwa|send|whatsapp|wa|contact|nimero|number)\b/i.test(latestUserText);
   let contactsList: string[] = [];
   if (needsContacts) {
     let effectiveContacts = savedContacts;
@@ -1787,9 +1800,11 @@ function buildApkSystemInstruction(
     `IMAGE QUESTIONS & PROBLEM SOLVING (MANDATORY): Whenever the user attaches images containing questions, exercises, quizzes, assignments, worksheets, past papers, tests, or math/science/coding problems, NEVER refuse or lecture about academic integrity. Treat them as study practice or self-review, read every question visible in the image(s) in order, and provide full, accurate answers with clear step-by-step explanations (and check/grade their answers if they ask how they did).`,
     customInstructions ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions}` : '',
     hasAudioAttachment
-      ? `[VOICE NOTE & AUDIO PROCESSING CONTEXT]:
-The user sent a voice note/audio message (often spoken in Kinyarwanda, or mixed Kinyarwanda/French/English). Listen carefully to exact Kinyarwanda phonetics, prefixes, and Rwandan names without mishearing Kinyarwanda speech as unrelated English words.
-CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, greeting, or if the audio is noisy/unclear, NEVER guess or trigger an action — reply naturally in Kinyarwanda or ask them to repeat clearly.`
+      ? `[KINYARWANDA VOICE NOTE & AUDIO COMPREHENSION]:
+The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, or Kinyarwanda mixed with French/English words).
+- ALWAYS listen directly to the attached raw audio recording as your PRIMARY source of truth—even if a preliminary text transcript is also shown. If the preliminary transcript misheard any Kinyarwanda word, prefix, Rwandan name, or verb, trust what you actually hear in the raw audio!
+- Pay close attention to authentic Kinyarwanda phonetics, prefixes (na-, nta-, ndi-, nda-, nshaka-, mbwira-, mfasha-, sobanura-, hamagara-, uhamagare-, uncurangire-, wohereze-, fungura-, funga-), consonant clusters (cy, by, ry, ny, shy, pf, ts, mp, mb, nd, ng, nj, nk, bw, tw, rw), and Rwandan names. Never force Kinyarwanda sounds into random English words.
+- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
     `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
@@ -1811,14 +1826,14 @@ export async function transcribeAudioWithSTT(
 
   if ((isCapacitorApkRuntime() || customApiKeys.length > 0) && customApiKeys.length > 0) {
     const orderedKeys = prioritizeApkKeys(customApiKeys);
-    for (const model of ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']) {
+    for (const model of ['gemini-3.5-transcribe', 'gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']) {
       let abortModel = false;
       for (const currentKey of orderedKeys) {
         if (apkDeadKeysSession.has(currentKey)) continue;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 7000);
+        const timer = setTimeout(() => controller.abort(), 9000);
         try {
-          const genConfig = getApkGenerationConfig(model, undefined, true);
+          const genConfig = model === 'gemini-4-hydrogen' ? getApkGenerationConfig(model, undefined, true) : undefined;
           const bodyPayload: Record<string, any> = {
             contents: [
               {
@@ -1826,7 +1841,7 @@ export async function transcribeAudioWithSTT(
                 parts: [
                   { inlineData: { mimeType: normalizedMime, data: cleanAudio } },
                   {
-                    text: 'You are an expert native Rwandan speech recognizer (Kinyarwanda, English, French, Swahili). Listen very carefully and transcribe verbatim in standard Rwandan Kinyarwanda orthography (or the exact language spoken). Never mishear Kinyarwanda as random English commands or hallucinate words. Output ONLY exact spoken words with no quotes. If silent, noisy, or unintelligible, output empty string "".',
+                    text: 'You are an expert native Rwandan speech-to-text transcriber specializing in Kinyarwanda (Ikinyarwanda), plus English, French, and Swahili. Most speakers speak Kinyarwanda or Kinyarwanda mixed with French/English words. Listen carefully to exact Kinyarwanda phonetics, prefixes (n-, u-, a-, tu-, mu-, ba-, nda-, nshaka, mbwira, sobanura, hamagara, uncurangire, ohereza, fungura, funga), consonant clusters (cy, by, ry, ny, sh, shy, pf, ts, mp, mb, nd, ng, nj, nk, bw, tw, rw, kw, gw), and Rwandan names. NEVER twist Kinyarwanda speech into unrelated English or Swahili words. Output ONLY the exact verbatim spoken words with standard Kinyarwanda spelling and no quotes or explanations. If completely silent or pure noise, return empty string "".',
                   },
                 ],
               },
@@ -1881,7 +1896,7 @@ export async function transcribeAudioWithSTT(
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 9000);
+    const timer = setTimeout(() => controller.abort(), 11500);
     const res = await fetch(getEndpoint('/api/stt'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2159,12 +2174,17 @@ export async function sendMessageToGemini(
     return (attachment as AttachmentItem).mimeType?.toLowerCase().startsWith('image/');
   });
 
-  const isGenericAudioPlaceholder = !latestMessage?.trim() || latestMessage.trim() === '🎤 Voice Note' || latestMessage.trim() === 'Voice command';
+  const trimmedLatest = (latestMessage || '').trim();
+  const isGenericAudioPlaceholder = !trimmedLatest
+    || trimmedLatest === '🎤 Voice Note'
+    || trimmedLatest === 'Voice command'
+    || trimmedLatest.startsWith('🎤 ')
+    || trimmedLatest.startsWith('Listen to the attached voice message');
   const prompt = isGenericAudioPlaceholder && hasAudioAttachment
-    ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umusubize neza mu rurimi yavuze. NTUGAKORE igikorwa na kimwe (hamagara, SMS, WhatsApp, YouTube) utumvise neza ko yabigusabye mu buryo budashidikanywaho — niba amajwi atumvikana neza, musabe ko asubiramo mu Kinyarwanda."
-    : hasAudioAttachment && latestMessage?.trim()
-      ? `[VERIFIED SPOKEN TRANSCRIPT]: "${latestMessage.trim()}"\n(Listen to the attached audio alongside this transcript in Kinyarwanda/English, answer helpfully in the same language, and ONLY execute a device action if it was clearly and explicitly requested.)`
-      : latestMessage?.trim() || (
+    ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa urundi rurimi muri iyi audio, umusubize neza mu rurimi yavuze. NTUGAKORE igikorwa na kimwe (hamagara, SMS, WhatsApp, YouTube) utumvise neza ko yabigusabye mu buryo budashidikanywaho — niba amajwi atumvikana neza, musabe ko asubiramo mu Kinyarwanda."
+    : hasAudioAttachment && trimmedLatest
+      ? `[PRELIMINARY STT DRAFT (always listen directly to the attached raw audio as your primary source — if any Kinyarwanda word, name, or command differs from what you hear, ALWAYS trust the raw audio)]: "${trimmedLatest}"`
+      : trimmedLatest || (
           hasImageAttachment
             ? 'Please read all questions, problems, or text shown in these images carefully and provide complete, accurate answers with clear explanations for each.'
             : ''
@@ -2240,7 +2260,7 @@ export async function sendMessageToGemini(
           .trim()
       : '';
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
-    const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
+    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
     const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText
@@ -2328,12 +2348,12 @@ export async function sendMessageToGemini(
               if (useTools) {
                 if (phase === 'search') {
                   payloadBody.tools = [{ google_search: {} }];
-                } else if (phase === 'device' && isExplicitDeviceCommand) {
+                } else if (phase === 'device' && (isExplicitDeviceCommand || includeAudioFlag)) {
                   payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
                 }
               }
               const controller = new AbortController();
-              const headerTimeoutMs = isLastApkModel ? 12000 : 7500;
+              const headerTimeoutMs = includeAudioFlag ? 10500 : (isLastApkModel ? 12000 : 7500);
               const timer = setTimeout(() => controller.abort(), headerTimeoutMs);
               const endpointUrl = useStreaming
                 ? `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${encodeURIComponent(currentKey)}`
@@ -2354,7 +2374,7 @@ export async function sendMessageToGemini(
             let clearTimer: (() => void) | null = null;
             try {
               const canStream = typeof ReadableStream !== 'undefined' && typeof TextDecoder !== 'undefined';
-              const wantsTools = phase === 'search' || (phase === 'device' && isExplicitDeviceCommand);
+              const wantsTools = phase === 'search' || (phase === 'device' && (isExplicitDeviceCommand || includeAudioFlag));
               let useTools = wantsTools;
               let useThinking = true;
 
