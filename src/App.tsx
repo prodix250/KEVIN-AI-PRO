@@ -74,7 +74,18 @@ const createVoiceRecordingSession = async (): Promise<VoiceRecordingSession> => 
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
     } catch (err) {
       try { agentBridge?.resumeWakeWord?.(); } catch { /* ignore */ }
       throw err;
@@ -828,20 +839,30 @@ export default function App() {
     try {
       const audioBlob = await recording.stop();
       resetVoiceRecordingState();
-      if (!audioBlob.size) {
+      if (!audioBlob.size || (!assistantRequest && audioBlob.size < 1400)) {
+        if (!assistantRequest) {
+          showToastMessage('🎙️ Ijwi ryabaye rigufi cyane. Ongera ufate amajwi neza.');
+          return;
+        }
         throw new Error('No audio was captured.');
       }
 
       const audioBase64 = await blobToBase64(audioBlob);
-      if (audioBase64.length <= 100) {
+      if (audioBase64.length <= 200) {
+        if (!assistantRequest) {
+          showToastMessage('🎙️ Nta jwi ryumvikanye neza. Ongera uvuge.');
+          return;
+        }
         throw new Error('The recorded audio is empty or invalid. Please record your message again.');
       }
 
       let transcript = '';
+      let sttSucceeded = false;
       if (!assistantRequest) {
         setIsTranscribingSTT(true);
         try {
           transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
+          sttSucceeded = true;
         } catch (sttErr) {
           console.warn('STT fallback to multimodal audio:', sttErr);
         } finally {
@@ -849,7 +870,12 @@ export default function App() {
         }
       }
 
-      const prompt = transcript || 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action.';
+      if (!assistantRequest && sttSucceeded && !transcript.trim() && audioBlob.size < 4500) {
+        showToastMessage('🎙️ Sinabashije kumva neza icyo uvuze. Ongera uvuge neza hafi ya mic.');
+        return;
+      }
+
+      const prompt = transcript || 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.';
 
       if (assistantRequest) {
         const nativeBridge = window.KevinAssistantNative;

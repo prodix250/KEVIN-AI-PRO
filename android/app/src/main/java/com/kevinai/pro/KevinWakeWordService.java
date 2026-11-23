@@ -76,16 +76,16 @@ public class KevinWakeWordService extends Service {
 
     private static final int SAMPLE_RATE = 16000;
     private static final int FRAME_SAMPLES = 640; // 40ms @ 16kHz
-    private static final int PRE_ROLL_FRAMES = 15; // 600ms pre-roll
-    private static final int MAX_SPEECH_FRAMES = 95; // 3.8s max utterance
+    private static final int PRE_ROLL_FRAMES = 12; // 480ms pre-roll
+    private static final int MAX_SPEECH_FRAMES = 75; // 3.0s max utterance
     private static final int END_SILENCE_FRAMES = 11; // 440ms silence
 
     private static final Pattern WAKE_PATTERN = Pattern.compile(
-            "(?:^|\\s)(?:hi|hey|hello|ok|okay|i|ai|aye|hay|high|eye|he|aie|eh|yo)\\s+(?:kevin|keven|kevine|kebin|kelvin|calvin|gavin|kavin|kev)(?:[,.!?\\s]*(.*))?$",
+            "(?:^|\\s)(?:hi|hey|hello|ok|okay)\\s+(?:kevin|keven|kevine)(?:[,.!?\\s]*(.*))?$",
             Pattern.CASE_INSENSITIVE
     );
-    private static final Pattern DIRECT_KEVIN_COMMAND_PATTERN = Pattern.compile(
-            "^(?:kevin|keven|kevine|kebin|kelvin|calvin|kavin)\\b[,.!?\\s]*(.*)$",
+    private static final Pattern STRICT_GEMINI_WAKE_PATTERN = Pattern.compile(
+            "(?:^|\\s)(?:hi|hey|hello|ok|okay|hai|hay)\\s+(?:kevin|keven|kevine)\\b",
             Pattern.CASE_INSENSITIVE
     );
 
@@ -458,15 +458,15 @@ public class KevinWakeWordService extends Service {
                 }
                 preRoll.addLast(copy);
 
-                double startThresh = Math.max(210.0, noiseFloor * 2.15);
+                double startThresh = Math.max(320.0, noiseFloor * 2.55);
                 if (rms > startThresh) {
                     startStreak++;
-                    if (startStreak >= 2) {
+                    if (startStreak >= 3) {
                         inSpeech = true;
                         speechFrames.clear();
                         speechFrames.addAll(preRoll);
                         speechFrames.add(copy);
-                        voicedFrames = 2;
+                        voicedFrames = 3;
                         silenceStreak = 0;
                         peakRms = rms;
                     }
@@ -475,7 +475,7 @@ public class KevinWakeWordService extends Service {
                 }
             } else {
                 speechFrames.add(copy);
-                double keepThresh = Math.max(175.0, noiseFloor * 1.75);
+                double keepThresh = Math.max(240.0, noiseFloor * 1.9);
                 if (rms > keepThresh) {
                     voicedFrames++;
                     silenceStreak = 0;
@@ -490,9 +490,9 @@ public class KevinWakeWordService extends Service {
                     silenceStreak = 0;
 
                     long now = System.currentTimeMillis();
-                    if (voicedFrames >= 5
-                            && peakRms >= 250.0
-                            && (now - lastCheckSentAt >= 650L)
+                    if (voicedFrames >= 8
+                            && peakRms >= 380.0
+                            && (now - lastCheckSentAt >= 850L)
                             && checkInFlight.compareAndSet(false, true)) {
                         lastCheckSentAt = now;
                         final byte[] wavBytes = encodePcmToWav(speechFrames);
@@ -589,7 +589,9 @@ public class KevinWakeWordService extends Service {
         }
 
         String matchedCommand = extractWakeCommandFromText(result.transcript);
-        boolean triggered = result.wake || matchedCommand != null;
+        String normalizedTranscript = normalizeTranscript(result.transcript);
+        boolean strictGeminiMatch = result.wake && STRICT_GEMINI_WAKE_PATTERN.matcher(normalizedTranscript).find();
+        boolean triggered = matchedCommand != null || strictGeminiMatch;
         if (triggered) {
             String cmd = !TextUtils.isEmpty(result.command)
                     ? result.command.trim()
@@ -619,11 +621,13 @@ public class KevinWakeWordService extends Service {
     }
 
     private WakeCheckResult callGeminiDirectWakeCheck(String audioBase64, List<String> keys) {
-        String[] models = new String[] { "gemini-2.5-flash", "gemini-3.1-flash-lite" };
-        String prompt = "Listen carefully to this short audio clip (often Rwandan/African English or Kinyarwanda accent). "
-                + "Detect whether the speaker says \"Hi Kevin\" (including \"Hey Kevin\", \"Hello Kevin\", \"OK Kevin\", \"Ai Kevin\", \"I Kevin\", \"High Kevin\", or starts with \"Kevin ...\"). "
-                + "Return ONLY raw JSON: {\"wake\":true|false,\"command\":\"trailing request after Kevin or empty\",\"transcript\":\"words heard\"}. "
-                + "If silence/noise, return {\"wake\":false,\"command\":\"\",\"transcript\":\"\"}.";
+        String[] models = new String[] { "gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite" };
+        String prompt = "Listen strictly to this short audio clip. "
+                + "Set \"wake\":true ONLY if the speaker clearly and intentionally calls the assistant by saying \"Hi Kevin\", \"Hey Kevin\", \"Hello Kevin\", or \"OK Kevin\". "
+                + "Do NOT trigger on ambient Kinyarwanda conversation, background TV/music, breathing, coughs, random noise, or someone just mentioning the name Kevin inside a sentence without saying Hi/Hey/Hello/OK Kevin. "
+                + "Return ONLY raw JSON: {\"wake\":true|false,\"command\":\"\",\"transcript\":\"exact words heard\"}. "
+                + "Leave \"command\" empty unless a clear full request (at least 2 words) immediately follows \"Hi Kevin\". "
+                + "If unsure, noisy, or silent, return {\"wake\":false,\"command\":\"\",\"transcript\":\"\"}.";
 
         for (String model : models) {
             for (int i = 0; i < Math.min(keys.size(), 2); i++) {
@@ -990,10 +994,6 @@ public class KevinWakeWordService extends Service {
         Matcher m = WAKE_PATTERN.matcher(normalized);
         if (m.find()) {
             return m.group(1) != null ? m.group(1).trim() : "";
-        }
-        Matcher direct = DIRECT_KEVIN_COMMAND_PATTERN.matcher(normalized);
-        if (direct.find()) {
-            return direct.group(1) != null ? direct.group(1).trim() : "";
         }
         return null;
     }

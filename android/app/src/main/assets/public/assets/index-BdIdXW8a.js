@@ -23745,7 +23745,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-BEogquJ_.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-DqjqmT57.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -24980,6 +24980,9 @@ function executeDeviceAction(name2, args) {
   if (name2 === "make_call" || name2 === "send_sms" || name2 === "open_whatsapp") {
     let resolvedPhone = isLikelyPhoneNumber(rawPhoneNumber) ? sanitizePhoneNumber(rawPhoneNumber) : "";
     let resolvedName = (rawContactName == null ? void 0 : rawContactName.trim()) || (!resolvedPhone && rawPhoneNumber.trim() ? rawPhoneNumber.trim() : void 0);
+    if (!resolvedPhone && (!resolvedName || /^(unknown|someone|anybody|none)$/i.test(resolvedName))) {
+      return null;
+    }
     if (!resolvedPhone && resolvedName) {
       const matches = resolveContactMatches(resolvedName);
       if (matches.length === 1) {
@@ -25654,9 +25657,11 @@ function buildApkSystemInstruction(userName, hasAudioAttachment, savedContacts, 
     `IMAGE QUESTIONS & PROBLEM SOLVING (MANDATORY): Whenever the user attaches images containing questions, exercises, quizzes, assignments, worksheets, past papers, tests, or math/science/coding problems, NEVER refuse or lecture about academic integrity. Treat them as study practice or self-review, read every question visible in the image(s) in order, and provide full, accurate answers with clear step-by-step explanations (and check/grade their answers if they ask how they did).`,
     customInstructions ? `USER CUSTOM INSTRUCTIONS:
 ${customInstructions}` : "",
-    hasAudioAttachment ? `The user sent a voice note/audio message. Listen attentively in Kinyarwanda, English, French, or Swahili and respond directly or execute requested tool actions immediately.` : "",
+    hasAudioAttachment ? `[VOICE NOTE & AUDIO PROCESSING CONTEXT]:
+The user sent a voice note/audio message (often spoken in Kinyarwanda, or mixed Kinyarwanda/French/English). Listen carefully to exact Kinyarwanda phonetics, prefixes, and Rwandan names without mishearing Kinyarwanda speech as unrelated English words.
+CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, greeting, or if the audio is noisy/unclear, NEVER guess or trigger an action — reply naturally in Kinyarwanda or ask them to repeat clearly.` : "",
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(" | ")}]` : "",
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Always execute requested device actions immediately using tool calls.]`,
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext
   ].filter(Boolean).join("\n\n");
 }
@@ -25670,7 +25675,7 @@ async function transcribeAudioWithSTT(audioBase64, audioMimeType = "audio/webm")
   const customApiKey = getUserCustomApiKey();
   const customApiKeys = getGeminiApiKeysArray();
   if (isCapacitorApkRuntime() && customApiKeys.length > 0) {
-    for (const model of ["gemini-2.5-flash", "gemini-3.1-flash-lite"]) {
+    for (const model of ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"]) {
       for (const currentKey of customApiKeys) {
         try {
           const directRes = await fetch(
@@ -25685,7 +25690,7 @@ async function transcribeAudioWithSTT(audioBase64, audioMimeType = "audio/webm")
                     parts: [
                       { inlineData: { mimeType: normalizedMime, data: cleanAudio } },
                       {
-                        text: "Transcribe the spoken audio verbatim in Kinyarwanda, English, French, or Swahili. Output ONLY the exact spoken words without quotes or extra explanation. Return empty string if silent."
+                        text: 'You are an expert native Rwandan speech recognizer (Kinyarwanda, English, French, Swahili). Listen very carefully and transcribe verbatim in standard Rwandan Kinyarwanda orthography (or the exact language spoken). Never mishear Kinyarwanda as random English commands or hallucinate words. Output ONLY exact spoken words with no quotes. If silent, noisy, or unintelligible, output empty string "".'
                       }
                     ]
                   }
@@ -25883,7 +25888,8 @@ async function sendMessageToGemini(history, latestMessage, onChunk, attachments,
     return (_a2 = attachment.mimeType) == null ? void 0 : _a2.toLowerCase().startsWith("image/");
   });
   const isGenericAudioPlaceholder = !(latestMessage == null ? void 0 : latestMessage.trim()) || latestMessage.trim() === "🎤 Voice Note" || latestMessage.trim() === "Voice command";
-  const prompt = isGenericAudioPlaceholder && hasAudioAttachment ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umenye icyo asabye, hanyuma umusubize neza kandi mu buryo bunoze mu Kinyarwanda cy'umwimerere (cyangwa Icyongereza niba aricyo yakoresheje), cyangwa ukore igikorwa asabye ako kanya." : (latestMessage == null ? void 0 : latestMessage.trim()) || (hasAudioAttachment ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi. Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umusubize neza kandi bunoze." : hasImageAttachment ? "Please read all questions, problems, or text shown in these images carefully and provide complete, accurate answers with clear explanations for each." : "");
+  const prompt = isGenericAudioPlaceholder && hasAudioAttachment ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umusubize neza mu rurimi yavuze. NTUGAKORE igikorwa na kimwe (hamagara, SMS, WhatsApp, YouTube) utumvise neza ko yabigusabye mu buryo budashidikanywaho — niba amajwi atumvikana neza, musabe ko asubiramo mu Kinyarwanda." : hasAudioAttachment && (latestMessage == null ? void 0 : latestMessage.trim()) ? `[VERIFIED SPOKEN TRANSCRIPT]: "${latestMessage.trim()}"
+(Listen to the attached audio alongside this transcript in Kinyarwanda/English, answer helpfully in the same language, and ONLY execute a device action if it was clearly and explicitly requested.)` : (latestMessage == null ? void 0 : latestMessage.trim()) || (hasImageAttachment ? "Please read all questions, problems, or text shown in these images carefully and provide complete, accurate answers with clear explanations for each." : "");
   const parts = prompt ? [{ text: prompt }] : [];
   if (audioBase64 !== void 0) {
     const validatedAudio = cleanBase64(audioBase64);
@@ -25963,7 +25969,7 @@ ${att.textContent}` });
           ];
         }
       }
-      const apkModels = phase === "search" ? ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"] : selectedModel === "Kevin 1.3 Lite" ? ["gemini-2.5-flash", "gemini-3.1-flash-lite"] : ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-4-hydrogen"];
+      const apkModels = includeAudioFlag ? ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"] : phase === "search" ? ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"] : selectedModel === "Kevin 1.3 Lite" ? ["gemini-2.5-flash", "gemini-3.1-flash-lite"] : ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"];
       for (const modelName of apkModels) {
         for (const currentKey of customApiKeys) {
           if (invalidKeys.has(currentKey)) continue;
@@ -26015,6 +26021,13 @@ ${att.textContent}` });
                 const fcArgs = { ...part.functionCall.args || {} };
                 if (fcName === "open_app" && String(fcArgs.app_name || "").toLowerCase().includes("google search")) {
                   continue;
+                }
+                if (fcName === "make_call" || fcName === "send_sms" || fcName === "open_whatsapp") {
+                  const p2 = String(fcArgs.phone_number || "").trim();
+                  const n = String(fcArgs.contact_name || "").trim();
+                  if (!p2 && !n || /^(unknown|someone|anybody|none)$/i.test(n)) {
+                    continue;
+                  }
                 }
                 if (fcName === "open_youtube" && typeof fcArgs.query === "string" && fcArgs.query.trim()) {
                   const resolved = await resolveYouTubeVideoForApk(fcArgs.query);
@@ -37037,7 +37050,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-C_KDg7pQ.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-DeDh3t5y.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -101610,7 +101623,18 @@ const createVoiceRecordingSession$1 = async (options) => {
   }
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1
+        }
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
   } catch (err) {
     try {
       (_b2 = agentBridge == null ? void 0 : agentBridge.resumeWakeWord) == null ? void 0 : _b2.call(agentBridge);
@@ -101668,6 +101692,7 @@ const createVoiceRecordingSession$1 = async (options) => {
         const samples = new Uint8Array(analyser.fftSize);
         const startedAt = Date.now();
         let heardSpeech = false;
+        let speechConsecutive = 0;
         let lastSpeechAt = startedAt;
         vadInterval = setInterval(() => {
           var _a3, _b3;
@@ -101681,15 +101706,20 @@ const createVoiceRecordingSession$1 = async (options) => {
             sumSq += norm * norm;
           }
           const rms = Math.sqrt(sumSq / samples.length);
-          if (elapsed > 350 && rms > 0.02) {
-            heardSpeech = true;
+          if (elapsed > 450 && rms > 0.032) {
+            speechConsecutive++;
+            if (speechConsecutive >= 2) {
+              heardSpeech = true;
+            }
             lastSpeechAt = now2;
+          } else {
+            speechConsecutive = 0;
           }
-          if (heardSpeech && (now2 - lastSpeechAt >= 1300 || elapsed >= 14500)) {
+          if (heardSpeech && (now2 - lastSpeechAt >= 1350 || elapsed >= 15e3)) {
             vadTriggered = true;
             stopVad();
             (_a3 = options.onAutoSilence) == null ? void 0 : _a3.call(options);
-          } else if (!heardSpeech && elapsed >= 7500) {
+          } else if (!heardSpeech && elapsed >= 8e3) {
             vadTriggered = true;
             stopVad();
             (_b3 = options.onNoSpeechTimeout) == null ? void 0 : _b3.call(options);
@@ -101938,13 +101968,14 @@ function AssistantOverlay({
         window.__kevinPendingWakeWord = void 0;
       }
       const cmd = (detail.command || "").trim();
-      if (cmd) {
+      const meaningfulWords = cmd.replace(/[^a-zA-Z0-9\u00C0-\u024F\s]/g, " ").trim().split(/\s+/).filter((w2) => w2.length >= 2);
+      if (cmd && meaningfulWords.length >= 2) {
         void wakeHandlersRef.current.handleSend(cmd);
       } else {
         showAudioStatus("🎙️ Ndakumva! Vuga icyo ushaka...");
         setTimeout(() => {
           void wakeHandlersRef.current.startVoiceRecording(true);
-        }, 200);
+        }, 220);
       }
     };
     const onWakeWord = (event) => {
@@ -102220,23 +102251,31 @@ function AssistantOverlay({
     try {
       const audioBlob = await recording.stop();
       resetVoiceRecordingState();
-      if (!audioBlob.size) {
-        throw new Error("No audio was captured.");
+      if (!audioBlob.size || audioBlob.size < 1400) {
+        showAudioStatus("🎙️ Ijwi ryabaye rigufi cyane. Kanda mic wongere uvuge neza.");
+        return;
       }
       const audioBase64 = await blobToRawBase64(audioBlob);
-      if (audioBase64.length <= 100) {
-        throw new Error("The recorded audio is empty or invalid. Please record your message again.");
+      if (audioBase64.length <= 200) {
+        showAudioStatus("🎙️ Nta jwi ryumvikanye neza. Kanda mic wongere uvuge.");
+        return;
       }
       let transcript = "";
+      let sttSucceeded = false;
       setIsTranscribing(true);
       try {
         transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
+        sttSucceeded = true;
       } catch (sttErr) {
         console.warn("STT fallback to multimodal audio:", sttErr);
       } finally {
         setIsTranscribing(false);
       }
-      const prompt = transcript || "Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action.";
+      if (sttSucceeded && !transcript.trim() && audioBlob.size < 4500) {
+        showAudioStatus("🎙️ Sinabashije kumva neza icyo uvuze. Ongera uvuge hafi ya mic.");
+        return;
+      }
+      const prompt = transcript || "Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.";
       const audioUrl = URL.createObjectURL(audioBlob);
       await handleSend(prompt, audioBase64, recording.mimeType, void 0, transcript || "🎤 Voice Note", audioUrl);
     } catch (error) {
@@ -102871,7 +102910,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-CXin7f8c.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-BZERvSZu.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -103115,7 +103154,18 @@ const createVoiceRecordingSession = async () => {
   }
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1
+        }
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
   } catch (err) {
     try {
       (_b2 = agentBridge == null ? void 0 : agentBridge.resumeWakeWord) == null ? void 0 : _b2.call(agentBridge);
@@ -103770,25 +103820,39 @@ function App() {
     try {
       const audioBlob = await recording.stop();
       resetVoiceRecordingState();
-      if (!audioBlob.size) {
+      if (!audioBlob.size || !assistantRequest && audioBlob.size < 1400) {
+        if (!assistantRequest) {
+          showToastMessage("🎙️ Ijwi ryabaye rigufi cyane. Ongera ufate amajwi neza.");
+          return;
+        }
         throw new Error("No audio was captured.");
       }
       const audioBase64 = await blobToBase64(audioBlob);
-      if (audioBase64.length <= 100) {
+      if (audioBase64.length <= 200) {
+        if (!assistantRequest) {
+          showToastMessage("🎙️ Nta jwi ryumvikanye neza. Ongera uvuge.");
+          return;
+        }
         throw new Error("The recorded audio is empty or invalid. Please record your message again.");
       }
       let transcript = "";
+      let sttSucceeded = false;
       if (!assistantRequest) {
         setIsTranscribingSTT(true);
         try {
           transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
+          sttSucceeded = true;
         } catch (sttErr) {
           console.warn("STT fallback to multimodal audio:", sttErr);
         } finally {
           setIsTranscribingSTT(false);
         }
       }
-      const prompt = transcript || "Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action.";
+      if (!assistantRequest && sttSucceeded && !transcript.trim() && audioBlob.size < 4500) {
+        showToastMessage("🎙️ Sinabashije kumva neza icyo uvuze. Ongera uvuge neza hafi ya mic.");
+        return;
+      }
+      const prompt = transcript || "Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.";
       if (assistantRequest) {
         const nativeBridge = window.KevinAssistantNative;
         const attachments = [audioBlob];

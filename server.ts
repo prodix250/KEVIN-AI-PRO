@@ -69,10 +69,10 @@ const KEVIN_SYSTEM_INSTRUCTION = `You are Kevin AI,
 
 4. VOICE NOTE & AUDIO PROCESSING (IKINYARWANDA VOICE UNDERSTANDING):
 - When the user sends a voice note or recorded audio message:
-  * Listen attentively to the audio in Kinyarwanda or English.
-  * Understand natural Rwandan pronunciation, fast speech, local accents, and conversational phrasing.
+  * Listen attentively to the spoken audio in Kinyarwanda, English, French, or Swahili — prioritize exact Kinyarwanda comprehension over guessing English words.
+  * Understand natural Rwandan pronunciation, prefixes (na-, nta-, ndi-, nshaka-, mbwira-, mfasha-, sobanura-, hamagara-, curanga-, ohereza-), local accents, and conversational phrasing.
   * Understand names of Rwandan people (Kevin, Aline, Helve, Kelly, Barame, Jean, Patrick, etc.), Rwandan places (Kigali, Rwamagana, Gahengeri, Huye, Musanze, Rubavu, etc.), and Rwandan musicians/artists (Meddy, Bruce Melodie, The Ben, Element, Juno Kizigenza, Chriss Eazy, etc.).
-  * Respond directly, helpfully, and naturally in Kinyarwanda (or English), and immediately execute any requested device actions (open_youtube, make_call, send_sms, open_whatsapp).
+  * STRICT ANTI-WRONG-ACTION RULE: ONLY execute a device action (open_youtube, make_call, send_sms, open_whatsapp, scan_whatsapp_chats, open_camera, open_app) if the user explicitly and clearly asked for that exact action in their audio. If they are greeting you, asking a question, or if the audio is noisy/unclear, NEVER guess or trigger an action — reply naturally in Kinyarwanda or ask them to repeat clearly.
 
 5. MULTIMODAL, IMAGE QUESTIONS & DOCUMENT ANALYSIS:
 - Images/Vision: When the user attaches an image or screenshot, analyze everything visible thoroughly (diagrams, handwritten notes, printed text, OCR code reading, math equations, objects).
@@ -110,7 +110,7 @@ You are a full autonomous agent with direct permission-backed control over apps 
 - Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately. For phone numbers in Rwanda, ensure the country code +250 is used (e.g. +250788123456 or 250788123456 instead of 0788123456) so WhatsApp can deliver the message immediately without missing country code errors. In the 'message' parameter, write ONLY ONE single natural human message matching the user's/recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions.
 - WhatsApp Auto-Reply Mode: When the user asks you to automatically reply to incoming WhatsApp messages on their behalf (e.g., 'ujye unsubiriza kuri whatsapp', 'enable whatsapp auto reply'), ALWAYS call configure_whatsapp_autoreply(enabled, reply_style).
 - Check All WhatsApp Chats & Reply to Unreplied Messages: When the user asks you to check their WhatsApp chats and reply to unread/unreplied messages (e.g., 'reba muri whatsapp zanjye usubize ubutumwa budasubije', 'check all whatsapp chats and reply'), ALWAYS call scan_whatsapp_chats().
-- Calls & Other Apps: Use make_call, open_audiomack, open_lark_player, open_camera, or open_app immediately whenever requested.`;
+- Calls & Other Apps: Use make_call, open_audiomack, open_lark_player, open_camera, or open_app ONLY when explicitly requested by the user (never guess or fabricate targets when uncertain).`;
 
 const deviceActionDeclarations: FunctionDeclaration[] = [
   {
@@ -505,7 +505,7 @@ async function startServer() {
         return;
       }
 
-      const sttModels = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+      const sttModels = ['gemini-2.5-flash', 'gemini-3.5-transcribe', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
       let lastErr: unknown = null;
       const invalidKeys = new Set<string>();
 
@@ -535,12 +535,13 @@ async function startServer() {
                   },
                   {
                     text: `You are an expert native Rwandan speech recognition and transcription assistant specializing in Kinyarwanda, English, French, and Swahili.
-Listen very carefully to this audio recording:
-1. If the speaker is speaking in Kinyarwanda, transcribe verbatim in standard, authentic Kinyarwanda orthography (intego y'imyandikire y'Ikinyarwanda).
-   - Accurately recognize Rwandan words, phonemes, and phrasing (e.g., 'Amakuru', 'Bite', 'Muraho', 'Umeze ute', 'Curanga indirimbo...', 'Hamagara...', 'Ohereza ubutumwa...', 'Kora...', 'Shushanya...', 'Mbwira...').
-2. If the speaker is speaking English, French, or Swahili, transcribe verbatim in that language.
-3. Output ONLY the exact transcribed spoken words. Do NOT add preamble, quotes, explanations, or timestamps.
-4. If there is only background silence, static, or no intelligible human speech, return strictly an empty string "".`,
+Listen carefully and accurately to this audio clip:
+1. If the speaker is speaking in Kinyarwanda (including natural Rwandan speech mixed with French/English nouns), transcribe verbatim in standard, authentic Kinyarwanda orthography (intego y'imyandikire y'Ikinyarwanda).
+   - Pay close attention to Rwandan words and prefixes (e.g., 'Muraho', 'Amakuru', 'Bite', 'Umeze ute', 'Nshaka ko...', 'Mbwira...', 'Sobanura...', 'Kora...', 'Mfasha...', 'Curanga indirimbo...', 'Hamagara...', 'Ohereza ubutumwa...', 'Reba muri WhatsApp...') and Rwandan names.
+   - NEVER mishear Kinyarwanda words as random English words or invent commands the speaker did not say.
+2. If the speaker is speaking English, French, or Swahili, transcribe verbatim in that exact language.
+3. Output ONLY the exact transcribed spoken words. Do NOT add quotes, explanations, punctuation-only replies, or timestamps.
+4. If the audio is silent, static, background noise, or unintelligible mumbling, return strictly an empty string "".`,
                   },
                 ],
               },
@@ -641,11 +642,13 @@ Listen very carefully to this audio recording:
                     },
                   },
                   {
-                    text: `Listen carefully to this short audio clip (often Rwandan/African English or Kinyarwanda accent).
-Detect whether the speaker is calling the assistant "Hi Kevin" (including "Hey Kevin", "Hello Kevin", "OK Kevin", "Ai Kevin", "I Kevin", "High Kevin", or starting a command with "Kevin ...").
-Respond with ONLY a single raw JSON object (no markdown fences) in this exact format:
-{"wake":true|false,"command":"any command spoken after Kevin, otherwise empty string","transcript":"short verbatim words heard"}
-If there is only silence, breathing, or noise, return {"wake":false,"command":"","transcript":""}.`,
+                    text: `Listen strictly to this short audio clip.
+Set "wake":true ONLY if the speaker clearly and intentionally calls the assistant by saying "Hi Kevin", "Hey Kevin", "Hello Kevin", or "OK Kevin".
+Do NOT trigger on ambient Kinyarwanda speech, background TV/music, breathing, noise, or mentioning the name Kevin casually inside a sentence without saying Hi/Hey/Hello/OK Kevin.
+Respond with ONLY a single raw JSON object (no markdown fences):
+{"wake":true|false,"command":"","transcript":"exact words heard"}
+Leave "command" empty "" unless a clear multi-word request immediately follows "Hi Kevin".
+If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.`,
                   },
                 ],
               },
@@ -676,9 +679,10 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
               .replace(/\s+/g, ' ')
               .trim();
             const wakeMatch = norm.match(
-              /(?:^|\s)(?:hi|hey|hello|ok|okay|i|ai|aye|hay|high|eye|he|eh|yo)?\s*(?:kevin|keven|kevine|kebin|kelvin|calvin|gavin|kavin|kev)(?:\s+(.*))?$/i
+              /(?:^|\s)(?:hi|hey|hello|ok|okay)\s+(?:kevin|keven|kevine)(?:\s+(.*))?$/i
             );
-            const isWake = Boolean(parsed.wake) || Boolean(wakeMatch);
+            const hasStrictWakeName = /(?:^|\s)(?:hi|hey|hello|ok|okay|hai|hay)\s+(?:kevin|keven|kevine)\b/i.test(norm);
+            const isWake = Boolean(wakeMatch) || (Boolean(parsed.wake) && hasStrictWakeName);
             const command = String(parsed.command || wakeMatch?.[1] || '').trim();
 
             res.json({ wake: isWake, command, transcript, model });
@@ -946,11 +950,11 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
         : '';
       const audioInstruction = hasAudioAttachment
         ? `[VOICE NOTE & AUDIO PROCESSING CONTEXT]:
-- The user has sent a recorded voice note or voice message in audio format.
-- You are an expert at listening to spoken Kinyarwanda, English, French, and Swahili with complete native comprehension.
-- Listen attentively to their spoken words, Rwandan pronunciation, fast conversational speech, and intent.
-- Respond directly, helpfully, and naturally in their spoken language (if spoken in Kinyarwanda, reply in authentic, fluent Kinyarwanda).
-- If the user gave an action command (like playing a song on YouTube, calling someone, sending an SMS or WhatsApp message), immediately execute the corresponding tool function (open_youtube, make_call, send_sms, open_whatsapp).`
+- The user has sent a recorded voice message in audio format (often spoken in Kinyarwanda, or Kinyarwanda mixed with English/French).
+- Listen attentively to exact Kinyarwanda phonemes, prefixes, and Rwandan names without mishearing Kinyarwanda speech as unrelated English commands.
+- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: NEVER execute or call any device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera, open_app) UNLESS the user's voice message explicitly and unmistakably commanded that exact action (e.g., clearly saying "hamagara ...", "curanga ...", "ohereza SMS ...", "ohereza kuri WhatsApp ...").
+- If the audio is a greeting, a normal question, a conversation, or unclear/noisy, DO NOT trigger any tool — reply naturally in fluent, authentic Kinyarwanda (or ask the user to repeat clearly if noisy).
+- NEVER invent a phone number, contact name, song, or message that was not clearly spoken.`
         : '';
       const latestUserText = Array.isArray(contents) && contents.length > 0
         ? ((contents[contents.length - 1] as any)?.parts || [])
@@ -985,7 +989,7 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
       const contactsContext = contactsList.length > 0
         ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]`
         : '';
-      const agentContext = `[AGENT PERMISSIONS: autoSend=${Boolean(agentPermissions?.autoSend)}, autoCall=${agentPermissions?.autoCall !== false}, autoPlayYouTube=${agentPermissions?.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(agentPermissions?.whatsappAutoReply)}. Always execute requested actions immediately using tool calls.]`;
+      const agentContext = `[AGENT PERMISSIONS: autoSend=${Boolean(agentPermissions?.autoSend)}, autoCall=${agentPermissions?.autoCall !== false}, autoPlayYouTube=${agentPermissions?.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(agentPermissions?.whatsappAutoReply)}. Execute device tool calls ONLY when explicitly and clearly requested by the user.]`;
 
       const systemInstruction = [
         KEVIN_SYSTEM_INSTRUCTION,
@@ -1006,14 +1010,16 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
         && !isExplicitDeviceCommand
         && /\b(news|amakuru|agezweho|ubu|weather|score|match|price|current|latest|internet|google|search|shaka|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|ikipe|perezida|uri he|amakuru mashya|mancity|man city|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr)\b/i.test(latestUserText)
       );
-      const modelsToTry = shouldTryWebSearch
+      const modelsToTry = hasAudioAttachment
         ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']
-        : selectedModel === 'Prodix pro'
-          ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
-          : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen'];
+        : shouldTryWebSearch
+          ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']
+          : selectedModel === 'Prodix pro'
+            ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
+            : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen'];
 
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-      const firstModelTimeoutMs = shouldTryWebSearch ? 12000 : (hasAudioAttachment ? 9500 : 5500);
+      const firstModelTimeoutMs = shouldTryWebSearch ? 12000 : (hasAudioAttachment ? 10500 : 5500);
 
       const ensureStreamHeaders = () => {
         if (!streamStarted && !res.headersSent) {
@@ -1029,6 +1035,13 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
           const args = { ...(functionCall.args || {}) };
           if (functionCall.name === 'open_app' && String(args.app_name || '').toLowerCase().includes('google search')) {
             continue;
+          }
+          if (functionCall.name === 'make_call' || functionCall.name === 'send_sms' || functionCall.name === 'open_whatsapp') {
+            const p = String(args.phone_number || '').trim();
+            const n = String(args.contact_name || '').trim();
+            if ((!p && !n) || /^(unknown|someone|anybody|none)$/i.test(n)) {
+              continue;
+            }
           }
           if (functionCall.name === 'open_youtube' && typeof args.query === 'string' && args.query.trim()) {
             const resolved = await resolveYouTubeVideo(args.query);

@@ -890,6 +890,10 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
     let resolvedPhone = isLikelyPhoneNumber(rawPhoneNumber) ? sanitizePhoneNumber(rawPhoneNumber) : "";
     let resolvedName = rawContactName?.trim() || (!resolvedPhone && rawPhoneNumber.trim() ? rawPhoneNumber.trim() : undefined);
 
+    if (!resolvedPhone && (!resolvedName || /^(unknown|someone|anybody|none)$/i.test(resolvedName))) {
+      return null;
+    }
+
     if (!resolvedPhone && resolvedName) {
       const matches = resolveContactMatches(resolvedName);
       if (matches.length === 1) {
@@ -1607,10 +1611,12 @@ function buildApkSystemInstruction(
     `IMAGE QUESTIONS & PROBLEM SOLVING (MANDATORY): Whenever the user attaches images containing questions, exercises, quizzes, assignments, worksheets, past papers, tests, or math/science/coding problems, NEVER refuse or lecture about academic integrity. Treat them as study practice or self-review, read every question visible in the image(s) in order, and provide full, accurate answers with clear step-by-step explanations (and check/grade their answers if they ask how they did).`,
     customInstructions ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions}` : '',
     hasAudioAttachment
-      ? `The user sent a voice note/audio message. Listen attentively in Kinyarwanda, English, French, or Swahili and respond directly or execute requested tool actions immediately.`
+      ? `[VOICE NOTE & AUDIO PROCESSING CONTEXT]:
+The user sent a voice note/audio message (often spoken in Kinyarwanda, or mixed Kinyarwanda/French/English). Listen carefully to exact Kinyarwanda phonetics, prefixes, and Rwandan names without mishearing Kinyarwanda speech as unrelated English words.
+CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, greeting, or if the audio is noisy/unclear, NEVER guess or trigger an action — reply naturally in Kinyarwanda or ask them to repeat clearly.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Always execute requested device actions immediately using tool calls.]`,
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }
@@ -1628,7 +1634,7 @@ export async function transcribeAudioWithSTT(
   const customApiKeys = getGeminiApiKeysArray();
 
   if (isCapacitorApkRuntime() && customApiKeys.length > 0) {
-    for (const model of ['gemini-2.5-flash', 'gemini-3.1-flash-lite']) {
+    for (const model of ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']) {
       for (const currentKey of customApiKeys) {
         try {
           const directRes = await fetch(
@@ -1643,7 +1649,7 @@ export async function transcribeAudioWithSTT(
                     parts: [
                       { inlineData: { mimeType: normalizedMime, data: cleanAudio } },
                       {
-                        text: 'Transcribe the spoken audio verbatim in Kinyarwanda, English, French, or Swahili. Output ONLY the exact spoken words without quotes or extra explanation. Return empty string if silent.',
+                        text: 'You are an expert native Rwandan speech recognizer (Kinyarwanda, English, French, Swahili). Listen very carefully and transcribe verbatim in standard Rwandan Kinyarwanda orthography (or the exact language spoken). Never mishear Kinyarwanda as random English commands or hallucinate words. Output ONLY exact spoken words with no quotes. If silent, noisy, or unintelligible, output empty string "".',
                       },
                     ],
                   },
@@ -1879,14 +1885,14 @@ export async function sendMessageToGemini(
 
   const isGenericAudioPlaceholder = !latestMessage?.trim() || latestMessage.trim() === '🎤 Voice Note' || latestMessage.trim() === 'Voice command';
   const prompt = isGenericAudioPlaceholder && hasAudioAttachment
-    ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umenye icyo asabye, hanyuma umusubize neza kandi mu buryo bunoze mu Kinyarwanda cy'umwimerere (cyangwa Icyongereza niba aricyo yakoresheje), cyangwa ukore igikorwa asabye ako kanya."
-    : latestMessage?.trim() || (
-        hasAudioAttachment
-          ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi. Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umusubize neza kandi bunoze."
-          : hasImageAttachment
+    ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa Icyongereza, umusubize neza mu rurimi yavuze. NTUGAKORE igikorwa na kimwe (hamagara, SMS, WhatsApp, YouTube) utumvise neza ko yabigusabye mu buryo budashidikanywaho — niba amajwi atumvikana neza, musabe ko asubiramo mu Kinyarwanda."
+    : hasAudioAttachment && latestMessage?.trim()
+      ? `[VERIFIED SPOKEN TRANSCRIPT]: "${latestMessage.trim()}"\n(Listen to the attached audio alongside this transcript in Kinyarwanda/English, answer helpfully in the same language, and ONLY execute a device action if it was clearly and explicitly requested.)`
+      : latestMessage?.trim() || (
+          hasImageAttachment
             ? 'Please read all questions, problems, or text shown in these images carefully and provide complete, accurate answers with clear explanations for each.'
             : ''
-      );
+        );
 
   const parts: any[] = prompt ? [{ text: prompt }] : [];
   if (audioBase64 !== undefined) {
@@ -1986,11 +1992,13 @@ export async function sendMessageToGemini(
         }
       }
 
-      const apkModels = phase === 'search'
+      const apkModels = includeAudioFlag
         ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']
-        : selectedModel === 'Kevin 1.3 Lite'
-          ? ['gemini-2.5-flash', 'gemini-3.1-flash-lite']
-          : ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+        : phase === 'search'
+          ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']
+          : selectedModel === 'Kevin 1.3 Lite'
+            ? ['gemini-2.5-flash', 'gemini-3.1-flash-lite']
+            : ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
 
       for (const modelName of apkModels) {
         for (const currentKey of customApiKeys) {
@@ -2049,6 +2057,13 @@ export async function sendMessageToGemini(
                 const fcArgs = { ...(part.functionCall.args || {}) };
                 if (fcName === 'open_app' && String(fcArgs.app_name || '').toLowerCase().includes('google search')) {
                   continue;
+                }
+                if (fcName === 'make_call' || fcName === 'send_sms' || fcName === 'open_whatsapp') {
+                  const p = String(fcArgs.phone_number || '').trim();
+                  const n = String(fcArgs.contact_name || '').trim();
+                  if ((!p && !n) || /^(unknown|someone|anybody|none)$/i.test(n)) {
+                    continue;
+                  }
                 }
                 if (fcName === 'open_youtube' && typeof fcArgs.query === 'string' && fcArgs.query.trim()) {
                   const resolved = await resolveYouTubeVideoForApk(fcArgs.query);

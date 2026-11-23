@@ -56,7 +56,18 @@ const createVoiceRecordingSession = async (options?: {
 
   let stream: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
   } catch (err) {
     try { agentBridge?.resumeWakeWord?.(); } catch { /* ignore */ }
     throw err;
@@ -113,6 +124,7 @@ const createVoiceRecordingSession = async (options?: {
         const samples = new Uint8Array(analyser.fftSize);
         const startedAt = Date.now();
         let heardSpeech = false;
+        let speechConsecutive = 0;
         let lastSpeechAt = startedAt;
 
         vadInterval = setInterval(() => {
@@ -126,15 +138,20 @@ const createVoiceRecordingSession = async (options?: {
             sumSq += norm * norm;
           }
           const rms = Math.sqrt(sumSq / samples.length);
-          if (elapsed > 350 && rms > 0.02) {
-            heardSpeech = true;
+          if (elapsed > 450 && rms > 0.032) {
+            speechConsecutive++;
+            if (speechConsecutive >= 2) {
+              heardSpeech = true;
+            }
             lastSpeechAt = now;
+          } else {
+            speechConsecutive = 0;
           }
-          if (heardSpeech && (now - lastSpeechAt >= 1300 || elapsed >= 14500)) {
+          if (heardSpeech && (now - lastSpeechAt >= 1350 || elapsed >= 15000)) {
             vadTriggered = true;
             stopVad();
             options.onAutoSilence?.();
-          } else if (!heardSpeech && elapsed >= 7500) {
+          } else if (!heardSpeech && elapsed >= 8000) {
             vadTriggered = true;
             stopVad();
             options.onNoSpeechTimeout?.();
@@ -403,13 +420,18 @@ export default function AssistantOverlay({
         (window as any).__kevinPendingWakeWord = undefined;
       }
       const cmd = (detail.command || '').trim();
-      if (cmd) {
+      const meaningfulWords = cmd
+        .replace(/[^a-zA-Z0-9\u00C0-\u024F\s]/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter((w) => w.length >= 2);
+      if (cmd && meaningfulWords.length >= 2) {
         void wakeHandlersRef.current.handleSend(cmd);
       } else {
         showAudioStatus('🎙️ Ndakumva! Vuga icyo ushaka...');
         setTimeout(() => {
           void wakeHandlersRef.current.startVoiceRecording(true);
-        }, 200);
+        }, 220);
       }
     };
 
@@ -722,26 +744,35 @@ export default function AssistantOverlay({
     try {
       const audioBlob = await recording.stop();
       resetVoiceRecordingState();
-      if (!audioBlob.size) {
-        throw new Error('No audio was captured.');
+      if (!audioBlob.size || audioBlob.size < 1400) {
+        showAudioStatus('🎙️ Ijwi ryabaye rigufi cyane. Kanda mic wongere uvuge neza.');
+        return;
       }
 
       const audioBase64 = await blobToRawBase64(audioBlob);
-      if (audioBase64.length <= 100) {
-        throw new Error('The recorded audio is empty or invalid. Please record your message again.');
+      if (audioBase64.length <= 200) {
+        showAudioStatus('🎙️ Nta jwi ryumvikanye neza. Kanda mic wongere uvuge.');
+        return;
       }
 
       let transcript = '';
+      let sttSucceeded = false;
       setIsTranscribing(true);
       try {
         transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
+        sttSucceeded = true;
       } catch (sttErr) {
         console.warn('STT fallback to multimodal audio:', sttErr);
       } finally {
         setIsTranscribing(false);
       }
 
-      const prompt = transcript || 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action.';
+      if (sttSucceeded && !transcript.trim() && audioBlob.size < 4500) {
+        showAudioStatus('🎙️ Sinabashije kumva neza icyo uvuze. Ongera uvuge hafi ya mic.');
+        return;
+      }
+
+      const prompt = transcript || 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.';
       const audioUrl = URL.createObjectURL(audioBlob);
       await handleSend(prompt, audioBase64, recording.mimeType, undefined, transcript || '🎤 Voice Note', audioUrl);
     } catch (error) {
