@@ -506,7 +506,7 @@ async function startServer() {
         return;
       }
 
-      const sttModels = ['gemini-2.5-flash', 'gemini-3.5-transcribe', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+      const sttModels = ['gemini-2.5-flash', 'gemini-3.5-transcribe', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
       let lastErr: unknown = null;
       const invalidKeys = new Set<string>();
 
@@ -614,7 +614,7 @@ Listen carefully and accurately to this audio clip:
         return;
       }
 
-      const wakeModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-transcribe'];
+      const wakeModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-transcribe', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
       let lastErr: unknown = null;
       const invalidKeys = new Set<string>();
 
@@ -816,7 +816,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       let lastErr: unknown = null;
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       const invalidKeys = new Set<string>();
-      const waModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+      const waModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 
       for (const model of waModels) {
         const waHasFallback = model !== waModels[waModels.length - 1];
@@ -1017,12 +1017,12 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
         && /\b(news|amakuru|agezweho|ubu|weather|score|match|price|current|latest|internet|google|search|shaka|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|ikipe|perezida|uri he|amakuru mashya|mancity|man city|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr)\b/i.test(latestUserText)
       );
       const modelsToTry = hasAudioAttachment
-        ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']
+        ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
         : shouldTryWebSearch
-          ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']
+          ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
           : selectedModel === 'Prodix pro'
-            ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
-            : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen'];
+            ? ['gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+            : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       const firstModelTimeoutMs = shouldTryWebSearch ? 12000 : (hasAudioAttachment ? 10500 : 5500);
@@ -1099,8 +1099,8 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
 
         const phaseModels = phase === 'rss_text'
           ? (selectedModel === 'Prodix pro'
-              ? ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
-              : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen'])
+              ? ['gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+              : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'])
           : modelsToTry;
 
         for (const modelName of phaseModels) {
@@ -1274,67 +1274,70 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                     break;
                   }
                   if (attempt === 0) {
-                    await sleep(400);
+                    await sleep(450);
                     continue;
                   }
-                  // Try one bounded non-streaming generateContent call as final rescue
-                  try {
-                    const fallbackPromise = ai.models.generateContent({
-                      model: modelName,
-                      contents: phaseContents as any,
-                      config: {
-                        systemInstruction,
-                        ...(phase === 'device' ? { tools: [{ functionDeclarations: deviceActionDeclarations }] } : {}),
-                        ...modelThinkingConfig,
-                      },
-                    });
-                    fallbackPromise.catch(() => {});
-                    const fallbackRes = await Promise.race([
-                      fallbackPromise,
-                      new Promise<never>((_, reject) =>
-                        setTimeout(() => reject(new Error('503 Fallback timed out')), 8000)
-                      ),
-                    ]);
-                    const fallbackCalls = (fallbackRes as any).functionCalls || [];
-                    const fallbackText = fallbackRes.text || '';
-                    if (fallbackCalls.length > 0 || fallbackText) {
-                      await writePayloadChunk(fallbackCalls, fallbackText);
-                      const fallbackCandidate = (fallbackRes as any).candidates?.[0];
-                      const fallbackGm = fallbackCandidate?.groundingMetadata || (fallbackRes as any).groundingMetadata;
-                      const fallbackGChunks = fallbackGm?.groundingChunks || [];
-                      const fallbackSources: Array<{ title: string; url: string }> = [...phaseSources];
-                      const seenUrls = new Set<string>(phaseSources.map(s => s.url));
-                      for (const gc of fallbackGChunks) {
-                        const uri = gc?.web?.uri || gc?.maps?.uri;
-                        const title = gc?.web?.title || gc?.maps?.title || uri;
-                        if (uri && !seenUrls.has(uri)) {
-                          seenUrls.add(uri);
-                          fallbackSources.push({ title, url: uri });
-                        }
-                      }
-                      if (fallbackSources.length === 0 && fallbackText) {
-                        const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-                        let match;
-                        while ((match = linkRegex.exec(fallbackText)) !== null) {
-                          const title = match[1].trim();
-                          const url = match[2].trim();
-                          if (url && !seenUrls.has(url) && !url.includes('image.pollinations.ai') && !url.includes('localhost')) {
-                            seenUrls.add(url);
-                            fallbackSources.push({ title, url });
+                  // Try bounded non-streaming generateContent rescue across reliable GA fallback models
+                  const rescueModels = Array.from(new Set([modelName, 'gemini-2.5-flash-lite', 'gemini-2.0-flash']));
+                  for (const rescueModel of rescueModels) {
+                    try {
+                      const fallbackPromise = ai.models.generateContent({
+                        model: rescueModel,
+                        contents: phaseContents as any,
+                        config: {
+                          systemInstruction,
+                          ...(phase === 'device' ? { tools: [{ functionDeclarations: deviceActionDeclarations }] } : {}),
+                          ...(rescueModel === 'gemini-4-hydrogen' ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+                        },
+                      });
+                      fallbackPromise.catch(() => {});
+                      const fallbackRes = await Promise.race([
+                        fallbackPromise,
+                        new Promise<never>((_, reject) =>
+                          setTimeout(() => reject(new Error('503 Fallback timed out')), 8000)
+                        ),
+                      ]);
+                      const fallbackCalls = (fallbackRes as any).functionCalls || [];
+                      const fallbackText = fallbackRes.text || '';
+                      if (fallbackCalls.length > 0 || fallbackText) {
+                        await writePayloadChunk(fallbackCalls, fallbackText);
+                        const fallbackCandidate = (fallbackRes as any).candidates?.[0];
+                        const fallbackGm = fallbackCandidate?.groundingMetadata || (fallbackRes as any).groundingMetadata;
+                        const fallbackGChunks = fallbackGm?.groundingChunks || [];
+                        const fallbackSources: Array<{ title: string; url: string }> = [...phaseSources];
+                        const seenUrls = new Set<string>(phaseSources.map(s => s.url));
+                        for (const gc of fallbackGChunks) {
+                          const uri = gc?.web?.uri || gc?.maps?.uri;
+                          const title = gc?.web?.title || gc?.maps?.title || uri;
+                          if (uri && !seenUrls.has(uri)) {
+                            seenUrls.add(uri);
+                            fallbackSources.push({ title, url: uri });
                           }
                         }
-                      }
-                      if (fallbackSources.length > 0) {
+                        if (fallbackSources.length === 0 && fallbackText) {
+                          const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+                          let match;
+                          while ((match = linkRegex.exec(fallbackText)) !== null) {
+                            const title = match[1].trim();
+                            const url = match[2].trim();
+                            if (url && !seenUrls.has(url) && !url.includes('image.pollinations.ai') && !url.includes('localhost')) {
+                              seenUrls.add(url);
+                              fallbackSources.push({ title, url });
+                            }
+                          }
+                        }
+                        if (fallbackSources.length > 0) {
+                          ensureStreamHeaders();
+                          res.write(JSON.stringify({ type: 'sources', sources: fallbackSources }) + '\n');
+                        }
                         ensureStreamHeaders();
-                        res.write(JSON.stringify({ type: 'sources', sources: fallbackSources }) + '\n');
+                        res.write(JSON.stringify({ type: 'done' }) + '\n');
+                        res.end();
+                        return;
                       }
-                      ensureStreamHeaders();
-                      res.write(JSON.stringify({ type: 'done' }) + '\n');
-                      res.end();
-                      return;
+                    } catch (fallbackErr: any) {
+                      lastErr = fallbackErr;
                     }
-                  } catch (fallbackErr: any) {
-                    lastErr = fallbackErr;
                   }
                   break;
                 }

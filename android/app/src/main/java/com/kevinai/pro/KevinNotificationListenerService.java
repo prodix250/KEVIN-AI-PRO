@@ -484,68 +484,85 @@ public class KevinNotificationListenerService extends NotificationListenerServic
             sysPrompt += "\nOwner's Personal Style Preference: " + replyStyle.trim();
         }
 
-        String[] models = new String[] { "gemini-2.5-flash", "gemini-3.1-flash-lite" };
-        for (String model : models) {
+        String[] models = new String[] {
+                "gemini-2.5-flash",
+                "gemini-3.1-flash-lite",
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash"
+        };
+        for (int mIdx = 0; mIdx < models.length; mIdx++) {
+            String model = models[mIdx];
+            boolean isLastModel = (mIdx == models.length - 1);
             for (String key : apiKeys) {
-                HttpURLConnection conn = null;
-                try {
-                    String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/"
-                            + model + ":generateContent?key=" + URLEncoder.encode(key, "UTF-8");
-                    URL url = new URL(endpoint);
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setConnectTimeout(8_000);
-                    conn.setReadTimeout(12_000);
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setDoOutput(true);
+                int maxAttempts = isLastModel ? 2 : 1;
+                for (int attempt = 0; attempt < maxAttempts; attempt++) {
+                    HttpURLConnection conn = null;
+                    try {
+                        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/"
+                                + model + ":generateContent?key=" + URLEncoder.encode(key, "UTF-8");
+                        URL url = new URL(endpoint);
+                        conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("POST");
+                        conn.setConnectTimeout(8_000);
+                        conn.setReadTimeout(12_000);
+                        conn.setRequestProperty("Content-Type", "application/json");
+                        conn.setDoOutput(true);
 
-                    JSONObject body = new JSONObject();
-                    JSONObject sysPart = new JSONObject().put("text", sysPrompt);
-                    body.put("systemInstruction", new JSONObject().put("parts", new JSONArray().put(sysPart)));
+                        JSONObject body = new JSONObject();
+                        JSONObject sysPart = new JSONObject().put("text", sysPrompt);
+                        body.put("systemInstruction", new JSONObject().put("parts", new JSONArray().put(sysPart)));
 
-                    JSONObject userPart = new JSONObject().put("text", incoming.trim());
-                    JSONObject userContent = new JSONObject()
-                            .put("role", "user")
-                            .put("parts", new JSONArray().put(userPart));
-                    body.put("contents", new JSONArray().put(userContent));
+                        JSONObject userPart = new JSONObject().put("text", incoming.trim());
+                        JSONObject userContent = new JSONObject()
+                                .put("role", "user")
+                                .put("parts", new JSONArray().put(userPart));
+                        body.put("contents", new JSONArray().put(userContent));
 
-                    try (OutputStream os = conn.getOutputStream()) {
-                        os.write(body.toString().getBytes(StandardCharsets.UTF_8));
-                    }
-
-                    if (conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
-                        StringBuilder sb = new StringBuilder();
-                        try (BufferedReader reader = new BufferedReader(
-                                new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                            String line;
-                            while ((line = reader.readLine()) != null) {
-                                sb.append(line);
-                            }
+                        try (OutputStream os = conn.getOutputStream()) {
+                            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
                         }
-                        JSONObject json = new JSONObject(sb.toString());
-                        JSONArray candidates = json.optJSONArray("candidates");
-                        if (candidates != null && candidates.length() > 0) {
-                            JSONObject content = candidates.getJSONObject(0).optJSONObject("content");
-                            if (content != null) {
-                                JSONArray parts = content.optJSONArray("parts");
-                                if (parts != null) {
-                                    StringBuilder replySb = new StringBuilder();
-                                    for (int i = 0; i < parts.length(); i++) {
-                                        String t = parts.getJSONObject(i).optString("text", "");
-                                        replySb.append(t);
-                                    }
-                                    String reply = sanitizeWhatsAppReply(replySb.toString(), safeOwner, safeSender);
-                                    if (!TextUtils.isEmpty(reply)) {
-                                        return reply;
+
+                        int code = conn.getResponseCode();
+                        if (code >= 200 && code < 300) {
+                            StringBuilder sb = new StringBuilder();
+                            try (BufferedReader reader = new BufferedReader(
+                                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                                String line;
+                                while ((line = reader.readLine()) != null) {
+                                    sb.append(line);
+                                }
+                            }
+                            JSONObject json = new JSONObject(sb.toString());
+                            JSONArray candidates = json.optJSONArray("candidates");
+                            if (candidates != null && candidates.length() > 0) {
+                                JSONObject content = candidates.getJSONObject(0).optJSONObject("content");
+                                if (content != null) {
+                                    JSONArray parts = content.optJSONArray("parts");
+                                    if (parts != null) {
+                                        StringBuilder replySb = new StringBuilder();
+                                        for (int i = 0; i < parts.length(); i++) {
+                                            String t = parts.getJSONObject(i).optString("text", "");
+                                            replySb.append(t);
+                                        }
+                                        String reply = sanitizeWhatsAppReply(replySb.toString(), safeOwner, safeSender);
+                                        if (!TextUtils.isEmpty(reply)) {
+                                            return reply;
+                                        }
                                     }
                                 }
                             }
+                            break;
+                        } else if (code == 503 && attempt + 1 < maxAttempts) {
+                            try { Thread.sleep(350L); } catch (InterruptedException ignored) {}
+                        } else {
+                            break;
                         }
-                    }
-                } catch (Exception ignored) {
-                } finally {
-                    if (conn != null) {
-                        conn.disconnect();
+                    } catch (Exception ignored) {
+                        break;
+                    } finally {
+                        if (conn != null) {
+                            conn.disconnect();
+                        }
                     }
                 }
             }

@@ -23767,7 +23767,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-CTnl7lcB.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-D5H9MqIj.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -25747,7 +25747,7 @@ async function transcribeAudioWithSTT(audioBase64, audioMimeType = "audio/webm")
   const customApiKey = getUserCustomApiKey();
   const customApiKeys = getGeminiApiKeysArray();
   if (isCapacitorApkRuntime() && customApiKeys.length > 0) {
-    for (const model of ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"]) {
+    for (const model of ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"]) {
       for (const currentKey of customApiKeys) {
         try {
           const directRes = await fetch(
@@ -25859,7 +25859,7 @@ async function generateWhatsAppAutoReply(sender, incomingMessage, replyStyle) {
   const customApiKey = getUserCustomApiKey();
   const customApiKeys = getGeminiApiKeysArray();
   if (isCapacitorApkRuntime() && customApiKeys.length > 0) {
-    for (const model of ["gemini-2.5-flash", "gemini-3.1-flash-lite"]) {
+    for (const model of ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-3.1-flash-lite"]) {
       for (const currentKey of customApiKeys) {
         try {
           const directRes = await fetch(
@@ -26041,100 +26041,118 @@ ${att.textContent}` });
           ];
         }
       }
-      const apkModels = includeAudioFlag ? ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"] : phase === "search" ? ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"] : selectedModel === "Kevin 1.3 Lite" ? ["gemini-2.5-flash", "gemini-3.1-flash-lite"] : ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite"];
+      const apkModels = includeAudioFlag ? ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"] : phase === "search" ? ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"] : selectedModel === "Kevin 1.3 Lite" ? ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-2.0-flash"] : ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
       for (const modelName of apkModels) {
+        const isLastApkModel = modelName === apkModels[apkModels.length - 1];
         for (const currentKey of customApiKeys) {
           if (invalidKeys.has(currentKey)) continue;
-          try {
-            const payloadBody = {
-              systemInstruction: { parts: [{ text: apkSystemInstruction }] },
-              contents: phaseContents
-            };
-            if (phase === "search") {
-              payloadBody.tools = [{ google_search: {} }];
-            } else if (phase === "device") {
-              payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
-            }
-            const directRes = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payloadBody)
+          const maxDirectAttempts = isLastApkModel ? 2 : 1;
+          for (let attempt = 0; attempt < maxDirectAttempts; attempt++) {
+            try {
+              const payloadBody = {
+                systemInstruction: { parts: [{ text: apkSystemInstruction }] },
+                contents: phaseContents
+              };
+              if (phase === "search") {
+                payloadBody.tools = [{ google_search: {} }];
+              } else if (phase === "device") {
+                payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
               }
-            );
-            const json2 = await directRes.json().catch(() => null);
-            if (!directRes.ok) {
-              const apiErrMsg = ((_b2 = json2 == null ? void 0 : json2.error) == null ? void 0 : _b2.message) || `HTTP ${directRes.status}`;
-              const lowerErr = apiErrMsg.toLowerCase();
-              if (directRes.status === 401 || directRes.status === 403 || lowerErr.includes("api key not valid") || lowerErr.includes("api_key_invalid")) {
-                invalidKeys.add(currentKey);
-              }
-              lastDirectErr = new Error(apiErrMsg);
-              continue;
-            }
-            const responseParts = ((_e2 = (_d = (_c = json2 == null ? void 0 : json2.candidates) == null ? void 0 : _c[0]) == null ? void 0 : _d.content) == null ? void 0 : _e2.parts) || [];
-            let streamedText = "";
-            const streamedActions = [];
-            const directSources = [...phaseSources];
-            const gChunks = ((_h = (_g = (_f = json2 == null ? void 0 : json2.candidates) == null ? void 0 : _f[0]) == null ? void 0 : _g.groundingMetadata) == null ? void 0 : _h.groundingChunks) || [];
-            for (const gc of gChunks) {
-              const uri = ((_i = gc == null ? void 0 : gc.web) == null ? void 0 : _i.uri) || ((_j = gc == null ? void 0 : gc.maps) == null ? void 0 : _j.uri);
-              const title = ((_k = gc == null ? void 0 : gc.web) == null ? void 0 : _k.title) || ((_l = gc == null ? void 0 : gc.maps) == null ? void 0 : _l.title) || uri;
-              if (uri && !directSources.some((s2) => s2.url === uri)) {
-                directSources.push({ title, url: uri });
-              }
-            }
-            for (const part of responseParts) {
-              if (part == null ? void 0 : part.text) {
-                streamedText += part.text;
-              } else if ((_m = part == null ? void 0 : part.functionCall) == null ? void 0 : _m.name) {
-                const fcName = String(part.functionCall.name);
-                const fcArgs = { ...part.functionCall.args || {} };
-                if (fcName === "open_app" && String(fcArgs.app_name || "").toLowerCase().includes("google search")) {
+              const directRes = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(payloadBody)
+                }
+              );
+              const json2 = await directRes.json().catch(() => null);
+              if (!directRes.ok) {
+                const apiErrMsg = ((_b2 = json2 == null ? void 0 : json2.error) == null ? void 0 : _b2.message) || `HTTP ${directRes.status}`;
+                const lowerErr = apiErrMsg.toLowerCase();
+                if (directRes.status === 401 || directRes.status === 403 || lowerErr.includes("api key not valid") || lowerErr.includes("api_key_invalid")) {
+                  invalidKeys.add(currentKey);
+                  break;
+                }
+                const isTransientBusy = directRes.status === 503 || lowerErr.includes("high demand") || lowerErr.includes("unavailable") || lowerErr.includes("overloaded");
+                lastDirectErr = new Error(apiErrMsg);
+                if (isTransientBusy && attempt + 1 < maxDirectAttempts) {
+                  await new Promise((r2) => setTimeout(r2, 500));
                   continue;
                 }
-                if (fcName === "make_call" || fcName === "send_sms" || fcName === "open_whatsapp") {
-                  const p2 = String(fcArgs.phone_number || "").trim();
-                  const n = String(fcArgs.contact_name || "").trim();
-                  if (!p2 && !n || /^(unknown|someone|anybody|none)$/i.test(n)) {
+                if (directRes.status === 404 || lowerErr.includes("not found")) {
+                  break;
+                }
+                break;
+              }
+              const responseParts = ((_e2 = (_d = (_c = json2 == null ? void 0 : json2.candidates) == null ? void 0 : _c[0]) == null ? void 0 : _d.content) == null ? void 0 : _e2.parts) || [];
+              let streamedText = "";
+              const streamedActions = [];
+              const directSources = [...phaseSources];
+              const gChunks = ((_h = (_g = (_f = json2 == null ? void 0 : json2.candidates) == null ? void 0 : _f[0]) == null ? void 0 : _g.groundingMetadata) == null ? void 0 : _h.groundingChunks) || [];
+              for (const gc of gChunks) {
+                const uri = ((_i = gc == null ? void 0 : gc.web) == null ? void 0 : _i.uri) || ((_j = gc == null ? void 0 : gc.maps) == null ? void 0 : _j.uri);
+                const title = ((_k = gc == null ? void 0 : gc.web) == null ? void 0 : _k.title) || ((_l = gc == null ? void 0 : gc.maps) == null ? void 0 : _l.title) || uri;
+                if (uri && !directSources.some((s2) => s2.url === uri)) {
+                  directSources.push({ title, url: uri });
+                }
+              }
+              for (const part of responseParts) {
+                if (part == null ? void 0 : part.text) {
+                  streamedText += part.text;
+                } else if ((_m = part == null ? void 0 : part.functionCall) == null ? void 0 : _m.name) {
+                  const fcName = String(part.functionCall.name);
+                  const fcArgs = { ...part.functionCall.args || {} };
+                  if (fcName === "open_app" && String(fcArgs.app_name || "").toLowerCase().includes("google search")) {
                     continue;
                   }
-                }
-                if (fcName === "open_youtube" && typeof fcArgs.query === "string" && fcArgs.query.trim()) {
-                  const resolved = await resolveYouTubeVideoForApk(fcArgs.query);
-                  if (resolved) {
-                    fcArgs.videoId = resolved.videoId;
-                    fcArgs.videoTitle = resolved.title;
-                    fcArgs.channel = resolved.channel;
+                  if (fcName === "make_call" || fcName === "send_sms" || fcName === "open_whatsapp") {
+                    const p2 = String(fcArgs.phone_number || "").trim();
+                    const n = String(fcArgs.contact_name || "").trim();
+                    if (!p2 && !n || /^(unknown|someone|anybody|none)$/i.test(n)) {
+                      continue;
+                    }
                   }
+                  if (fcName === "open_youtube" && typeof fcArgs.query === "string" && fcArgs.query.trim()) {
+                    const resolved = await resolveYouTubeVideoForApk(fcArgs.query);
+                    if (resolved) {
+                      fcArgs.videoId = resolved.videoId;
+                      fcArgs.videoTitle = resolved.title;
+                      fcArgs.channel = resolved.channel;
+                    }
+                  }
+                  const action = executeDeviceAction(fcName, fcArgs);
+                  if (action) streamedActions.push(action);
                 }
-                const action = executeDeviceAction(fcName, fcArgs);
-                if (action) streamedActions.push(action);
               }
-            }
-            if (directSources.length === 0) {
-              const mdSources = extractMarkdownUrls(streamedText);
-              directSources.push(...mdSources);
-            }
-            if (phase === "search" && directSources.length === 0) {
-              const lowerReply = streamedText.toLowerCase();
-              const looksUngrounded = lowerReply.includes("live search") || lowerReply.includes("real-time") || lowerReply.includes("ntabwo mbasha gushakisha") || lowerReply.includes("cannot access") || lowerReply.includes("don't have access");
-              if (looksUngrounded) {
+              if (directSources.length === 0) {
+                const mdSources = extractMarkdownUrls(streamedText);
+                directSources.push(...mdSources);
+              }
+              if (phase === "search" && directSources.length === 0) {
+                const lowerReply = streamedText.toLowerCase();
+                const looksUngrounded = lowerReply.includes("live search") || lowerReply.includes("real-time") || lowerReply.includes("ntabwo mbasha gushakisha") || lowerReply.includes("cannot access") || lowerReply.includes("don't have access");
+                if (looksUngrounded) {
+                  break;
+                }
+              }
+              if (streamedText) {
+                onChunk == null ? void 0 : onChunk(streamedText);
+              }
+              if (directSources.length > 0) {
+                onSources == null ? void 0 : onSources(directSources);
+              }
+              if (streamedText || streamedActions.length > 0) {
+                return { streamedText, streamedActions, streamedSources: directSources };
+              }
+              break;
+            } catch (directErr) {
+              lastDirectErr = directErr;
+              if (attempt + 1 < maxDirectAttempts) {
+                await new Promise((r2) => setTimeout(r2, 450));
                 continue;
               }
             }
-            if (streamedText) {
-              onChunk == null ? void 0 : onChunk(streamedText);
-            }
-            if (directSources.length > 0) {
-              onSources == null ? void 0 : onSources(directSources);
-            }
-            if (streamedText || streamedActions.length > 0) {
-              return { streamedText, streamedActions, streamedSources: directSources };
-            }
-          } catch (directErr) {
-            lastDirectErr = directErr;
           }
         }
       }
@@ -26221,6 +26239,11 @@ ${att.textContent}` });
   };
   let fullResponse = "";
   let actions = [];
+  const isTransientHighDemandError = (err) => {
+    const msg = err instanceof Error ? err.message : String(err || "");
+    const lower = msg.toLowerCase();
+    return msg.includes("503") || lower.includes("high demand") || lower.includes("unavailable") || lower.includes("overloaded");
+  };
   if (isApk) {
     if (customApiKeys.length > 0) {
       try {
@@ -26233,7 +26256,14 @@ ${att.textContent}` });
           fullResponse = backendResult.streamedText;
           actions = backendResult.streamedActions;
         } catch {
-          throw directErr;
+          if (isTransientHighDemandError(directErr)) {
+            await new Promise((r2) => setTimeout(r2, 850));
+            const retryResult = await executeDirectApkGemini(contents, hasAudioAttachment);
+            fullResponse = retryResult.streamedText;
+            actions = retryResult.streamedActions;
+          } else {
+            throw directErr;
+          }
         }
       }
     } else {
@@ -26241,8 +26271,19 @@ ${att.textContent}` });
         const backendResult = await executeChatRequest(contents, hasAudioAttachment);
         fullResponse = backendResult.streamedText;
         actions = backendResult.streamedActions;
-      } catch {
-        throw new Error("APK_NO_API_KEY: Nta Gemini API Key irabikwa muri porogaramu. Nyamuneka jya muri Settings > INJIZA KEVIN API KEYS ushyiremo API Key yawe.");
+      } catch (backendErr) {
+        if (isTransientHighDemandError(backendErr)) {
+          try {
+            await new Promise((r2) => setTimeout(r2, 850));
+            const retryBackend = await executeChatRequest(contents, hasAudioAttachment);
+            fullResponse = retryBackend.streamedText;
+            actions = retryBackend.streamedActions;
+          } catch (retryErr) {
+            throw retryErr;
+          }
+        } else {
+          throw new Error("APK_NO_API_KEY: Nta Gemini API Key irabikwa muri porogaramu. Nyamuneka jya muri Settings > INJIZA KEVIN API KEYS ushyiremo API Key yawe.");
+        }
       }
     }
   } else {
@@ -26251,8 +26292,7 @@ ${att.textContent}` });
       fullResponse = result2.streamedText;
       actions = result2.streamedActions;
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const isHighDemand = errMsg.includes("503") || errMsg.toLowerCase().includes("high demand") || errMsg.toLowerCase().includes("unavailable");
+      const isHighDemand = isTransientHighDemandError(err);
       if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
         const textOnlyContents = [
           ...contents.slice(0, -1),
@@ -26261,6 +26301,11 @@ ${att.textContent}` });
         const fallbackResult = await executeChatRequest(textOnlyContents, false);
         fullResponse = fallbackResult.streamedText;
         actions = fallbackResult.streamedActions;
+      } else if (isHighDemand) {
+        await new Promise((r2) => setTimeout(r2, 850));
+        const retryResult = await executeChatRequest(contents, hasAudioAttachment);
+        fullResponse = retryResult.streamedText;
+        actions = retryResult.streamedActions;
       } else {
         throw err;
       }
@@ -37122,7 +37167,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-BNh7sptX.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-CU5ah_1Z.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -102982,7 +103027,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-sXaNwuIk.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-zjTHYTss.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {

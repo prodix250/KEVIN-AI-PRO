@@ -621,7 +621,13 @@ public class KevinWakeWordService extends Service {
     }
 
     private WakeCheckResult callGeminiDirectWakeCheck(String audioBase64, List<String> keys) {
-        String[] models = new String[] { "gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite" };
+        String[] models = new String[] {
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-4-hydrogen",
+                "gemini-3.1-flash-lite"
+        };
         String prompt = "Listen strictly to this short audio clip. "
                 + "Set \"wake\":true ONLY if the speaker clearly and intentionally calls the assistant by saying \"Hi Kevin\", \"Hey Kevin\", \"Hello Kevin\", or \"OK Kevin\". "
                 + "Do NOT trigger on ambient Kinyarwanda conversation, background TV/music, breathing, coughs, random noise, or someone just mentioning the name Kevin inside a sentence without saying Hi/Hey/Hello/OK Kevin. "
