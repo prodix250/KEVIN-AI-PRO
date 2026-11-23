@@ -1734,9 +1734,12 @@ export async function transcribeAudioWithSTT(
   const customApiKey = getUserCustomApiKey();
   const customApiKeys = getGeminiApiKeysArray();
 
-  if (isCapacitorApkRuntime() && customApiKeys.length > 0) {
-    for (const model of ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']) {
+  if ((isCapacitorApkRuntime() || customApiKeys.length > 0) && customApiKeys.length > 0) {
+    const invalidSttKeys = new Set<string>();
+    for (const model of ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']) {
+      let abortModel = false;
       for (const currentKey of customApiKeys) {
+        if (invalidSttKeys.has(currentKey)) continue;
         try {
           const directRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(currentKey)}`,
@@ -1758,7 +1761,11 @@ export async function transcribeAudioWithSTT(
               }),
             }
           );
-          if (!directRes.ok) continue;
+          if (!directRes.ok) {
+            if (directRes.status === 401 || directRes.status === 403) invalidSttKeys.add(currentKey);
+            if (directRes.status === 404) { abortModel = true; break; }
+            continue;
+          }
           const directJson = await directRes.json();
           const text = directJson?.candidates?.[0]?.content?.parts
             ?.map((p: any) => p?.text || '')
@@ -1769,6 +1776,7 @@ export async function transcribeAudioWithSTT(
           }
         } catch {}
       }
+      if (abortModel) continue;
     }
   }
 
@@ -1869,8 +1877,11 @@ export async function generateWhatsAppAutoReply(
   const customApiKeys = getGeminiApiKeysArray();
 
   if (isCapacitorApkRuntime() && customApiKeys.length > 0) {
-    for (const model of ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-3.1-flash-lite']) {
+    const invalidWaKeys = new Set<string>();
+    for (const model of ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']) {
+      let abortModel = false;
       for (const currentKey of customApiKeys) {
+        if (invalidWaKeys.has(currentKey)) continue;
         try {
           const directRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(currentKey)}`,
@@ -1902,7 +1913,11 @@ export async function generateWhatsAppAutoReply(
               }),
             }
           );
-          if (!directRes.ok) continue;
+          if (!directRes.ok) {
+            if (directRes.status === 401 || directRes.status === 403) invalidWaKeys.add(currentKey);
+            if (directRes.status === 404) { abortModel = true; break; }
+            continue;
+          }
           const directJson = await directRes.json();
           const rawReply = directJson?.candidates?.[0]?.content?.parts
             ?.map((p: any) => p?.text || '')
@@ -1912,6 +1927,7 @@ export async function generateWhatsAppAutoReply(
           if (reply) return reply;
         } catch {}
       }
+      if (abortModel) continue;
     }
   }
 
@@ -2150,15 +2166,16 @@ export async function sendMessageToGemini(
       }
 
       const apkModels = includeAudioFlag
-        ? ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+        ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
         : phase === 'search'
-          ? ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+          ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
           : selectedModel === 'Kevin 1.3 Lite'
-            ? ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.0-flash']
-            : ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+            ? ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash']
+            : ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 
       for (const modelName of apkModels) {
         const isLastApkModel = modelName === apkModels[apkModels.length - 1];
+        let abortModelLoop = false;
         for (const currentKey of customApiKeys) {
           if (invalidKeys.has(currentKey)) continue;
           const maxDirectAttempts = isLastApkModel ? 2 : 1;
@@ -2176,7 +2193,7 @@ export async function sendMessageToGemini(
                 }
               }
               const controller = new AbortController();
-              const timer = setTimeout(() => controller.abort(), 16000);
+              const timer = setTimeout(() => controller.abort(), isLastApkModel ? 16000 : 10000);
               try {
                 return await fetch(
                   `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
@@ -2212,6 +2229,10 @@ export async function sendMessageToGemini(
                 if (!isNotFound || !lastDirectErr) {
                   lastDirectErr = new Error(apiErrMsg);
                 }
+                if (isNotFound) {
+                  abortModelLoop = true;
+                  break;
+                }
                 const isTransientBusy = directRes.status === 503
                   || lowerErr.includes('high demand')
                   || lowerErr.includes('unavailable')
@@ -2219,9 +2240,6 @@ export async function sendMessageToGemini(
                 if (isTransientBusy && attempt + 1 < maxDirectAttempts) {
                   await new Promise((r) => setTimeout(r, 500));
                   continue;
-                }
-                if (isNotFound) {
-                  break;
                 }
                 break;
               }
@@ -2277,6 +2295,7 @@ export async function sendMessageToGemini(
 
               // Never accept ungrounded stale memory during 'search' if RSS fallback hasn't run yet
               if (phase === 'search' && directSources.length === 0) {
+                abortModelLoop = true;
                 break;
               }
 
@@ -2294,12 +2313,17 @@ export async function sendMessageToGemini(
               break;
             } catch (directErr: any) {
               lastDirectErr = directErr;
+              if (directErr?.name === 'AbortError' && !isLastApkModel) {
+                abortModelLoop = true;
+                break;
+              }
               if (attempt + 1 < maxDirectAttempts) {
                 await new Promise((r) => setTimeout(r, 450));
                 continue;
               }
             }
           }
+          if (abortModelLoop) break;
         }
       }
     }

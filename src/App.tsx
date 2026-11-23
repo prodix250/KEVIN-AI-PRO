@@ -1705,7 +1705,7 @@ export default function App() {
       ) && !isCapacitorApkRuntime();
       const isApkMissingKey = errMsg.includes('APK_NO_API_KEY')
         || (getGeminiApiKeysArray().length === 0 && !isLocalPreview && (errMsg.includes('Nta Gemini API key') || errMsg.includes('API key') || errMsg.includes('Failed to fetch')));
-      const isQuotaError = errMsg.includes('resource_exhausted') || errMsg.includes('Quota exceeded') || errMsg.includes('429') || errMsg.toLowerCase().includes('quota');
+      const isQuotaError = errMsg.toLowerCase().includes('resource_exhausted') || errMsg.includes('Quota exceeded') || errMsg.includes('429') || errMsg.toLowerCase().includes('quota');
       const isHighDemandError = errMsg.includes('503') || errMsg.toLowerCase().includes('high demand') || errMsg.toLowerCase().includes('unavailable');
       const isAuthError = errMsg.includes('API key not valid') || errMsg.includes('401') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('Secrets') || errMsg.includes('Nta Gemini API key');
       let displayMsg = "Mbabarira, habaye ikibazo cyo kohereza ubutumwa. Ongera ugerageze.";

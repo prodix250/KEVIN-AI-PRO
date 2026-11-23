@@ -228,6 +228,14 @@ function getServerApiKeys(customKeys?: string | string[]): string[] {
     process.env.GEMINI_API_KEY,
     process.env.GEMINI_API_KEY_BACKUP,
     process.env.GEMINI_API_KEY_BACKUP_2,
+    process.env.GEMINI_API_KEY_BACKUP_3,
+    process.env.GEMINI_API_KEY_BACKUP_4,
+    process.env.VITE_GEMINI_API_KEY,
+    process.env.VITE_GEMINI_API_KEY_BACKUP,
+    process.env.VITE_GEMINI_API_KEY_BACKUP_2,
+    process.env.VITE_GEMINI_API_KEY_BACKUP_3,
+    process.env.VITE_GEMINI_API_KEY_BACKUP_4,
+    process.env.GOOGLE_API_KEY,
   ];
   return Array.from(new Set(
     keys
