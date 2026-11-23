@@ -80,6 +80,7 @@
       "Courier New", monospace;
     --color-red-50: oklch(97.1% .013 17.38);
     --color-red-100: oklch(93.6% .032 17.717);
+    --color-red-300: oklch(80.8% .114 19.571);
     --color-red-400: oklch(70.4% .191 22.216);
     --color-red-500: oklch(63.7% .237 25.331);
     --color-red-600: oklch(57.7% .245 27.325);
@@ -636,6 +637,10 @@
     margin-inline: calc(var(--spacing) * .5);
   }
 
+  .mx-1 {
+    margin-inline: var(--spacing);
+  }
+
   .mx-2 {
     margin-inline: calc(var(--spacing) * 2);
   }
@@ -646,6 +651,10 @@
 
   .mx-auto {
     margin-inline: auto;
+  }
+
+  .my-1 {
+    margin-block: var(--spacing);
   }
 
   .my-1\.5 {
@@ -1138,6 +1147,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .grid-cols-8 {
     grid-template-columns: repeat(8, minmax(0, 1fr));
   }
@@ -1524,6 +1537,16 @@
     }
   }
 
+  .border-red-500\/30 {
+    border-color: #fb2c364d;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .border-red-500\/30 {
+      border-color: color-mix(in oklab, var(--color-red-500) 30%, transparent);
+    }
+  }
+
   .border-transparent {
     border-color: #0000;
   }
@@ -1639,6 +1662,16 @@
   @supports (color: color-mix(in lab, red, red)) {
     .bg-amber-500\/10 {
       background-color: color-mix(in oklab, var(--color-amber-500) 10%, transparent);
+    }
+  }
+
+  .bg-amber-500\/12 {
+    background-color: #f99c001f;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-amber-500\/12 {
+      background-color: color-mix(in oklab, var(--color-amber-500) 12%, transparent);
     }
   }
 
@@ -1802,6 +1835,16 @@
     }
   }
 
+  .bg-gray-100\/90 {
+    background-color: #f3f4f6e6;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-gray-100\/90 {
+      background-color: color-mix(in oklab, var(--color-gray-100) 90%, transparent);
+    }
+  }
+
   .bg-gray-200 {
     background-color: var(--color-gray-200);
   }
@@ -1858,6 +1901,16 @@
 
   .bg-red-500 {
     background-color: var(--color-red-500);
+  }
+
+  .bg-red-500\/12 {
+    background-color: #fb2c361f;
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-red-500\/12 {
+      background-color: color-mix(in oklab, var(--color-red-500) 12%, transparent);
+    }
   }
 
   .bg-red-500\/15 {
@@ -2135,6 +2188,10 @@
 
   .py-12 {
     padding-block: calc(var(--spacing) * 12);
+  }
+
+  .pt-0\.5 {
+    padding-top: calc(var(--spacing) * .5);
   }
 
   .pt-1 {
@@ -2507,6 +2564,10 @@
     color: var(--color-red-600);
   }
 
+  .text-red-700 {
+    color: var(--color-red-700);
+  }
+
   .text-white {
     color: var(--color-white);
   }
@@ -2533,6 +2594,10 @@
 
   .opacity-0 {
     opacity: 0;
+  }
+
+  .opacity-90 {
+    opacity: .9;
   }
 
   .opacity-100 {
@@ -2863,6 +2928,10 @@
       background-color: #1ebe5b;
     }
 
+    .hover\:bg-\[\#008f6f\]:hover {
+      background-color: #008f6f;
+    }
+
     .hover\:bg-\[\#075E54\]:hover {
       background-color: #075e54;
     }
@@ -2873,6 +2942,16 @@
 
     .hover\:bg-\[\#128C7E\]:hover {
       background-color: #128c7e;
+    }
+
+    .hover\:bg-amber-500\/22:hover {
+      background-color: #f99c0038;
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+      .hover\:bg-amber-500\/22:hover {
+        background-color: color-mix(in oklab, var(--color-amber-500) 22%, transparent);
+      }
     }
 
     .hover\:bg-amber-500\/25:hover {
@@ -2933,6 +3012,26 @@
 
     .hover\:bg-red-50:hover {
       background-color: var(--color-red-50);
+    }
+
+    .hover\:bg-red-500\/22:hover {
+      background-color: #fb2c3638;
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+      .hover\:bg-red-500\/22:hover {
+        background-color: color-mix(in oklab, var(--color-red-500) 22%, transparent);
+      }
+    }
+
+    .hover\:bg-red-500\/25:hover {
+      background-color: #fb2c3640;
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+      .hover\:bg-red-500\/25:hover {
+        background-color: color-mix(in oklab, var(--color-red-500) 25%, transparent);
+      }
     }
 
     .hover\:bg-red-700:hover {
@@ -3462,6 +3561,10 @@
 
   .dark\:text-purple-400:where(.dark, .dark *) {
     color: var(--color-purple-400);
+  }
+
+  .dark\:text-red-300:where(.dark, .dark *) {
+    color: var(--color-red-300);
   }
 
   .dark\:text-red-400:where(.dark, .dark *) {

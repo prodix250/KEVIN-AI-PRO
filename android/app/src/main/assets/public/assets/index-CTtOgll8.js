@@ -14450,7 +14450,7 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$I = [
+const __iconNode$K = [
   ["path", { d: "M12 8V4H8", key: "hb8ula" }],
   ["rect", { width: "16", height: "12", x: "4", y: "8", rx: "2", key: "enze0r" }],
   ["path", { d: "M2 14h2", key: "vft8re" }],
@@ -14458,14 +14458,14 @@ const __iconNode$I = [
   ["path", { d: "M15 13v2", key: "1xurst" }],
   ["path", { d: "M9 13v2", key: "rq6x2g" }]
 ];
-const Bot = createLucideIcon("bot", __iconNode$I);
+const Bot = createLucideIcon("bot", __iconNode$K);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$H = [
+const __iconNode$J = [
   [
     "path",
     {
@@ -14475,31 +14475,53 @@ const __iconNode$H = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera$1 = createLucideIcon("camera", __iconNode$H);
+const Camera$1 = createLucideIcon("camera", __iconNode$J);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$G = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
-const Check = createLucideIcon("check", __iconNode$G);
+const __iconNode$I = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
+const Check = createLucideIcon("check", __iconNode$I);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$F = [["path", { d: "m6 9 6 6 6-6", key: "qrunsl" }]];
-const ChevronDown = createLucideIcon("chevron-down", __iconNode$F);
+const __iconNode$H = [["path", { d: "m6 9 6 6 6-6", key: "qrunsl" }]];
+const ChevronDown = createLucideIcon("chevron-down", __iconNode$H);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$E = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$E);
+const __iconNode$G = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$G);
+/**
+ * @license lucide-react v0.546.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$F = [
+  ["path", { d: "M12 6v6l4 2", key: "mmk7yg" }],
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }]
+];
+const Clock = createLucideIcon("clock", __iconNode$F);
+/**
+ * @license lucide-react v0.546.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$E = [
+  ["rect", { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2", key: "17jyea" }],
+  ["path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2", key: "zix9uf" }]
+];
+const Copy = createLucideIcon("copy", __iconNode$E);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14507,10 +14529,11 @@ const ChevronRight = createLucideIcon("chevron-right", __iconNode$E);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$D = [
-  ["rect", { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2", key: "17jyea" }],
-  ["path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2", key: "zix9uf" }]
+  ["path", { d: "M12 15V3", key: "m9g1x1" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
+  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
 ];
-const Copy = createLucideIcon("copy", __iconNode$D);
+const Download = createLucideIcon("download", __iconNode$D);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14518,11 +14541,11 @@ const Copy = createLucideIcon("copy", __iconNode$D);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$C = [
-  ["path", { d: "M12 15V3", key: "m9g1x1" }],
-  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
-  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
+  ["circle", { cx: "12", cy: "12", r: "1", key: "41hilf" }],
+  ["circle", { cx: "12", cy: "5", r: "1", key: "gxeob9" }],
+  ["circle", { cx: "12", cy: "19", r: "1", key: "lyex9k" }]
 ];
-const Download = createLucideIcon("download", __iconNode$C);
+const EllipsisVertical = createLucideIcon("ellipsis-vertical", __iconNode$C);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14530,11 +14553,11 @@ const Download = createLucideIcon("download", __iconNode$C);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$B = [
-  ["circle", { cx: "12", cy: "12", r: "1", key: "41hilf" }],
-  ["circle", { cx: "12", cy: "5", r: "1", key: "gxeob9" }],
-  ["circle", { cx: "12", cy: "19", r: "1", key: "lyex9k" }]
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
+  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
 ];
-const EllipsisVertical = createLucideIcon("ellipsis-vertical", __iconNode$B);
+const ExternalLink = createLucideIcon("external-link", __iconNode$B);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14542,11 +14565,13 @@ const EllipsisVertical = createLucideIcon("ellipsis-vertical", __iconNode$B);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$A = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
-  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
+  ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", key: "1rqfz7" }],
+  ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4", key: "tnqrlb" }],
+  ["path", { d: "M10 9H8", key: "b1mrlr" }],
+  ["path", { d: "M16 13H8", key: "t4e002" }],
+  ["path", { d: "M16 17H8", key: "z1uh3a" }]
 ];
-const ExternalLink = createLucideIcon("external-link", __iconNode$A);
+const FileText = createLucideIcon("file-text", __iconNode$A);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14554,13 +14579,11 @@ const ExternalLink = createLucideIcon("external-link", __iconNode$A);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$z = [
-  ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", key: "1rqfz7" }],
-  ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4", key: "tnqrlb" }],
-  ["path", { d: "M10 9H8", key: "b1mrlr" }],
-  ["path", { d: "M16 13H8", key: "t4e002" }],
-  ["path", { d: "M16 17H8", key: "z1uh3a" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20", key: "13o1zl" }],
+  ["path", { d: "M2 12h20", key: "9i4pu4" }]
 ];
-const FileText = createLucideIcon("file-text", __iconNode$z);
+const Globe = createLucideIcon("globe", __iconNode$z);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14568,11 +14591,11 @@ const FileText = createLucideIcon("file-text", __iconNode$z);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$y = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20", key: "13o1zl" }],
-  ["path", { d: "M2 12h20", key: "9i4pu4" }]
+  ["path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", key: "1357e3" }],
+  ["path", { d: "M3 3v5h5", key: "1xhq8a" }],
+  ["path", { d: "M12 7v5l4 2", key: "1fdv2h" }]
 ];
-const Globe = createLucideIcon("globe", __iconNode$y);
+const History = createLucideIcon("history", __iconNode$y);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14580,11 +14603,11 @@ const Globe = createLucideIcon("globe", __iconNode$y);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$x = [
-  ["path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", key: "1357e3" }],
-  ["path", { d: "M3 3v5h5", key: "1xhq8a" }],
-  ["path", { d: "M12 7v5l4 2", key: "1fdv2h" }]
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
+  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
+  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
 ];
-const History = createLucideIcon("history", __iconNode$x);
+const Image$1 = createLucideIcon("image", __iconNode$x);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14592,11 +14615,11 @@ const History = createLucideIcon("history", __iconNode$x);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$w = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
-  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
-  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "M12 16v-4", key: "1dtifu" }],
+  ["path", { d: "M12 8h.01", key: "e9boi3" }]
 ];
-const Image$1 = createLucideIcon("image", __iconNode$w);
+const Info$1 = createLucideIcon("info", __iconNode$w);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14604,11 +14627,11 @@ const Image$1 = createLucideIcon("image", __iconNode$w);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$v = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M12 16v-4", key: "1dtifu" }],
-  ["path", { d: "M12 8h.01", key: "e9boi3" }]
+  ["path", { d: "m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4", key: "g0fldk" }],
+  ["path", { d: "m21 2-9.6 9.6", key: "1j0ho8" }],
+  ["circle", { cx: "7.5", cy: "15.5", r: "5.5", key: "yqb3hr" }]
 ];
-const Info$1 = createLucideIcon("info", __iconNode$v);
+const Key = createLucideIcon("key", __iconNode$v);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14616,18 +14639,6 @@ const Info$1 = createLucideIcon("info", __iconNode$v);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$u = [
-  ["path", { d: "m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4", key: "g0fldk" }],
-  ["path", { d: "m21 2-9.6 9.6", key: "1j0ho8" }],
-  ["circle", { cx: "7.5", cy: "15.5", r: "5.5", key: "yqb3hr" }]
-];
-const Key = createLucideIcon("key", __iconNode$u);
-/**
- * @license lucide-react v0.546.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$t = [
   ["path", { d: "M10 8h.01", key: "1r9ogq" }],
   ["path", { d: "M12 12h.01", key: "1mp3jc" }],
   ["path", { d: "M14 8h.01", key: "1primd" }],
@@ -14638,15 +14649,28 @@ const __iconNode$t = [
   ["path", { d: "M8 12h.01", key: "czm47f" }],
   ["rect", { width: "20", height: "16", x: "2", y: "4", rx: "2", key: "18n3k1" }]
 ];
-const Keyboard = createLucideIcon("keyboard", __iconNode$t);
+const Keyboard = createLucideIcon("keyboard", __iconNode$u);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$s = [["path", { d: "M21 12a9 9 0 1 1-6.219-8.56", key: "13zald" }]];
-const LoaderCircle = createLucideIcon("loader-circle", __iconNode$s);
+const __iconNode$t = [["path", { d: "M21 12a9 9 0 1 1-6.219-8.56", key: "13zald" }]];
+const LoaderCircle = createLucideIcon("loader-circle", __iconNode$t);
+/**
+ * @license lucide-react v0.546.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$s = [
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "m21 3-7 7", key: "1l2asr" }],
+  ["path", { d: "m3 21 7-7", key: "tjx5ai" }],
+  ["path", { d: "M9 21H3v-6", key: "wtvkvv" }]
+];
+const Maximize2 = createLucideIcon("maximize-2", __iconNode$s);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14654,12 +14678,11 @@ const LoaderCircle = createLucideIcon("loader-circle", __iconNode$s);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$r = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "m21 3-7 7", key: "1l2asr" }],
-  ["path", { d: "m3 21 7-7", key: "tjx5ai" }],
-  ["path", { d: "M9 21H3v-6", key: "wtvkvv" }]
+  ["path", { d: "M4 5h16", key: "1tepv9" }],
+  ["path", { d: "M4 12h16", key: "1lakjw" }],
+  ["path", { d: "M4 19h16", key: "1djgab" }]
 ];
-const Maximize2 = createLucideIcon("maximize-2", __iconNode$r);
+const Menu = createLucideIcon("menu", __iconNode$r);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14667,18 +14690,6 @@ const Maximize2 = createLucideIcon("maximize-2", __iconNode$r);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$q = [
-  ["path", { d: "M4 5h16", key: "1tepv9" }],
-  ["path", { d: "M4 12h16", key: "1lakjw" }],
-  ["path", { d: "M4 19h16", key: "1djgab" }]
-];
-const Menu = createLucideIcon("menu", __iconNode$q);
-/**
- * @license lucide-react v0.546.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$p = [
   [
     "path",
     {
@@ -14687,7 +14698,19 @@ const __iconNode$p = [
     }
   ]
 ];
-const MessageSquare = createLucideIcon("message-square", __iconNode$p);
+const MessageSquare = createLucideIcon("message-square", __iconNode$q);
+/**
+ * @license lucide-react v0.546.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$p = [
+  ["path", { d: "M12 19v3", key: "npa21l" }],
+  ["path", { d: "M19 10v2a7 7 0 0 1-14 0v-2", key: "1vc78b" }],
+  ["rect", { x: "9", y: "2", width: "6", height: "13", rx: "3", key: "s6n7sd" }]
+];
+const Mic = createLucideIcon("mic", __iconNode$p);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14695,11 +14718,13 @@ const MessageSquare = createLucideIcon("message-square", __iconNode$p);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$o = [
-  ["path", { d: "M12 19v3", key: "npa21l" }],
-  ["path", { d: "M19 10v2a7 7 0 0 1-14 0v-2", key: "1vc78b" }],
-  ["rect", { x: "9", y: "2", width: "6", height: "13", rx: "3", key: "s6n7sd" }]
+  ["path", { d: "m9 10 3-3 3 3", key: "11gsxs" }],
+  ["path", { d: "M12 13V7", key: "h0r20n" }],
+  ["rect", { width: "20", height: "14", x: "2", y: "3", rx: "2", key: "48i651" }],
+  ["path", { d: "M12 17v4", key: "1riwvh" }],
+  ["path", { d: "M8 21h8", key: "1ev6f3" }]
 ];
-const Mic = createLucideIcon("mic", __iconNode$o);
+const MonitorUp = createLucideIcon("monitor-up", __iconNode$o);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14707,13 +14732,15 @@ const Mic = createLucideIcon("mic", __iconNode$o);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$n = [
-  ["path", { d: "m9 10 3-3 3 3", key: "11gsxs" }],
-  ["path", { d: "M12 13V7", key: "h0r20n" }],
-  ["rect", { width: "20", height: "14", x: "2", y: "3", rx: "2", key: "48i651" }],
-  ["path", { d: "M12 17v4", key: "1riwvh" }],
-  ["path", { d: "M8 21h8", key: "1ev6f3" }]
+  [
+    "path",
+    {
+      d: "M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401",
+      key: "kfwtm"
+    }
+  ]
 ];
-const MonitorUp = createLucideIcon("monitor-up", __iconNode$n);
+const Moon = createLucideIcon("moon", __iconNode$n);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14724,12 +14751,12 @@ const __iconNode$m = [
   [
     "path",
     {
-      d: "M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401",
-      key: "kfwtm"
+      d: "m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551",
+      key: "1miecu"
     }
   ]
 ];
-const Moon = createLucideIcon("moon", __iconNode$m);
+const Paperclip = createLucideIcon("paperclip", __iconNode$m);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -14737,15 +14764,10 @@ const Moon = createLucideIcon("moon", __iconNode$m);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$l = [
-  [
-    "path",
-    {
-      d: "m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551",
-      key: "1miecu"
-    }
-  ]
+  ["rect", { x: "14", y: "3", width: "5", height: "18", rx: "1", key: "kaeet6" }],
+  ["rect", { x: "5", y: "3", width: "5", height: "18", rx: "1", key: "1wsw3u" }]
 ];
-const Paperclip = createLucideIcon("paperclip", __iconNode$l);
+const Pause = createLucideIcon("pause", __iconNode$l);
 /**
  * @license lucide-react v0.546.0 - ISC
  *
@@ -23745,7 +23767,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-DqjqmT57.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-CTnl7lcB.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -24287,14 +24309,43 @@ const DEFAULT_AGENT_PERMISSIONS = {
   autoCall: true,
   autoPlayYouTube: true,
   whatsappAutoReply: false,
+  whatsappAutoReplyPausedUntil: 0,
   whatsappReplyStyle: ""
 };
+function getWhatsAppAutoReplyState(perms) {
+  const enabled = Boolean(perms.whatsappAutoReply);
+  const rawUntil = Number(perms.whatsappAutoReplyPausedUntil || 0);
+  const now2 = Date.now();
+  const paused = enabled && rawUntil > now2;
+  return {
+    enabled,
+    paused,
+    active: enabled && !paused,
+    pausedUntil: paused ? rawUntil : 0,
+    remainingMs: paused ? Math.max(0, rawUntil - now2) : 0
+  };
+}
+function formatRemainingPauseDuration(remainingMs) {
+  const totalMinutes = Math.max(1, Math.ceil(remainingMs / 6e4));
+  if (totalMinutes < 60) {
+    return totalMinutes === 1 ? "umunota 1" : `iminota ${totalMinutes}`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  const hourStr = hours === 1 ? "isaha 1" : `amasaha ${hours}`;
+  if (mins === 0) return hourStr;
+  return `${hourStr} n'iminota ${mins}`;
+}
 function getAgentPermissions() {
   if (typeof window === "undefined") return DEFAULT_AGENT_PERMISSIONS;
   try {
     const raw = window.localStorage.getItem(AGENT_PERMISSIONS_STORAGE_KEY);
     if (!raw) return DEFAULT_AGENT_PERMISSIONS;
-    return { ...DEFAULT_AGENT_PERMISSIONS, ...JSON.parse(raw) };
+    const parsed = { ...DEFAULT_AGENT_PERMISSIONS, ...JSON.parse(raw) };
+    if (!parsed.whatsappAutoReply || !parsed.whatsappAutoReplyPausedUntil || parsed.whatsappAutoReplyPausedUntil <= Date.now()) {
+      parsed.whatsappAutoReplyPausedUntil = 0;
+    }
+    return parsed;
   } catch {
     return DEFAULT_AGENT_PERMISSIONS;
   }
@@ -24302,23 +24353,31 @@ function getAgentPermissions() {
 function saveAgentPermissions(perms) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(AGENT_PERMISSIONS_STORAGE_KEY, JSON.stringify(perms));
+    const normalizedPausedUntil = perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now() ? perms.whatsappAutoReplyPausedUntil : 0;
+    const normalizedPerms = {
+      ...perms,
+      whatsappAutoReplyPausedUntil: normalizedPausedUntil
+    };
+    window.localStorage.setItem(AGENT_PERMISSIONS_STORAGE_KEY, JSON.stringify(normalizedPerms));
     const userName = window.localStorage.getItem("kevin_user_name") || window.localStorage.getItem("kevin_ai_user_name") || "Kevin";
     const backendBaseUrl = isCapacitorApkRuntime() ? PRODUCTION_BACKEND_URL : window.location.origin;
     const bridge = window.KevinAgentBridge;
     if (bridge == null ? void 0 : bridge.setAgentConfig) {
       bridge.setAgentConfig(
-        Boolean(perms.autoSend),
-        Boolean(perms.whatsappAutoReply),
-        perms.whatsappReplyStyle || "",
+        Boolean(normalizedPerms.autoSend),
+        Boolean(normalizedPerms.whatsappAutoReply),
+        normalizedPerms.whatsappReplyStyle || "",
         userName,
         backendBaseUrl
       );
     }
+    if (bridge == null ? void 0 : bridge.setWhatsAppAutoReplyPause) {
+      bridge.setWhatsAppAutoReplyPause(Number(normalizedPausedUntil));
+    }
     if (bridge == null ? void 0 : bridge.setAgentApiKeys) {
       bridge.setAgentApiKeys(JSON.stringify(getGeminiApiKeysArray()));
     }
-    window.dispatchEvent(new CustomEvent("kevinAgentPermissionsUpdated", { detail: perms }));
+    window.dispatchEvent(new CustomEvent("kevinAgentPermissionsUpdated", { detail: normalizedPerms }));
   } catch (error) {
     console.error("Unable to save Kevin AI agent permissions.", error);
   }
@@ -24783,7 +24842,7 @@ function saveChatHistory(history) {
   }
 }
 function runDeviceAction(action, forceExecute = false) {
-  var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k;
+  var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k, _l;
   const bridge = window.KevinAgentBridge;
   const perms = getAgentPermissions();
   if (action.name === "open_camera") {
@@ -24897,14 +24956,18 @@ function runDeviceAction(action, forceExecute = false) {
     return true;
   }
   if (action.name === "configure_whatsapp_autoreply") {
-    const enabled = ((_i = action.args) == null ? void 0 : _i.enabled) !== false;
-    const replyStyle = typeof ((_j = action.args) == null ? void 0 : _j.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
+    const pauseMinutes = Number(((_i = action.args) == null ? void 0 : _i.pause_minutes) || 0);
+    const hasPause = Number.isFinite(pauseMinutes) && pauseMinutes > 0;
+    const enabled = hasPause ? true : ((_j = action.args) == null ? void 0 : _j.enabled) !== false;
+    const pausedUntil = hasPause ? Date.now() + Math.round(pauseMinutes * 6e4) : 0;
+    const replyStyle = typeof ((_k = action.args) == null ? void 0 : _k.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
     saveAgentPermissions({
       ...perms,
       whatsappAutoReply: enabled,
+      whatsappAutoReplyPausedUntil: pausedUntil,
       whatsappReplyStyle: replyStyle
     });
-    if (enabled && (bridge == null ? void 0 : bridge.scanAndReplyWhatsAppChats)) {
+    if (enabled && !hasPause && (bridge == null ? void 0 : bridge.scanAndReplyWhatsAppChats)) {
       try {
         const scanRaw = bridge.scanAndReplyWhatsAppChats();
         action.args = { ...action.args, scanResult: JSON.parse(scanRaw || "{}") };
@@ -24915,11 +24978,12 @@ function runDeviceAction(action, forceExecute = false) {
     return true;
   }
   if (action.name === "scan_whatsapp_chats") {
-    const replyStyle = typeof ((_k = action.args) == null ? void 0 : _k.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
-    if (!perms.whatsappAutoReply || replyStyle !== perms.whatsappReplyStyle) {
+    const replyStyle = typeof ((_l = action.args) == null ? void 0 : _l.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
+    if (!perms.whatsappAutoReply || perms.whatsappAutoReplyPausedUntil || replyStyle !== perms.whatsappReplyStyle) {
       saveAgentPermissions({
         ...perms,
         whatsappAutoReply: true,
+        whatsappAutoReplyPausedUntil: 0,
         whatsappReplyStyle: replyStyle
       });
     }
@@ -25076,8 +25140,10 @@ function executeDeviceAction(name2, args) {
     return actionObj;
   }
   if (name2 === "configure_whatsapp_autoreply") {
-    const enabled = args.enabled !== false;
-    label = enabled ? "Fungura WhatsApp Auto-Reply" : "Funga WhatsApp Auto-Reply";
+    const pauseMinutes = Number(args.pause_minutes || 0);
+    const hasPause = Number.isFinite(pauseMinutes) && pauseMinutes > 0;
+    const enabled = hasPause ? true : args.enabled !== false;
+    label = hasPause ? `Hagarika WhatsApp Auto-Reply (${formatRemainingPauseDuration(pauseMinutes * 6e4)})` : enabled ? "Fungura WhatsApp Auto-Reply" : "Funga WhatsApp Auto-Reply";
     const actionObj = {
       name: name2,
       args,
@@ -25101,7 +25167,7 @@ function executeDeviceAction(name2, args) {
   return null;
 }
 function actionConfirmation(action) {
-  var _a2, _b2;
+  var _a2, _b2, _c;
   if (action.name === "open_youtube") {
     return `▶ Yamaze gufungura YouTube ngo icurange: **${action.videoTitle || "Indirimbo"}** 🎶✨`;
   }
@@ -25122,11 +25188,16 @@ function actionConfirmation(action) {
     return `💚 WhatsApp ifunguwe kuri **${action.contactName || action.phoneNumber}**!`;
   }
   if (action.name === "configure_whatsapp_autoreply") {
-    const enabled = ((_a2 = action.args) == null ? void 0 : _a2.enabled) !== false;
-    return enabled ? `💬 WhatsApp Auto-Reply yafunguwe! Kevin AI irahita isubiza ubutumwa bwinjiye kuri WhatsApp.` : `🔕 WhatsApp Auto-Reply yahagaritswe.`;
+    const pauseMinutes = Number(((_a2 = action.args) == null ? void 0 : _a2.pause_minutes) || 0);
+    if (Number.isFinite(pauseMinutes) && pauseMinutes > 0) {
+      const durationStr = formatRemainingPauseDuration(pauseMinutes * 6e4);
+      return `⏸️ WhatsApp Auto-Reply yahagaritsweho **${durationStr}**! Nta butumwa izasubiza kugeza icyo gihe kirangiye cyangwa uyisubukuye.`;
+    }
+    const enabled = ((_b2 = action.args) == null ? void 0 : _b2.enabled) !== false;
+    return enabled ? `💬 WhatsApp Auto-Reply yafunguwe! Kevin AI irahita isubiza ubutumwa bwinjiye kuri WhatsApp.` : `🔕 WhatsApp Auto-Reply yafunzwe burundu kugeza igihe uzayifungurira.`;
   }
   if (action.name === "scan_whatsapp_chats") {
-    const sr = ((_b2 = action.args) == null ? void 0 : _b2.scanResult) || {};
+    const sr = ((_c = action.args) == null ? void 0 : _c.scanResult) || {};
     if (action.status === "needs_permission") {
       return `⚠️ Kugira ngo Kevin AI irebe chat za WhatsApp zose, emera **WA Notif** cyangwa **Accessibility** muri **Kevin Permission**.`;
     }
@@ -25400,11 +25471,12 @@ const APK_DEVICE_ACTION_DECLARATIONS = [
   },
   {
     name: "configure_whatsapp_autoreply",
-    description: "Enable or disable automatic AI replying to incoming WhatsApp messages.",
+    description: "Enable, disable, or pause automatic AI replying to incoming WhatsApp messages for a specific number of minutes.",
     parameters: {
       type: "OBJECT",
       properties: {
         enabled: { type: "BOOLEAN", description: "Whether WhatsApp auto-reply should be enabled." },
+        pause_minutes: { type: "NUMBER", description: "Optional number of minutes to pause WhatsApp auto-reply (e.g. 15, 30, 60, 120, 480). Omit or 0 to turn completely off or immediately resume." },
         reply_style: { type: "STRING", description: "Optional reply instructions." }
       },
       required: ["enabled"]
@@ -25661,7 +25733,7 @@ ${customInstructions}` : "",
 The user sent a voice note/audio message (often spoken in Kinyarwanda, or mixed Kinyarwanda/French/English). Listen carefully to exact Kinyarwanda phonetics, prefixes, and Rwandan names without mishearing Kinyarwanda speech as unrelated English words.
 CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, greeting, or if the audio is noisy/unclear, NEVER guess or trigger an action — reply naturally in Kinyarwanda or ask them to repeat clearly.` : "",
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(" | ")}]` : "",
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext
   ].filter(Boolean).join("\n\n");
 }
@@ -37050,7 +37122,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-DeDh3t5y.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-BNh7sptX.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -102910,7 +102982,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-BZERvSZu.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-sXaNwuIk.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -103591,12 +103663,39 @@ function App() {
   const [waTestSender, setWaTestSender] = reactExports.useState("Aline");
   const [waTestMessage, setWaTestMessage] = reactExports.useState("");
   const [isTestingWaReply, setIsTestingWaReply] = reactExports.useState(false);
+  const [customPauseMinutes, setCustomPauseMinutes] = reactExports.useState("");
+  const [pauseNowTick, setPauseNowTick] = reactExports.useState(() => Date.now());
   const [isTranscribingSTT, setIsTranscribingSTT] = reactExports.useState(false);
   const vcfInputRef = reactExports.useRef(null);
   const autoSyncedContactsRef = reactExports.useRef(false);
   reactExports.useEffect(() => {
     saveAgentPermissions(agentPermissions);
   }, []);
+  reactExports.useEffect(() => {
+    const pausedUntil = Number(agentPermissions.whatsappAutoReplyPausedUntil || 0);
+    if (!agentPermissions.whatsappAutoReply || pausedUntil <= Date.now()) {
+      return;
+    }
+    const remaining = pausedUntil - Date.now();
+    const intervalId = setInterval(() => {
+      setPauseNowTick(Date.now());
+    }, 1e4);
+    const expiryTimer = setTimeout(() => {
+      setPauseNowTick(Date.now());
+      const latest = getAgentPermissions();
+      if (latest.whatsappAutoReply && Number(latest.whatsappAutoReplyPausedUntil || 0) <= Date.now()) {
+        const resumed = { ...latest, whatsappAutoReplyPausedUntil: 0 };
+        setAgentPermissions(resumed);
+        saveAgentPermissions(resumed);
+        setNativeAgentStatus(getNativeAgentStatus());
+        showToastMessage("💬 Igihe cyo guhagarika cyarangiye — WhatsApp Auto-Reply yongeye gutangira!");
+      }
+    }, Math.min(remaining + 120, 2147483647));
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(expiryTimer);
+    };
+  }, [agentPermissions.whatsappAutoReply, agentPermissions.whatsappAutoReplyPausedUntil]);
   reactExports.useEffect(() => {
     if (!nativeAgentStatus.isAndroid || !nativeAgentStatus.hasContactsPermission || autoSyncedContactsRef.current) {
       return;
@@ -103663,7 +103762,35 @@ function App() {
     const next = { ...agentPermissions, ...patch2 };
     setAgentPermissions(next);
     saveAgentPermissions(next);
+    setPauseNowTick(Date.now());
     setNativeAgentStatus(getNativeAgentStatus());
+  };
+  const waAutoReplyState = (() => {
+    return getWhatsAppAutoReplyState(agentPermissions);
+  })();
+  const pauseWhatsAppAutoReplyForMinutes = (minutes) => {
+    const cleanMins = Math.max(1, Math.round(minutes));
+    const pausedUntil = Date.now() + cleanMins * 6e4;
+    updateAgentPerms({
+      whatsappAutoReply: true,
+      whatsappAutoReplyPausedUntil: pausedUntil
+    });
+    const resumeAt = new Date(pausedUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    showToastMessage(`⏸️ WhatsApp Auto-Reply yahagaritsweho ${formatRemainingPauseDuration(cleanMins * 6e4)} (izongera saa ${resumeAt}).`);
+  };
+  const stopWhatsAppAutoReplyCompletely = () => {
+    updateAgentPerms({
+      whatsappAutoReply: false,
+      whatsappAutoReplyPausedUntil: 0
+    });
+    showToastMessage("🔕 WhatsApp Auto-Reply yafunzwe kugeza igihe uzayifungurira.");
+  };
+  const resumeWhatsAppAutoReplyNow = () => {
+    updateAgentPerms({
+      whatsappAutoReply: true,
+      whatsappAutoReplyPausedUntil: 0
+    });
+    showToastMessage("💬 WhatsApp Auto-Reply yongeye gukora!");
   };
   const handleAddContact = () => {
     const cleanName = newContactName.trim();
@@ -104684,10 +104811,67 @@ Click the **${docName}** file below to download and view the complete document.`
                       /* @__PURE__ */ jsxRuntimeExports.jsx(Bot, { size: 16, className: "text-[#00a884]" }),
                       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Kevin Permission" })
                     ] }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `text-[10px] font-bold px-1.5 py-0.5 rounded-full ${agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "text-gray-400 dark:text-gray-500"}`, children: agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? "ACTIVE" : "SETUP" })
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `text-[10px] font-bold px-1.5 py-0.5 rounded-full ${waAutoReplyState.paused ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : agentPermissions.autoSend || waAutoReplyState.active ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "text-gray-400 dark:text-gray-500"}`, children: waAutoReplyState.paused ? "PAUSED" : agentPermissions.autoSend || waAutoReplyState.active ? "ACTIVE" : "SETUP" })
                   ]
                 }
               ),
+              agentPermissions.whatsappAutoReply && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mx-1 my-1 px-2.5 py-2 rounded-xl bg-gray-100/90 dark:bg-[#202c33] border border-gray-200 dark:border-[#2f3b43] space-y-1.5", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center justify-between gap-2 text-[11px] font-bold", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: waAutoReplyState.paused ? "text-amber-600 dark:text-amber-400" : "text-[#075E54] dark:text-[#00FF88]", children: waAutoReplyState.paused ? `⏸️ WA Auto-Reply yahagaritswe (${formatRemainingPauseDuration(waAutoReplyState.remainingMs)})` : "💬 WA Auto-Reply irakora" }) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5", children: [
+                  waAutoReplyState.paused ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => {
+                        resumeWhatsAppAutoReplyNow();
+                        setMenuOpen(false);
+                      },
+                      className: "flex-1 py-1 px-2 rounded-lg bg-[#00a884] hover:bg-[#008f6f] text-white text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer",
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { size: 10 }),
+                        " Subukura"
+                      ]
+                    }
+                  ) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => {
+                          pauseWhatsAppAutoReplyForMinutes(30);
+                          setMenuOpen(false);
+                        },
+                        className: "flex-1 py-1 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 text-[10px] font-bold cursor-pointer",
+                        children: "⏸️ 30m"
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => {
+                          pauseWhatsAppAutoReplyForMinutes(60);
+                          setMenuOpen(false);
+                        },
+                        className: "flex-1 py-1 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 text-[10px] font-bold cursor-pointer",
+                        children: "⏸️ 1h"
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => {
+                        stopWhatsAppAutoReplyCompletely();
+                        setMenuOpen(false);
+                      },
+                      className: "flex-1 py-1 px-2 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-600 dark:text-red-400 text-[10px] font-bold cursor-pointer",
+                      children: "⏹️ Funga"
+                    }
+                  )
+                ] })
+              ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200", onClick: () => {
                 setShowAbout(true);
                 setMenuOpen(false);
@@ -106245,7 +106429,10 @@ Click the **${docName}** file below to download and view the complete document.`
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2.5", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-900 dark:text-[#e9edef]", children: "💬 WhatsApp Auto-Reply Agent" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-900 dark:text-[#e9edef]", children: "💬 WhatsApp Auto-Reply Agent" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `text-[10px] font-bold px-2 py-0.5 rounded-md ${waAutoReplyState.active ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : waAutoReplyState.paused ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300"}`, children: waAutoReplyState.active ? "Irakora" : waAutoReplyState.paused ? `Yahagaritswe (${formatRemainingPauseDuration(waAutoReplyState.remainingMs)})` : "Irafunze" })
+                    ] }),
                     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0]", children: "Kevin AI ajya areba chat za WhatsApp zose akagusubiriza ubutumwa butarasubizwa." })
                   ] }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -106254,11 +106441,120 @@ Click the **${docName}** file below to download and view the complete document.`
                       type: "button",
                       role: "switch",
                       "aria-checked": agentPermissions.whatsappAutoReply,
-                      onClick: () => updateAgentPerms({ whatsappAutoReply: !agentPermissions.whatsappAutoReply }),
-                      className: `w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${agentPermissions.whatsappAutoReply ? "bg-[#00a884]" : "bg-gray-300 dark:bg-gray-700"}`,
+                      onClick: () => {
+                        if (agentPermissions.whatsappAutoReply) {
+                          stopWhatsAppAutoReplyCompletely();
+                        } else {
+                          resumeWhatsAppAutoReplyNow();
+                        }
+                      },
+                      className: `w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${waAutoReplyState.active ? "bg-[#00a884]" : waAutoReplyState.paused ? "bg-amber-500" : "bg-gray-300 dark:bg-gray-700"}`,
                       children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.whatsappAutoReply ? "translate-x-5" : "translate-x-0"}` })
                     }
                   )
+                ] }),
+                waAutoReplyState.paused && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-2 text-xs font-semibold text-amber-800 dark:text-amber-200", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1.5", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(Pause, { size: 13 }),
+                      "Yahagaritsweho ",
+                      formatRemainingPauseDuration(waAutoReplyState.remainingMs)
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-[11px] opacity-90", children: [
+                      "Izongera saa ",
+                      new Date(waAutoReplyState.pausedUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                    ] })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: resumeWhatsAppAutoReplyNow,
+                        className: "flex-1 py-1.5 px-3 rounded-lg bg-[#00a884] hover:bg-[#008f6f] text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer",
+                        children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { size: 12 }),
+                          " Subukura Ubu"
+                        ]
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: stopWhatsAppAutoReplyCompletely,
+                        className: "py-1.5 px-3 rounded-lg bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-600 dark:text-red-300 text-xs font-bold cursor-pointer",
+                        children: "Funga Burundu"
+                      }
+                    )
+                  ] })
+                ] }),
+                agentPermissions.whatsappAutoReply && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-2.5 rounded-lg bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#2f3b43] space-y-2", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-[11px] font-bold text-gray-700 dark:text-gray-200 flex items-center gap-1.5", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(Clock, { size: 12, className: "text-amber-500" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Hagarika gusubiza mu gihe runaka (Pause Auto-Reply):" })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-3 gap-1.5", children: [
+                    [
+                      { label: "15 min", mins: 15 },
+                      { label: "30 min", mins: 30 },
+                      { label: "1 isaha", mins: 60 },
+                      { label: "2 amasaha", mins: 120 },
+                      { label: "8 amasaha", mins: 480 }
+                    ].map((preset) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => pauseWhatsAppAutoReplyForMinutes(preset.mins),
+                        className: "py-1.5 px-2 rounded-lg bg-amber-500/12 hover:bg-amber-500/22 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-[11px] font-bold cursor-pointer transition-colors",
+                        children: [
+                          "⏸️ ",
+                          preset.label
+                        ]
+                      },
+                      preset.mins
+                    )),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: stopWhatsAppAutoReplyCompletely,
+                        className: "py-1.5 px-2 rounded-lg bg-red-500/12 hover:bg-red-500/22 border border-red-500/30 text-red-700 dark:text-red-300 text-[11px] font-bold cursor-pointer transition-colors",
+                        children: "⏹️ Funga"
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5 pt-0.5", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "input",
+                      {
+                        type: "number",
+                        min: 1,
+                        max: 1440,
+                        value: customPauseMinutes,
+                        onChange: (e) => setCustomPauseMinutes(e.target.value),
+                        placeholder: "Ibindi (iminota, urugero 45)",
+                        className: "flex-1 min-w-0 bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs"
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => {
+                          const mins = parseInt(customPauseMinutes, 10);
+                          if (!Number.isFinite(mins) || mins < 1) {
+                            showToastMessage("Shyiramo umubare w'iminota (urugero 15 cyangwa 45).");
+                            return;
+                          }
+                          pauseWhatsAppAutoReplyForMinutes(Math.min(1440, mins));
+                          setCustomPauseMinutes("");
+                        },
+                        className: "py-1.5 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shrink-0 cursor-pointer",
+                        children: "Hagarika"
+                      }
+                    )
+                  ] })
                 ] }),
                 nativeAgentStatus.isAndroid && /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "button",
@@ -106266,8 +106562,8 @@ Click the **${docName}** file below to download and view the complete document.`
                     type: "button",
                     onClick: () => {
                       var _a3, _b3;
-                      if (!agentPermissions.whatsappAutoReply) {
-                        updateAgentPerms({ whatsappAutoReply: true });
+                      if (!waAutoReplyState.active) {
+                        resumeWhatsAppAutoReplyNow();
                       }
                       const raw = (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.scanAndReplyWhatsAppChats) == null ? void 0 : _b3.call(_a3);
                       try {

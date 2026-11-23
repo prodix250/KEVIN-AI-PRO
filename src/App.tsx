@@ -4,11 +4,11 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown } from 'lucide-react';
+import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown, Pause, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
@@ -583,6 +583,8 @@ export default function App() {
   const [waTestSender, setWaTestSender] = useState('Aline');
   const [waTestMessage, setWaTestMessage] = useState('');
   const [isTestingWaReply, setIsTestingWaReply] = useState(false);
+  const [customPauseMinutes, setCustomPauseMinutes] = useState('');
+  const [pauseNowTick, setPauseNowTick] = useState(() => Date.now());
   const [isTranscribingSTT, setIsTranscribingSTT] = useState(false);
   const vcfInputRef = useRef<HTMLInputElement | null>(null);
   const autoSyncedContactsRef = useRef(false);
@@ -590,6 +592,33 @@ export default function App() {
   useEffect(() => {
     saveAgentPermissions(agentPermissions);
   }, []);
+
+  useEffect(() => {
+    const pausedUntil = Number(agentPermissions.whatsappAutoReplyPausedUntil || 0);
+    if (!agentPermissions.whatsappAutoReply || pausedUntil <= Date.now()) {
+      return;
+    }
+    const remaining = pausedUntil - Date.now();
+    const intervalId = setInterval(() => {
+      setPauseNowTick(Date.now());
+    }, 10_000);
+    const expiryTimer = setTimeout(() => {
+      setPauseNowTick(Date.now());
+      const latest = getAgentPermissions();
+      if (latest.whatsappAutoReply && Number(latest.whatsappAutoReplyPausedUntil || 0) <= Date.now()) {
+        const resumed = { ...latest, whatsappAutoReplyPausedUntil: 0 };
+        setAgentPermissions(resumed);
+        saveAgentPermissions(resumed);
+        setNativeAgentStatus(getNativeAgentStatus());
+        showToastMessage('💬 Igihe cyo guhagarika cyarangiye — WhatsApp Auto-Reply yongeye gutangira!');
+      }
+    }, Math.min(remaining + 120, 2_147_483_647));
+
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(expiryTimer);
+    };
+  }, [agentPermissions.whatsappAutoReply, agentPermissions.whatsappAutoReplyPausedUntil]);
 
   useEffect(() => {
     if (!nativeAgentStatus.isAndroid || !nativeAgentStatus.hasContactsPermission || autoSyncedContactsRef.current) {
@@ -662,7 +691,40 @@ export default function App() {
     const next = { ...agentPermissions, ...patch };
     setAgentPermissions(next);
     saveAgentPermissions(next);
+    setPauseNowTick(Date.now());
     setNativeAgentStatus(getNativeAgentStatus());
+  };
+
+  const waAutoReplyState = (() => {
+    void pauseNowTick;
+    return getWhatsAppAutoReplyState(agentPermissions);
+  })();
+
+  const pauseWhatsAppAutoReplyForMinutes = (minutes: number) => {
+    const cleanMins = Math.max(1, Math.round(minutes));
+    const pausedUntil = Date.now() + cleanMins * 60_000;
+    updateAgentPerms({
+      whatsappAutoReply: true,
+      whatsappAutoReplyPausedUntil: pausedUntil,
+    });
+    const resumeAt = new Date(pausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    showToastMessage(`⏸️ WhatsApp Auto-Reply yahagaritsweho ${formatRemainingPauseDuration(cleanMins * 60_000)} (izongera saa ${resumeAt}).`);
+  };
+
+  const stopWhatsAppAutoReplyCompletely = () => {
+    updateAgentPerms({
+      whatsappAutoReply: false,
+      whatsappAutoReplyPausedUntil: 0,
+    });
+    showToastMessage('🔕 WhatsApp Auto-Reply yafunzwe kugeza igihe uzayifungurira.');
+  };
+
+  const resumeWhatsAppAutoReplyNow = () => {
+    updateAgentPerms({
+      whatsappAutoReply: true,
+      whatsappAutoReplyPausedUntil: 0,
+    });
+    showToastMessage('💬 WhatsApp Auto-Reply yongeye gukora!');
   };
 
   const handleAddContact = () => {
@@ -1825,13 +1887,65 @@ export default function App() {
                         <span>Kevin Permission</span>
                       </div>
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                        agentPermissions.autoSend || agentPermissions.whatsappAutoReply
-                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                          : 'text-gray-400 dark:text-gray-500'
+                        waAutoReplyState.paused
+                          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          : agentPermissions.autoSend || waAutoReplyState.active
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                            : 'text-gray-400 dark:text-gray-500'
                       }`}>
-                        {agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? 'ACTIVE' : 'SETUP'}
+                        {waAutoReplyState.paused
+                          ? 'PAUSED'
+                          : agentPermissions.autoSend || waAutoReplyState.active
+                            ? 'ACTIVE'
+                            : 'SETUP'}
                       </span>
                     </div>
+                    {agentPermissions.whatsappAutoReply && (
+                      <div className="mx-1 my-1 px-2.5 py-2 rounded-xl bg-gray-100/90 dark:bg-[#202c33] border border-gray-200 dark:border-[#2f3b43] space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 text-[11px] font-bold">
+                          <span className={waAutoReplyState.paused ? 'text-amber-600 dark:text-amber-400' : 'text-[#075E54] dark:text-[#00FF88]'}>
+                            {waAutoReplyState.paused
+                              ? `⏸️ WA Auto-Reply yahagaritswe (${formatRemainingPauseDuration(waAutoReplyState.remainingMs)})`
+                              : '💬 WA Auto-Reply irakora'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {waAutoReplyState.paused ? (
+                            <button
+                              type="button"
+                              onClick={() => { resumeWhatsAppAutoReplyNow(); setMenuOpen(false); }}
+                              className="flex-1 py-1 px-2 rounded-lg bg-[#00a884] hover:bg-[#008f6f] text-white text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              <Play size={10} /> Subukura
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => { pauseWhatsAppAutoReplyForMinutes(30); setMenuOpen(false); }}
+                                className="flex-1 py-1 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 text-[10px] font-bold cursor-pointer"
+                              >
+                                ⏸️ 30m
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { pauseWhatsAppAutoReplyForMinutes(60); setMenuOpen(false); }}
+                                className="flex-1 py-1 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 text-[10px] font-bold cursor-pointer"
+                              >
+                                ⏸️ 1h
+                              </button>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => { stopWhatsAppAutoReplyCompletely(); setMenuOpen(false); }}
+                            className="flex-1 py-1 px-2 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-600 dark:text-red-400 text-[10px] font-bold cursor-pointer"
+                          >
+                            ⏹️ Funga
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200" onClick={() => { setShowAbout(true); setMenuOpen(false); }}>
                       <Info size={16} className="text-blue-400" />
                       <span>About Kevin AI</span>
@@ -3436,7 +3550,22 @@ export default function App() {
                   <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2.5">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">💬 WhatsApp Auto-Reply Agent</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">💬 WhatsApp Auto-Reply Agent</p>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                            waAutoReplyState.active
+                              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                              : waAutoReplyState.paused
+                                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                          }`}>
+                            {waAutoReplyState.active
+                              ? 'Irakora'
+                              : waAutoReplyState.paused
+                                ? `Yahagaritswe (${formatRemainingPauseDuration(waAutoReplyState.remainingMs)})`
+                                : 'Irafunze'}
+                          </span>
+                        </div>
                         <p className="text-xs text-gray-500 dark:text-[#8696a0]">
                           Kevin AI ajya areba chat za WhatsApp zose akagusubiriza ubutumwa butarasubizwa.
                         </p>
@@ -3445,20 +3574,121 @@ export default function App() {
                         type="button"
                         role="switch"
                         aria-checked={agentPermissions.whatsappAutoReply}
-                        onClick={() => updateAgentPerms({ whatsappAutoReply: !agentPermissions.whatsappAutoReply })}
+                        onClick={() => {
+                          if (agentPermissions.whatsappAutoReply) {
+                            stopWhatsAppAutoReplyCompletely();
+                          } else {
+                            resumeWhatsAppAutoReplyNow();
+                          }
+                        }}
                         className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${
-                          agentPermissions.whatsappAutoReply ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-gray-700'
+                          waAutoReplyState.active
+                            ? 'bg-[#00a884]'
+                            : waAutoReplyState.paused
+                              ? 'bg-amber-500'
+                              : 'bg-gray-300 dark:bg-gray-700'
                         }`}
                       >
                         <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.whatsappAutoReply ? 'translate-x-5' : 'translate-x-0'}`} />
                       </button>
                     </div>
+
+                    {waAutoReplyState.paused && (
+                      <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2">
+                        <div className="flex items-center justify-between gap-2 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                          <span className="flex items-center gap-1.5">
+                            <Pause size={13} />
+                            Yahagaritsweho {formatRemainingPauseDuration(waAutoReplyState.remainingMs)}
+                          </span>
+                          <span className="text-[11px] opacity-90">
+                            Izongera saa {new Date(waAutoReplyState.pausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={resumeWhatsAppAutoReplyNow}
+                            className="flex-1 py-1.5 px-3 rounded-lg bg-[#00a884] hover:bg-[#008f6f] text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Play size={12} /> Subukura Ubu
+                          </button>
+                          <button
+                            type="button"
+                            onClick={stopWhatsAppAutoReplyCompletely}
+                            className="py-1.5 px-3 rounded-lg bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-600 dark:text-red-300 text-xs font-bold cursor-pointer"
+                          >
+                            Funga Burundu
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {agentPermissions.whatsappAutoReply && (
+                      <div className="p-2.5 rounded-lg bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#2f3b43] space-y-2">
+                        <p className="text-[11px] font-bold text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+                          <Clock size={12} className="text-amber-500" />
+                          <span>Hagarika gusubiza mu gihe runaka (Pause Auto-Reply):</span>
+                        </p>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {[
+                            { label: '15 min', mins: 15 },
+                            { label: '30 min', mins: 30 },
+                            { label: '1 isaha', mins: 60 },
+                            { label: '2 amasaha', mins: 120 },
+                            { label: '8 amasaha', mins: 480 },
+                          ].map((preset) => (
+                            <button
+                              key={preset.mins}
+                              type="button"
+                              onClick={() => pauseWhatsAppAutoReplyForMinutes(preset.mins)}
+                              className="py-1.5 px-2 rounded-lg bg-amber-500/12 hover:bg-amber-500/22 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-[11px] font-bold cursor-pointer transition-colors"
+                            >
+                              ⏸️ {preset.label}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={stopWhatsAppAutoReplyCompletely}
+                            className="py-1.5 px-2 rounded-lg bg-red-500/12 hover:bg-red-500/22 border border-red-500/30 text-red-700 dark:text-red-300 text-[11px] font-bold cursor-pointer transition-colors"
+                          >
+                            ⏹️ Funga
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          <input
+                            type="number"
+                            min={1}
+                            max={1440}
+                            value={customPauseMinutes}
+                            onChange={(e) => setCustomPauseMinutes(e.target.value)}
+                            placeholder="Ibindi (iminota, urugero 45)"
+                            className="flex-1 min-w-0 bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const mins = parseInt(customPauseMinutes, 10);
+                              if (!Number.isFinite(mins) || mins < 1) {
+                                showToastMessage('Shyiramo umubare w\'iminota (urugero 15 cyangwa 45).');
+                                return;
+                              }
+                              pauseWhatsAppAutoReplyForMinutes(Math.min(1440, mins));
+                              setCustomPauseMinutes('');
+                            }}
+                            className="py-1.5 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shrink-0 cursor-pointer"
+                          >
+                            Hagarika
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {nativeAgentStatus.isAndroid && (
                       <button
                         type="button"
                         onClick={() => {
-                          if (!agentPermissions.whatsappAutoReply) {
-                            updateAgentPerms({ whatsappAutoReply: true });
+                          if (!waAutoReplyState.active) {
+                            resumeWhatsAppAutoReplyNow();
                           }
                           const raw = (window as any).KevinAgentBridge?.scanAndReplyWhatsAppChats?.();
                           try {

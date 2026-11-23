@@ -15,6 +15,7 @@ export interface AgentPermissions {
   autoCall: boolean;
   autoPlayYouTube: boolean;
   whatsappAutoReply: boolean;
+  whatsappAutoReplyPausedUntil?: number;
   whatsappReplyStyle: string;
 }
 
@@ -29,6 +30,9 @@ export interface NativeAgentStatus {
   isDefaultAssistant?: boolean;
   autoSendEnabled?: boolean;
   whatsappAutoReplyEnabled?: boolean;
+  whatsappAutoReplyPausedUntil?: number;
+  whatsappAutoReplyPaused?: boolean;
+  whatsappAutoReplyCurrentlyActive?: boolean;
   wakeWordEnabled?: boolean;
   wakeWordActive?: boolean;
   wakeWordEngine?: string;
@@ -64,15 +68,52 @@ const DEFAULT_AGENT_PERMISSIONS: AgentPermissions = {
   autoCall: true,
   autoPlayYouTube: true,
   whatsappAutoReply: false,
+  whatsappAutoReplyPausedUntil: 0,
   whatsappReplyStyle: '',
 };
+
+export function getWhatsAppAutoReplyState(perms: AgentPermissions): {
+  enabled: boolean;
+  paused: boolean;
+  active: boolean;
+  pausedUntil: number;
+  remainingMs: number;
+} {
+  const enabled = Boolean(perms.whatsappAutoReply);
+  const rawUntil = Number(perms.whatsappAutoReplyPausedUntil || 0);
+  const now = Date.now();
+  const paused = enabled && rawUntil > now;
+  return {
+    enabled,
+    paused,
+    active: enabled && !paused,
+    pausedUntil: paused ? rawUntil : 0,
+    remainingMs: paused ? Math.max(0, rawUntil - now) : 0,
+  };
+}
+
+export function formatRemainingPauseDuration(remainingMs: number): string {
+  const totalMinutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  if (totalMinutes < 60) {
+    return totalMinutes === 1 ? 'umunota 1' : `iminota ${totalMinutes}`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  const hourStr = hours === 1 ? 'isaha 1' : `amasaha ${hours}`;
+  if (mins === 0) return hourStr;
+  return `${hourStr} n'iminota ${mins}`;
+}
 
 export function getAgentPermissions(): AgentPermissions {
   if (typeof window === 'undefined') return DEFAULT_AGENT_PERMISSIONS;
   try {
     const raw = window.localStorage.getItem(AGENT_PERMISSIONS_STORAGE_KEY);
     if (!raw) return DEFAULT_AGENT_PERMISSIONS;
-    return { ...DEFAULT_AGENT_PERMISSIONS, ...JSON.parse(raw) };
+    const parsed = { ...DEFAULT_AGENT_PERMISSIONS, ...JSON.parse(raw) } as AgentPermissions;
+    if (!parsed.whatsappAutoReply || !parsed.whatsappAutoReplyPausedUntil || parsed.whatsappAutoReplyPausedUntil <= Date.now()) {
+      parsed.whatsappAutoReplyPausedUntil = 0;
+    }
+    return parsed;
   } catch {
     return DEFAULT_AGENT_PERMISSIONS;
   }
@@ -81,7 +122,16 @@ export function getAgentPermissions(): AgentPermissions {
 export function saveAgentPermissions(perms: AgentPermissions): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(AGENT_PERMISSIONS_STORAGE_KEY, JSON.stringify(perms));
+    const normalizedPausedUntil = perms.whatsappAutoReply
+      && perms.whatsappAutoReplyPausedUntil
+      && perms.whatsappAutoReplyPausedUntil > Date.now()
+      ? perms.whatsappAutoReplyPausedUntil
+      : 0;
+    const normalizedPerms: AgentPermissions = {
+      ...perms,
+      whatsappAutoReplyPausedUntil: normalizedPausedUntil,
+    };
+    window.localStorage.setItem(AGENT_PERMISSIONS_STORAGE_KEY, JSON.stringify(normalizedPerms));
     const userName = window.localStorage.getItem('kevin_user_name')
       || window.localStorage.getItem('kevin_ai_user_name')
       || 'Kevin';
@@ -89,17 +139,20 @@ export function saveAgentPermissions(perms: AgentPermissions): void {
     const bridge = (window as any).KevinAgentBridge;
     if (bridge?.setAgentConfig) {
       bridge.setAgentConfig(
-        Boolean(perms.autoSend),
-        Boolean(perms.whatsappAutoReply),
-        perms.whatsappReplyStyle || '',
+        Boolean(normalizedPerms.autoSend),
+        Boolean(normalizedPerms.whatsappAutoReply),
+        normalizedPerms.whatsappReplyStyle || '',
         userName,
         backendBaseUrl
       );
     }
+    if (bridge?.setWhatsAppAutoReplyPause) {
+      bridge.setWhatsAppAutoReplyPause(Number(normalizedPausedUntil));
+    }
     if (bridge?.setAgentApiKeys) {
       bridge.setAgentApiKeys(JSON.stringify(getGeminiApiKeysArray()));
     }
-    window.dispatchEvent(new CustomEvent('kevinAgentPermissionsUpdated', { detail: perms }));
+    window.dispatchEvent(new CustomEvent('kevinAgentPermissionsUpdated', { detail: normalizedPerms }));
   } catch (error) {
     console.error('Unable to save Kevin AI agent permissions.', error);
   }
@@ -789,16 +842,20 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
   }
 
   if (action.name === 'configure_whatsapp_autoreply') {
-    const enabled = action.args?.enabled !== false;
+    const pauseMinutes = Number(action.args?.pause_minutes || 0);
+    const hasPause = Number.isFinite(pauseMinutes) && pauseMinutes > 0;
+    const enabled = hasPause ? true : action.args?.enabled !== false;
+    const pausedUntil = hasPause ? Date.now() + Math.round(pauseMinutes * 60_000) : 0;
     const replyStyle = typeof action.args?.reply_style === 'string' && action.args.reply_style.trim()
       ? action.args.reply_style.trim()
       : perms.whatsappReplyStyle;
     saveAgentPermissions({
       ...perms,
       whatsappAutoReply: enabled,
+      whatsappAutoReplyPausedUntil: pausedUntil,
       whatsappReplyStyle: replyStyle,
     });
-    if (enabled && bridge?.scanAndReplyWhatsAppChats) {
+    if (enabled && !hasPause && bridge?.scanAndReplyWhatsAppChats) {
       try {
         const scanRaw = bridge.scanAndReplyWhatsAppChats();
         action.args = { ...action.args, scanResult: JSON.parse(scanRaw || '{}') };
@@ -812,10 +869,11 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
     const replyStyle = typeof action.args?.reply_style === 'string' && action.args.reply_style.trim()
       ? action.args.reply_style.trim()
       : perms.whatsappReplyStyle;
-    if (!perms.whatsappAutoReply || replyStyle !== perms.whatsappReplyStyle) {
+    if (!perms.whatsappAutoReply || perms.whatsappAutoReplyPausedUntil || replyStyle !== perms.whatsappReplyStyle) {
       saveAgentPermissions({
         ...perms,
         whatsappAutoReply: true,
+        whatsappAutoReplyPausedUntil: 0,
         whatsappReplyStyle: replyStyle,
       });
     }
@@ -1004,8 +1062,14 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
   }
 
   if (name === "configure_whatsapp_autoreply") {
-    const enabled = args.enabled !== false;
-    label = enabled ? "Fungura WhatsApp Auto-Reply" : "Funga WhatsApp Auto-Reply";
+    const pauseMinutes = Number(args.pause_minutes || 0);
+    const hasPause = Number.isFinite(pauseMinutes) && pauseMinutes > 0;
+    const enabled = hasPause ? true : args.enabled !== false;
+    label = hasPause
+      ? `Hagarika WhatsApp Auto-Reply (${formatRemainingPauseDuration(pauseMinutes * 60_000)})`
+      : enabled
+        ? "Fungura WhatsApp Auto-Reply"
+        : "Funga WhatsApp Auto-Reply";
     const actionObj: DeviceAction = {
       name,
       args,
@@ -1052,10 +1116,15 @@ function actionConfirmation(action: DeviceAction): string {
     return `💚 WhatsApp ifunguwe kuri **${action.contactName || action.phoneNumber}**!`;
   }
   if (action.name === 'configure_whatsapp_autoreply') {
+    const pauseMinutes = Number(action.args?.pause_minutes || 0);
+    if (Number.isFinite(pauseMinutes) && pauseMinutes > 0) {
+      const durationStr = formatRemainingPauseDuration(pauseMinutes * 60_000);
+      return `⏸️ WhatsApp Auto-Reply yahagaritsweho **${durationStr}**! Nta butumwa izasubiza kugeza icyo gihe kirangiye cyangwa uyisubukuye.`;
+    }
     const enabled = action.args?.enabled !== false;
     return enabled
       ? `💬 WhatsApp Auto-Reply yafunguwe! Kevin AI irahita isubiza ubutumwa bwinjiye kuri WhatsApp.`
-      : `🔕 WhatsApp Auto-Reply yahagaritswe.`;
+      : `🔕 WhatsApp Auto-Reply yafunzwe burundu kugeza igihe uzayifungurira.`;
   }
   if (action.name === 'scan_whatsapp_chats') {
     const sr = action.args?.scanResult || {};
@@ -1370,11 +1439,12 @@ const APK_DEVICE_ACTION_DECLARATIONS = [
   },
   {
     name: 'configure_whatsapp_autoreply',
-    description: 'Enable or disable automatic AI replying to incoming WhatsApp messages.',
+    description: 'Enable, disable, or pause automatic AI replying to incoming WhatsApp messages for a specific number of minutes.',
     parameters: {
       type: 'OBJECT',
       properties: {
         enabled: { type: 'BOOLEAN', description: 'Whether WhatsApp auto-reply should be enabled.' },
+        pause_minutes: { type: 'NUMBER', description: 'Optional number of minutes to pause WhatsApp auto-reply (e.g. 15, 30, 60, 120, 480). Omit or 0 to turn completely off or immediately resume.' },
         reply_style: { type: 'STRING', description: 'Optional reply instructions.' },
       },
       required: ['enabled'],
@@ -1616,7 +1686,7 @@ The user sent a voice note/audio message (often spoken in Kinyarwanda, or mixed 
 CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, greeting, or if the audio is noisy/unclear, NEVER guess or trigger an action — reply naturally in Kinyarwanda or ask them to repeat clearly.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }

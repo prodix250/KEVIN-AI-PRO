@@ -108,7 +108,7 @@ You are a full autonomous agent with direct permission-backed control over apps 
 - Direct Calling & Contact Resolution: When the user asks to call someone or a phone number (e.g., 'hamagara 0788...', 'hamagara Aline', 'call Mom', 'terefone Jean'), ALWAYS call make_call(phone_number, contact_name) immediately. If the user gives a phone number, pass phone_number. If the user gives a contact name without a number, check [SAVED CONTACTS] in your context first—if found there, pass both phone_number and contact_name; if NOT in [SAVED CONTACTS], pass contact_name only and leave phone_number empty so the device resolves it from Contacts. NEVER invent or guess a phone number!
 - Direct SMS Sending: When the user asks to send an SMS/text message (e.g., 'ohereza ubutumwa kuri 078...', 'send sms to Aline'), ALWAYS call send_sms(phone_number, message, contact_name) immediately (never tell the user to open their SMS app manually, and never invent a missing number).
 - Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately. For phone numbers in Rwanda, ensure the country code +250 is used (e.g. +250788123456 or 250788123456 instead of 0788123456) so WhatsApp can deliver the message immediately without missing country code errors. In the 'message' parameter, write ONLY ONE single natural human message matching the user's/recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions.
-- WhatsApp Auto-Reply Mode: When the user asks you to automatically reply to incoming WhatsApp messages on their behalf (e.g., 'ujye unsubiriza kuri whatsapp', 'enable whatsapp auto reply'), ALWAYS call configure_whatsapp_autoreply(enabled, reply_style).
+- WhatsApp Auto-Reply Mode: When the user asks you to enable, disable, stop, or pause WhatsApp auto-reply for a specific duration (e.g., 'ujye unsubiriza kuri whatsapp', 'hagarika gusubiza kuri whatsapp iminota 30', 'pause whatsapp auto-reply for 1 hour', 'funga auto reply'), ALWAYS call configure_whatsapp_autoreply(enabled, reply_style, pause_minutes).
 - Check All WhatsApp Chats & Reply to Unreplied Messages: When the user asks you to check their WhatsApp chats and reply to unread/unreplied messages (e.g., 'reba muri whatsapp zanjye usubize ubutumwa budasubije', 'check all whatsapp chats and reply'), ALWAYS call scan_whatsapp_chats().
 - Calls & Other Apps: Use make_call, open_audiomack, open_lark_player, open_camera, or open_app ONLY when explicitly requested by the user (never guess or fabricate targets when uncertain).`;
 
@@ -180,11 +180,12 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: "configure_whatsapp_autoreply",
-    description: "Enable or disable automatic AI replying to incoming WhatsApp messages, and optionally set reply style instructions.",
+    description: "Enable, disable, or pause automatic AI replying to incoming WhatsApp messages for a specific number of minutes.",
     parametersJsonSchema: {
       type: "object",
       properties: {
-        enabled: { type: "boolean", description: "Whether WhatsApp auto-reply should be enabled." },
+        enabled: { type: "boolean", description: "Whether WhatsApp auto-reply should be enabled (true to enable/resume or pause temporarily, false to turn completely off)." },
+        pause_minutes: { type: "number", description: "Optional number of minutes to pause WhatsApp auto-reply (e.g. 15, 30, 60, 120, 480). Omit or 0 when turning completely off or immediately resuming." },
         reply_style: { type: "string", description: "Instructions for how Kevin AI should reply on WhatsApp." }
       },
       required: ["enabled"]
@@ -913,6 +914,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
           autoCall?: boolean;
           autoPlayYouTube?: boolean;
           whatsappAutoReply?: boolean;
+          whatsappAutoReplyPausedUntil?: number;
         };
         savedContacts?: Array<{ name?: string; phone?: string }>;
       };
@@ -989,7 +991,11 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       const contactsContext = contactsList.length > 0
         ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]`
         : '';
-      const agentContext = `[AGENT PERMISSIONS: autoSend=${Boolean(agentPermissions?.autoSend)}, autoCall=${agentPermissions?.autoCall !== false}, autoPlayYouTube=${agentPermissions?.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(agentPermissions?.whatsappAutoReply)}. Execute device tool calls ONLY when explicitly and clearly requested by the user.]`;
+      const waPausedRemainingMin = Boolean(agentPermissions?.whatsappAutoReply)
+        && Number(agentPermissions?.whatsappAutoReplyPausedUntil || 0) > Date.now()
+        ? Math.max(1, Math.ceil((Number(agentPermissions?.whatsappAutoReplyPausedUntil || 0) - Date.now()) / 60_000))
+        : 0;
+      const agentContext = `[AGENT PERMISSIONS: autoSend=${Boolean(agentPermissions?.autoSend)}, autoCall=${agentPermissions?.autoCall !== false}, autoPlayYouTube=${agentPermissions?.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(agentPermissions?.whatsappAutoReply)}, whatsappAutoReplyPaused=${waPausedRemainingMin > 0}${waPausedRemainingMin > 0 ? ` (${waPausedRemainingMin} min remaining)` : ''}. Execute device tool calls ONLY when explicitly and clearly requested by the user.]`;
 
       const systemInstruction = [
         KEVIN_SYSTEM_INSTRUCTION,

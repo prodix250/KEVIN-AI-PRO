@@ -11,6 +11,7 @@ public final class KevinAgentPrefs {
     private static final String PREFS_NAME = "kevin_agent_prefs";
     private static final String KEY_AUTO_SEND_ENABLED = "auto_send_enabled";
     private static final String KEY_WA_AUTO_REPLY_ENABLED = "wa_auto_reply_enabled";
+    private static final String KEY_WA_PAUSED_UNTIL = "wa_paused_until";
     private static final String KEY_WA_REPLY_STYLE = "wa_reply_style";
     private static final String KEY_USER_NAME = "user_name";
     private static final String KEY_BACKEND_BASE_URL = "backend_base_url";
@@ -37,13 +38,17 @@ public final class KevinAgentPrefs {
             String userName,
             String backendBaseUrl
     ) {
-        prefs(context).edit()
+        SharedPreferences.Editor editor = prefs(context).edit()
                 .putBoolean(KEY_AUTO_SEND_ENABLED, autoSendEnabled)
                 .putBoolean(KEY_WA_AUTO_REPLY_ENABLED, waAutoReplyEnabled)
                 .putString(KEY_WA_REPLY_STYLE, replyStyle != null ? replyStyle : "")
                 .putString(KEY_USER_NAME, userName != null ? userName : "Kevin")
-                .putString(KEY_BACKEND_BASE_URL, backendBaseUrl != null ? backendBaseUrl : "")
-                .apply();
+                .putString(KEY_BACKEND_BASE_URL, backendBaseUrl != null ? backendBaseUrl : "");
+        if (!waAutoReplyEnabled) {
+            editor.putLong(KEY_WA_PAUSED_UNTIL, 0L);
+            editor.putLong(KEY_PENDING_WA_SCAN_UNTIL, 0L);
+        }
+        editor.apply();
     }
 
     public static void setApiKeysJson(Context context, String keysJson) {
@@ -74,6 +79,36 @@ public final class KevinAgentPrefs {
 
     public static boolean isWhatsAppAutoReplyEnabled(Context context) {
         return prefs(context).getBoolean(KEY_WA_AUTO_REPLY_ENABLED, false);
+    }
+
+    public static void setWhatsAppPausedUntil(Context context, long pausedUntilMs) {
+        long cleanUntil = Math.max(0L, pausedUntilMs);
+        SharedPreferences.Editor editor = prefs(context).edit()
+                .putLong(KEY_WA_PAUSED_UNTIL, cleanUntil);
+        if (cleanUntil > System.currentTimeMillis() || !isWhatsAppAutoReplyEnabled(context)) {
+            editor.putLong(KEY_PENDING_WA_SCAN_UNTIL, 0L);
+        }
+        editor.apply();
+    }
+
+    public static long getWhatsAppPausedUntil(Context context) {
+        return prefs(context).getLong(KEY_WA_PAUSED_UNTIL, 0L);
+    }
+
+    public static boolean isWhatsAppAutoReplyPaused(Context context) {
+        long until = prefs(context).getLong(KEY_WA_PAUSED_UNTIL, 0L);
+        if (until <= 0L) {
+            return false;
+        }
+        if (System.currentTimeMillis() >= until) {
+            prefs(context).edit().putLong(KEY_WA_PAUSED_UNTIL, 0L).apply();
+            return false;
+        }
+        return true;
+    }
+
+    public static boolean isWhatsAppAutoReplyCurrentlyActive(Context context) {
+        return isWhatsAppAutoReplyEnabled(context) && !isWhatsAppAutoReplyPaused(context);
     }
 
     public static String getWhatsAppReplyStyle(Context context) {

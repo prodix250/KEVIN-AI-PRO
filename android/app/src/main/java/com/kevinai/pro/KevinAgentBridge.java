@@ -105,6 +105,9 @@ public class KevinAgentBridge {
             obj.put("isDefaultAssistant", isDefaultAssistant());
             obj.put("autoSendEnabled", KevinAgentPrefs.isAutoSendEnabled(activity));
             obj.put("whatsappAutoReplyEnabled", KevinAgentPrefs.isWhatsAppAutoReplyEnabled(activity));
+            obj.put("whatsappAutoReplyPausedUntil", KevinAgentPrefs.getWhatsAppPausedUntil(activity));
+            obj.put("whatsappAutoReplyPaused", KevinAgentPrefs.isWhatsAppAutoReplyPaused(activity));
+            obj.put("whatsappAutoReplyCurrentlyActive", KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(activity));
             obj.put("wakeWordEnabled", KevinAgentPrefs.isWakeWordEnabled(activity));
             obj.put("wakeWordActive", KevinWakeWordService.isRunning);
             obj.put("wakeWordEngine", KevinWakeWordService.activeEngine);
@@ -338,7 +341,16 @@ public class KevinAgentBridge {
                 userName,
                 backendBaseUrl
         );
-        if (waAutoReplyEnabled) {
+        if (KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(activity)) {
+            KevinNotificationListenerService.scanActiveWhatsAppNotifications(activity, false);
+        }
+        dispatchAgentStatus();
+    }
+
+    @JavascriptInterface
+    public void setWhatsAppAutoReplyPause(long pausedUntilMs) {
+        KevinAgentPrefs.setWhatsAppPausedUntil(activity, pausedUntilMs);
+        if (KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(activity)) {
             KevinNotificationListenerService.scanActiveWhatsAppNotifications(activity, false);
         }
         dispatchAgentStatus();
@@ -346,6 +358,7 @@ public class KevinAgentBridge {
 
     @JavascriptInterface
     public String scanAndReplyWhatsAppChats() {
+        KevinAgentPrefs.setWhatsAppPausedUntil(activity, 0L);
         boolean hasNotifAccess = isNotificationListenerEnabled();
         boolean hasAcc = isAccessibilityEnabled();
         String waPkg = findInstalledWhatsAppPackage();

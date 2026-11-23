@@ -72,7 +72,7 @@ public class KevinNotificationListenerService extends NotificationListenerServic
     public void onListenerConnected() {
         super.onListenerConnected();
         instance = this;
-        if (KevinAgentPrefs.isWhatsAppAutoReplyEnabled(this)) {
+        if (KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(this)) {
             scanActiveWhatsAppNotifications(this, false);
         }
     }
@@ -87,7 +87,7 @@ public class KevinNotificationListenerService extends NotificationListenerServic
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
-        if (!KevinAgentPrefs.isWhatsAppAutoReplyEnabled(this)) {
+        if (!KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(this)) {
             return;
         }
         handleStatusBarNotification(sbn, false);
@@ -98,7 +98,7 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         if (svc == null) {
             return 0;
         }
-        if (!forceScan && !KevinAgentPrefs.isWhatsAppAutoReplyEnabled(context)) {
+        if (!forceScan && !KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(context)) {
             return 0;
         }
         try {
@@ -122,7 +122,7 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         if (sbn == null) {
             return false;
         }
-        if (!forceScan && !KevinAgentPrefs.isWhatsAppAutoReplyEnabled(this)) {
+        if (!forceScan && !KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(this)) {
             return false;
         }
         String pkg = sbn.getPackageName();
@@ -173,9 +173,16 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         recentRepliedKeys.put(dedupKey, System.currentTimeMillis());
         KevinAgentPrefs.recordWhatsAppChatReplied(this, sender, "");
 
+        final boolean isForced = forceScan;
         executor.execute(() -> {
+            if (!isForced && !KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(this)) {
+                return;
+            }
             String replyText = generateReplyStatic(this, sender, incoming);
             if (TextUtils.isEmpty(replyText)) {
+                return;
+            }
+            if (!isForced && !KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(this)) {
                 return;
             }
             if (sendNotificationReply(replyAction, replyText)) {

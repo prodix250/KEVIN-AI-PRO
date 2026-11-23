@@ -57,7 +57,8 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                         return;
                     }
                 }
-                if (KevinAgentPrefs.isWhatsAppScanActive(this)) {
+                if (KevinAgentPrefs.isWhatsAppScanActive(this)
+                        && KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(this)) {
                     handleWhatsAppUnreadScan(root, pkg);
                 }
             } else if ("com.google.android.youtube".equals(pkg)
@@ -79,7 +80,8 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         if (now - lastNavigationAt < 900L) {
             return;
         }
-        if (KevinAgentPrefs.getWhatsAppScanCount(this) >= 5) {
+        if (!KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(this)
+                || KevinAgentPrefs.getWhatsAppScanCount(this) >= 5) {
             KevinAgentPrefs.clearWhatsAppScan(this);
             return;
         }
@@ -291,6 +293,11 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                 }
 
                 mainHandler.postDelayed(() -> {
+                    if (!KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(KevinAgentAccessibilityService.this)) {
+                        KevinAgentPrefs.clearWhatsAppScan(KevinAgentAccessibilityService.this);
+                        scanStepBusy = false;
+                        return;
+                    }
                     AccessibilityNodeInfo sendRoot = getRootInActiveWindow();
                     boolean sent = false;
                     if (sendRoot != null) {
