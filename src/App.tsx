@@ -427,10 +427,6 @@ export default function App() {
   });
 
   useEffect(() => {
-    saveChatHistory(sessions);
-  }, [sessions]);
-
-  useEffect(() => {
     const current = sessions.find(s => s.id === currentSessionId);
     if (current) {
       setMessages(current.messages);
@@ -446,6 +442,29 @@ export default function App() {
   const [latestScreenFrame, setLatestScreenFrame] = useState<AttachmentItem | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  const latestSessionsRef = useRef(sessions);
+  latestSessionsRef.current = sessions;
+
+  useEffect(() => {
+    if (!isGenerating) {
+      saveChatHistory(sessions);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      saveChatHistory(latestSessionsRef.current);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [sessions, isGenerating]);
+
+  useEffect(() => {
+    const flushSessions = () => saveChatHistory(latestSessionsRef.current);
+    window.addEventListener('pagehide', flushSessions);
+    return () => {
+      window.removeEventListener('pagehide', flushSessions);
+      flushSessions();
+    };
+  }, []);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [attachmentPopupOpen, setAttachmentPopupOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
@@ -961,7 +980,12 @@ export default function App() {
       }
 
       const audioUrl = URL.createObjectURL(audioBlob);
-      void handleSendMessage(transcript || '🎤 Voice Note', audioBlob, audioBase64, recording.mimeType, audioUrl);
+      const cleanTranscript = transcript.trim();
+      if (cleanTranscript) {
+        void handleSendMessage(cleanTranscript, undefined, undefined, undefined, audioUrl);
+      } else {
+        void handleSendMessage('🎤 Voice Note', audioBlob, audioBase64, recording.mimeType, audioUrl);
+      }
     } catch (error) {
       console.error("Audio processing error:", error);
       const message = error instanceof Error ? error.message : "Unable to process the voice message.";
@@ -1721,7 +1745,7 @@ export default function App() {
         displayMsg = isCapacitorApkRuntime() || !isLocalPreview
           ? "⚠️ API Key yawe ntiyemeye cyangwa ntabwo irashyirwaho. Nyamuneka genzura keys zawe muri Settings > INJIZA KEVIN API KEYS."
           : "⚠️ Nta API Key yabonetse cyangwa ntabwo yashyizweho neza. Nyamuneka yishyireho muri Settings > Secrets panel.";
-      } else if (errMsg && errMsg.length < 220 && !errMsg.includes("[object")) {
+      } else if (errMsg && errMsg.length < 360 && !errMsg.includes("[object")) {
         displayMsg = `⚠️ ${errMsg}`;
       }
 

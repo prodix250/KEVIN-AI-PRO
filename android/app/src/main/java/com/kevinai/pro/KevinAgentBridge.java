@@ -563,8 +563,8 @@ public class KevinAgentBridge {
                 URL url = new URL(rssUrl);
                 conn = (HttpURLConnection) url.openConnection();
                 conn.setInstanceFollowRedirects(true);
-                conn.setConnectTimeout(4500);
-                conn.setReadTimeout(4500);
+                conn.setConnectTimeout(2000);
+                conn.setReadTimeout(2200);
                 conn.setRequestMethod("GET");
                 conn.setRequestProperty(
                         "User-Agent",

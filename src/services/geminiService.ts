@@ -1475,7 +1475,7 @@ async function resolveYouTubeVideoForApk(query: string): Promise<{ videoId: stri
   if (!trimmed) return null;
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
+    const timer = setTimeout(() => controller.abort(), 1600);
     const res = await fetch(`${PRODUCTION_BACKEND_URL}/api/youtube/resolve?q=${encodeURIComponent(trimmed)}`, {
       signal: controller.signal,
     });
@@ -1491,6 +1491,39 @@ async function resolveYouTubeVideoForApk(query: string): Promise<{ videoId: stri
     }
   } catch {}
   return null;
+}
+
+// In-memory APK key/model health & contacts cache to avoid repeating dead/rate-limited keys or re-reading 5,000 contacts every turn
+const apkDeadKeysSession = new Set<string>();
+const apkRateLimitedUntil = new Map<string, number>();
+let apkLastWorkingKey = '';
+let apkCachedNativeContacts: SavedContact[] | null = null;
+let apkCachedNativeContactsAt = 0;
+
+function prioritizeApkKeys(keys: string[]): string[] {
+  const now = Date.now();
+  const active = keys.filter((k) => {
+    if (apkDeadKeysSession.has(k)) return false;
+    const cooldown = apkRateLimitedUntil.get(k) || 0;
+    return cooldown <= now;
+  });
+  const candidates = active.length > 0 ? active : keys.filter((k) => !apkDeadKeysSession.has(k));
+  const pool = candidates.length > 0 ? candidates : keys;
+  if (apkLastWorkingKey && pool.includes(apkLastWorkingKey)) {
+    return [apkLastWorkingKey, ...pool.filter((k) => k !== apkLastWorkingKey)];
+  }
+  return pool;
+}
+
+function getApkGenerationConfig(modelName: string, selectedModel?: string, disableThinking = false): Record<string, any> | undefined {
+  if (modelName.startsWith('gemini-2.5-')) {
+    const budget = (!disableThinking && selectedModel === 'Prodix pro') ? 512 : 0;
+    return { thinkingConfig: { thinkingBudget: budget } };
+  }
+  if (modelName === 'gemini-4-hydrogen') {
+    return { thinkingConfig: { thinkingLevel: disableThinking ? 'LOW' : (selectedModel === 'Prodix pro' ? 'MEDIUM' : 'LOW') } };
+  }
+  return undefined;
 }
 
 function buildApkCleanWebSearchQuery(rawQuery: string): string {
@@ -1590,25 +1623,49 @@ async function fetchLiveWebSearchForApk(rawQuery: string): Promise<{
   const cleanQuery = buildApkCleanWebSearchQuery(rawQuery);
   if (!cleanQuery) return { contextText: '', sources: [] };
 
-  // 1. Native Android bridge RSS fetch (zero CORS, works even if backend is unreachable)
+  // 1. Native Android bridge RSS fetch (deferred off microtask, bounded to 2.4s so UI never freezes)
   try {
     const bridge = (window as any).KevinAgentBridge;
     if (bridge?.fetchWebNewsRss) {
-      const xml = String(bridge.fetchWebNewsRss(cleanQuery) || '');
-      const parsed = parseRssXmlForApk(xml, cleanQuery);
-      if (parsed.contextText) return parsed;
+      const nativeRss = await new Promise<{ contextText: string; sources: GroundingSource[] }>((resolve) => {
+        let done = false;
+        const timer = setTimeout(() => {
+          if (!done) {
+            done = true;
+            resolve({ contextText: '', sources: [] });
+          }
+        }, 2400);
+        setTimeout(() => {
+          try {
+            const xml = String(bridge.fetchWebNewsRss(cleanQuery) || '');
+            const parsed = parseRssXmlForApk(xml, cleanQuery);
+            if (!done) {
+              done = true;
+              clearTimeout(timer);
+              resolve(parsed);
+            }
+          } catch {
+            if (!done) {
+              done = true;
+              clearTimeout(timer);
+              resolve({ contextText: '', sources: [] });
+            }
+          }
+        }, 0);
+      });
+      if (nativeRss.contextText) return nativeRss;
     }
   } catch {}
 
-  // 2. Production backend /api/web-search fallback
-  try {
+  // 2. Race fast Wikipedia API and backend /api/web-search (strict 2.2s cap to avoid Render cold-start stalls)
+  const fetchBackendSearch = async (): Promise<{ contextText: string; sources: GroundingSource[] }> => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch(`${PRODUCTION_BACKEND_URL}/api/web-search?q=${encodeURIComponent(rawQuery)}`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (res.ok) {
+    const timer = setTimeout(() => controller.abort(), 2200);
+    try {
+      const res = await fetch(`${PRODUCTION_BACKEND_URL}/api/web-search?q=${encodeURIComponent(rawQuery)}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error('backend_search_failed');
       const data = await res.json().catch(() => null);
       if (data?.contextText) {
         return {
@@ -1616,36 +1673,43 @@ async function fetchLiveWebSearchForApk(rawQuery: string): Promise<{
           sources: Array.isArray(data.sources) ? data.sources : [],
         };
       }
+      throw new Error('empty_backend_search');
+    } finally {
+      clearTimeout(timer);
     }
-  } catch {}
+  };
 
-  // 3. CORS-enabled Wikipedia Search API fallback
-  try {
+  const fetchWikiSearch = async (): Promise<{ contextText: string; sources: GroundingSource[] }> => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
-    const wikiRes = await fetch(
-      `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQuery)}&srlimit=5&format=json&origin=*`,
-      { signal: controller.signal }
-    );
-    clearTimeout(timer);
-    if (wikiRes.ok) {
+    const timer = setTimeout(() => controller.abort(), 2200);
+    try {
+      const wikiRes = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQuery)}&srlimit=5&format=json&origin=*`,
+        { signal: controller.signal }
+      );
+      if (!wikiRes.ok) throw new Error('wiki_failed');
       const wikiJson = await wikiRes.json().catch(() => null);
       const searchHits: any[] = wikiJson?.query?.search || [];
-      if (searchHits.length > 0) {
-        const sources: GroundingSource[] = searchHits.map((hit) => ({
-          title: `Wikipedia: ${String(hit.title || cleanQuery)}`,
-          url: `https://en.wikipedia.org/wiki/${encodeURIComponent(String(hit.title || '').replace(/\s+/g, '_'))}`,
-        }));
-        const lines = searchHits.map((hit, idx) => {
-          const snippet = String(hit.snippet || '').replace(/<[^>]+>/g, '').trim();
-          return `${idx + 1}. "${hit.title}": ${snippet} — ${sources[idx].url}`;
-        });
-        return {
-          contextText: `[WEB REFERENCE RESULTS FOR "${cleanQuery}"]:\n${lines.join('\n')}`,
-          sources,
-        };
-      }
+      if (searchHits.length === 0) throw new Error('empty_wiki');
+      const sources: GroundingSource[] = searchHits.map((hit) => ({
+        title: `Wikipedia: ${String(hit.title || cleanQuery)}`,
+        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(String(hit.title || '').replace(/\s+/g, '_'))}`,
+      }));
+      const lines = searchHits.map((hit, idx) => {
+        const snippet = String(hit.snippet || '').replace(/<[^>]+>/g, '').trim();
+        return `${idx + 1}. "${hit.title}": ${snippet} — ${sources[idx].url}`;
+      });
+      return {
+        contextText: `[WEB REFERENCE RESULTS FOR "${cleanQuery}"]:\n${lines.join('\n')}`,
+        sources,
+      };
+    } finally {
+      clearTimeout(timer);
     }
+  };
+
+  try {
+    return await Promise.any([fetchBackendSearch(), fetchWikiSearch()]);
   } catch {}
 
   return { contextText: '', sources: [] };
@@ -1670,39 +1734,50 @@ function buildApkSystemInstruction(
     minute: '2-digit',
     timeZone: 'Africa/Kigali',
   })}.]`;
-  let effectiveContacts = savedContacts;
-  if (typeof window !== 'undefined' && effectiveContacts.length < 50) {
-    try {
-      const bridge = (window as any).KevinAgentBridge;
-      if (bridge?.lookupContactsJson) {
-        const nativeAll = JSON.parse(bridge.lookupContactsJson('')) as Array<{ name: string; phone: string }>;
-        if (Array.isArray(nativeAll) && nativeAll.length > effectiveContacts.length) {
-          effectiveContacts = mergeContactsBatch(nativeAll).contacts;
+
+  // Only inspect/attach contacts when the user is actually making a call/SMS/WhatsApp/contact request (saves ~8,000 tokens & UI thread bridge time!)
+  const needsContacts = hasAudioAttachment || /\b(hamagara|terefone|call|dial|sms|message|ubutumwa|ohereza|send|whatsapp|wa|contact|nimero|number)\b/i.test(latestUserText);
+  let contactsList: string[] = [];
+  if (needsContacts) {
+    let effectiveContacts = savedContacts;
+    const cacheValid = apkCachedNativeContacts && (Date.now() - apkCachedNativeContactsAt < 60_000);
+    if (cacheValid && apkCachedNativeContacts && apkCachedNativeContacts.length > effectiveContacts.length) {
+      effectiveContacts = apkCachedNativeContacts;
+    } else if (typeof window !== 'undefined' && effectiveContacts.length < 50 && !cacheValid) {
+      try {
+        const bridge = (window as any).KevinAgentBridge;
+        if (bridge?.lookupContactsJson) {
+          const nativeAll = JSON.parse(bridge.lookupContactsJson('')) as Array<{ name: string; phone: string }>;
+          if (Array.isArray(nativeAll) && nativeAll.length > 0) {
+            effectiveContacts = mergeContactsBatch(nativeAll).contacts;
+            apkCachedNativeContacts = effectiveContacts;
+            apkCachedNativeContactsAt = Date.now();
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
+    const userTokens = normalizeContactSearchText(latestUserText)
+      .split(/\s+/)
+      .filter((t) => t.length >= 2);
+    const validContacts = effectiveContacts.filter((c) => c && c.name?.trim() && c.phone?.trim());
+    const prioritized = userTokens.length > 0
+      ? [
+          ...validContacts.filter((c) => {
+            const nm = normalizeContactSearchText(c.name);
+            const ph = c.phone.replace(/[^\d]/g, '');
+            return userTokens.some((tok) => nm.includes(tok) || (ph && ph.includes(tok)));
+          }),
+          ...validContacts.filter((c) => {
+            const nm = normalizeContactSearchText(c.name);
+            const ph = c.phone.replace(/[^\d]/g, '');
+            return !userTokens.some((tok) => nm.includes(tok) || (ph && ph.includes(tok)));
+          }),
+        ]
+      : validContacts;
+    contactsList = prioritized
+      .slice(0, 40)
+      .map((c) => `${c.name.trim()}: ${c.phone.trim()}`);
   }
-  const userTokens = normalizeContactSearchText(latestUserText)
-    .split(/\s+/)
-    .filter((t) => t.length >= 2);
-  const validContacts = effectiveContacts.filter((c) => c && c.name?.trim() && c.phone?.trim());
-  const prioritized = userTokens.length > 0
-    ? [
-        ...validContacts.filter((c) => {
-          const nm = normalizeContactSearchText(c.name);
-          const ph = c.phone.replace(/[^\d]/g, '');
-          return userTokens.some((tok) => nm.includes(tok) || (ph && ph.includes(tok)));
-        }),
-        ...validContacts.filter((c) => {
-          const nm = normalizeContactSearchText(c.name);
-          const ph = c.phone.replace(/[^\d]/g, '');
-          return !userTokens.some((tok) => nm.includes(tok) || (ph && ph.includes(tok)));
-        }),
-      ]
-    : validContacts;
-  const contactsList = prioritized
-    .slice(0, 500)
-    .map((c) => `${c.name.trim()}: ${c.phone.trim()}`);
   const customInstructions = safeStorageGet('kevin_ai_custom_instructions')?.trim() || '';
 
   return [
@@ -1735,34 +1810,53 @@ export async function transcribeAudioWithSTT(
   const customApiKeys = getGeminiApiKeysArray();
 
   if ((isCapacitorApkRuntime() || customApiKeys.length > 0) && customApiKeys.length > 0) {
-    const invalidSttKeys = new Set<string>();
-    for (const model of ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']) {
+    const orderedKeys = prioritizeApkKeys(customApiKeys);
+    for (const model of ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']) {
       let abortModel = false;
-      for (const currentKey of customApiKeys) {
-        if (invalidSttKeys.has(currentKey)) continue;
+      for (const currentKey of orderedKeys) {
+        if (apkDeadKeysSession.has(currentKey)) continue;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 7000);
         try {
-          const directRes = await fetch(
+          const genConfig = getApkGenerationConfig(model, undefined, true);
+          const bodyPayload: Record<string, any> = {
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { inlineData: { mimeType: normalizedMime, data: cleanAudio } },
+                  {
+                    text: 'You are an expert native Rwandan speech recognizer (Kinyarwanda, English, French, Swahili). Listen very carefully and transcribe verbatim in standard Rwandan Kinyarwanda orthography (or the exact language spoken). Never mishear Kinyarwanda as random English commands or hallucinate words. Output ONLY exact spoken words with no quotes. If silent, noisy, or unintelligible, output empty string "".',
+                  },
+                ],
+              },
+            ],
+            ...(genConfig ? { generationConfig: genConfig } : {}),
+          };
+          let directRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(currentKey)}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [
-                  {
-                    role: 'user',
-                    parts: [
-                      { inlineData: { mimeType: normalizedMime, data: cleanAudio } },
-                      {
-                        text: 'You are an expert native Rwandan speech recognizer (Kinyarwanda, English, French, Swahili). Listen very carefully and transcribe verbatim in standard Rwandan Kinyarwanda orthography (or the exact language spoken). Never mishear Kinyarwanda as random English commands or hallucinate words. Output ONLY exact spoken words with no quotes. If silent, noisy, or unintelligible, output empty string "".',
-                      },
-                    ],
-                  },
-                ],
-              }),
+              body: JSON.stringify(bodyPayload),
+              signal: controller.signal,
             }
           );
+          if (directRes.status === 400 && genConfig) {
+            delete bodyPayload.generationConfig;
+            directRes = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(currentKey)}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bodyPayload),
+                signal: controller.signal,
+              }
+            );
+          }
           if (!directRes.ok) {
-            if (directRes.status === 401 || directRes.status === 403) invalidSttKeys.add(currentKey);
+            if (directRes.status === 401 || directRes.status === 403) apkDeadKeysSession.add(currentKey);
+            if (directRes.status === 429) apkRateLimitedUntil.set(currentKey, Date.now() + 90_000);
             if (directRes.status === 404) { abortModel = true; break; }
             continue;
           }
@@ -1772,15 +1866,22 @@ export async function transcribeAudioWithSTT(
             .join('')
             .trim();
           if (text !== undefined) {
+            apkLastWorkingKey = currentKey;
             return text === '""' || text === "''" ? '' : text;
           }
-        } catch {}
+        } catch {
+          // try next key/model
+        } finally {
+          clearTimeout(timer);
+        }
       }
       if (abortModel) continue;
     }
   }
 
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 9000);
     const res = await fetch(getEndpoint('/api/stt'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1790,7 +1891,9 @@ export async function transcribeAudioWithSTT(
         customApiKey,
         customApiKeys,
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
 
     if (!res.ok) {
       let errMessage = 'STT transcription failed';
@@ -1877,44 +1980,63 @@ export async function generateWhatsAppAutoReply(
   const customApiKeys = getGeminiApiKeysArray();
 
   if (isCapacitorApkRuntime() && customApiKeys.length > 0) {
-    const invalidWaKeys = new Set<string>();
-    for (const model of ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']) {
+    const orderedKeys = prioritizeApkKeys(customApiKeys);
+    for (const model of ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']) {
       let abortModel = false;
-      for (const currentKey of customApiKeys) {
-        if (invalidWaKeys.has(currentKey)) continue;
+      for (const currentKey of orderedKeys) {
+        if (apkDeadKeysSession.has(currentKey)) continue;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 7000);
         try {
-          const directRes = await fetch(
+          const genConfig = getApkGenerationConfig(model, undefined, true);
+          const payload: Record<string, any> = {
+            systemInstruction: {
+              parts: [
+                {
+                  text: [
+                    `You are ${userName} replying directly on WhatsApp to "${sender || 'your contact'}".`,
+                    `Write ONE single, natural human WhatsApp reply message directly addressing what they just wrote.`,
+                    `STRICT LANGUAGE RULE:`,
+                    `- If the message is in English, reply ONLY in natural, conversational English.`,
+                    `- If the message is in Kinyarwanda, reply ONLY in authentic, fluent, grammatically correct native Kinyarwanda (Ikinyarwanda cy'umwimerere — warm, polite, natural Rwandan phrasing, NEVER awkward literal translations).`,
+                    `- If the message is in French or Swahili, reply fluently in that exact language.`,
+                    `STRICT FORMAT RULES:`,
+                    `- Output ONLY the exact message text to send (1 to 2 short sentences max).`,
+                    `- NEVER include dates, timestamps (like [23/11, 11:23]), sender names (like "${userName}:"), labels, quotes, or markdown.`,
+                    `- NEVER generate multiple replies, multiple options, or a back-and-forth conversation.`,
+                    `- NEVER sound like or mention being an AI — write naturally as ${userName} themselves.`,
+                    replyStyle?.trim() ? `Owner's Personal Style Preference: ${replyStyle.trim()}` : '',
+                  ].filter(Boolean).join('\n'),
+                },
+              ],
+            },
+            contents: [{ role: 'user', parts: [{ text: incomingMessage.trim() }] }],
+            ...(genConfig ? { generationConfig: genConfig } : {}),
+          };
+          let directRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(currentKey)}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                systemInstruction: {
-                  parts: [
-                    {
-                      text: [
-                        `You are ${userName} replying directly on WhatsApp to "${sender || 'your contact'}".`,
-                        `Write ONE single, natural human WhatsApp reply message directly addressing what they just wrote.`,
-                        `STRICT LANGUAGE RULE:`,
-                        `- If the message is in English, reply ONLY in natural, conversational English.`,
-                        `- If the message is in Kinyarwanda, reply ONLY in authentic, fluent, grammatically correct native Kinyarwanda (Ikinyarwanda cy'umwimerere — warm, polite, natural Rwandan phrasing, NEVER awkward literal translations).`,
-                        `- If the message is in French or Swahili, reply fluently in that exact language.`,
-                        `STRICT FORMAT RULES:`,
-                        `- Output ONLY the exact message text to send (1 to 2 short sentences max).`,
-                        `- NEVER include dates, timestamps (like [23/11, 11:23]), sender names (like "${userName}:"), labels, quotes, or markdown.`,
-                        `- NEVER generate multiple replies, multiple options, or a back-and-forth conversation.`,
-                        `- NEVER sound like or mention being an AI — write naturally as ${userName} themselves.`,
-                        replyStyle?.trim() ? `Owner's Personal Style Preference: ${replyStyle.trim()}` : '',
-                      ].filter(Boolean).join('\n'),
-                    },
-                  ],
-                },
-                contents: [{ role: 'user', parts: [{ text: incomingMessage.trim() }] }],
-              }),
+              body: JSON.stringify(payload),
+              signal: controller.signal,
             }
           );
+          if (directRes.status === 400 && genConfig) {
+            delete payload.generationConfig;
+            directRes = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(currentKey)}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: controller.signal,
+              }
+            );
+          }
           if (!directRes.ok) {
-            if (directRes.status === 401 || directRes.status === 403) invalidWaKeys.add(currentKey);
+            if (directRes.status === 401 || directRes.status === 403) apkDeadKeysSession.add(currentKey);
+            if (directRes.status === 429) apkRateLimitedUntil.set(currentKey, Date.now() + 90_000);
             if (directRes.status === 404) { abortModel = true; break; }
             continue;
           }
@@ -1924,8 +2046,15 @@ export async function generateWhatsAppAutoReply(
             .join('')
             .trim();
           const reply = sanitizeWhatsAppReplyText(rawReply || '', userName, sender);
-          if (reply) return reply;
-        } catch {}
+          if (reply) {
+            apkLastWorkingKey = currentKey;
+            return reply;
+          }
+        } catch {
+          // try next key/model
+        } finally {
+          clearTimeout(timer);
+        }
       }
       if (abortModel) continue;
     }
@@ -2112,22 +2241,26 @@ export async function sendMessageToGemini(
       : '';
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
     const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
+    const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText
       && !includeAudioFlag
       && !isExplicitDeviceCommand
-      && /\b(news|amakuru|agezweho|bigezweho|ibigezweho|mashya|masha|ubu|ubungubu|kuri ubu|uyu munsi|uyumunsi|ejo|ijoro ryashize|iki cyumweru|weather|iteganyagihe|forecast|meteo|météo|score|scores|match|matches|umukino|imikino|results|standings|table|ranking|amanota|shampiyona|champiyona|premier league|champions league|la liga|afcon|world cup|price|igiciro|ibiciro|dollar|idorari|exchange rate|bitcoin|crypto|current|currently|latest|recent|recently|update|updates|breaking|headlines|trending|yesterday|tonight|last night|internet|google|search|shaka|online|live|today|president|perezida|minister|minisiteri|minisitiri|winner|who won|watsinze|yatsinze|batsinze|what happened|byagenze gute|byabaye|rwanda|kigali|2025|2026|2027|uri he|mancity|man city|manutd|man utd|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr|kiyovu|mukura|amavubi|actualites|actualités|nouvelles|igihe|kigalitoday|rba|bbc)\b/i.test(latestUserText)
+      && !isAmakuruGreeting
+      && /\b(news|amakuru|agezweho|bigezweho|ibigezweho|mashya|masha|weather|iteganyagihe|forecast|meteo|météo|score|scores|match|matches|umukino|imikino|results|standings|table|ranking|amanota|shampiyona|champiyona|premier league|champions league|la liga|afcon|world cup|price|igiciro|ibiciro|dollar|idorari|exchange rate|bitcoin|crypto|latest|recent|recently|update|updates|breaking|headlines|trending|tonight|last night|internet|google|search|shaka|online|live|president|perezida|minister|minisiteri|minisitiri|winner|who won|watsinze|yatsinze|batsinze|mancity|man city|manutd|man utd|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr|kiyovu|mukura|amavubi|actualites|actualités|nouvelles|igihe|kigalitoday|rba|bbc)\b/i.test(latestUserText)
     );
 
+    // Kick off fast RSS/wiki lookup in parallel ONLY if search intent is detected (zero delay before starting Gemini!)
+    const rssPromise: Promise<{ contextText: string; sources: GroundingSource[] }> | null = shouldTryWebSearch
+      ? fetchLiveWebSearchForApk(latestUserText).catch(() => ({ contextText: '', sources: [] }))
+      : null;
     let rssCache: { contextText: string; sources: GroundingSource[] } | null = null;
-    if (shouldTryWebSearch) {
-      rssCache = await fetchLiveWebSearchForApk(latestUserText).catch(() => ({ contextText: '', sources: [] }));
-    }
+    let ungroundedSearchFallbackText = '';
 
     const phases: Array<'search' | 'rss_text' | 'device'> = shouldTryWebSearch
       ? ['search', 'rss_text']
       : ['device'];
-    const invalidKeys = new Set<string>();
+    const orderedKeys = prioritizeApkKeys(customApiKeys);
     let lastDirectErr: unknown = null;
 
     for (const phase of phases) {
@@ -2135,10 +2268,10 @@ export async function sendMessageToGemini(
       let phaseSources: GroundingSource[] = [];
 
       if (phase === 'rss_text') {
-        if (!rssCache) {
-          rssCache = await fetchLiveWebSearchForApk(latestUserText).catch(() => ({ contextText: '', sources: [] }));
+        if (!rssCache && rssPromise) {
+          rssCache = await rssPromise;
         }
-        if (rssCache.contextText) {
+        if (rssCache?.contextText) {
           phaseSources = rssCache.sources;
           phaseContents = [
             ...requestContents.slice(0, -1),
@@ -2150,82 +2283,132 @@ export async function sendMessageToGemini(
               ],
             },
           ];
+        } else if (ungroundedSearchFallbackText) {
+          onChunk?.(ungroundedSearchFallbackText);
+          return {
+            streamedText: ungroundedSearchFallbackText,
+            streamedActions: [],
+            streamedSources: [],
+          };
         }
-      } else if (phase === 'search' && rssCache?.contextText) {
-        phaseSources = rssCache.sources;
-        phaseContents = [
-          ...requestContents.slice(0, -1),
-          {
-            role: 'user',
-            parts: [
-              ...((requestContents[requestContents.length - 1] as any)?.parts || []),
-              { text: `\n\n${rssCache.contextText}` },
-            ],
-          },
-        ];
       }
 
       const apkModels = includeAudioFlag
-        ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+        ? ['gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
         : phase === 'search'
-          ? ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+          ? ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
           : selectedModel === 'Kevin 1.3 Lite'
-            ? ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash']
-            : ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+            ? ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen', 'gemini-2.5-flash']
+            : selectedModel === 'Prodix pro'
+              ? ['gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
+              : ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
 
+      let jumpToNextPhase = false;
       for (const modelName of apkModels) {
+        if (jumpToNextPhase) break;
         const isLastApkModel = modelName === apkModels[apkModels.length - 1];
         let abortModelLoop = false;
-        for (const currentKey of customApiKeys) {
-          if (invalidKeys.has(currentKey)) continue;
+        for (const currentKey of orderedKeys) {
+          if (apkDeadKeysSession.has(currentKey)) continue;
           const maxDirectAttempts = isLastApkModel ? 2 : 1;
           for (let attempt = 0; attempt < maxDirectAttempts; attempt++) {
-            const callOnce = async (useTools: boolean): Promise<Response> => {
+            const callStreamOrGenerate = async (
+              useTools: boolean,
+              useThinkingConfig: boolean,
+              useStreaming: boolean
+            ): Promise<{ res: Response; controller: AbortController; clearHeaderTimer: () => void }> => {
               const payloadBody: Record<string, any> = {
                 systemInstruction: { parts: [{ text: apkSystemInstruction }] },
                 contents: phaseContents,
               };
+              const genConfig = useThinkingConfig ? getApkGenerationConfig(modelName, selectedModel) : undefined;
+              if (genConfig) {
+                payloadBody.generationConfig = genConfig;
+              }
               if (useTools) {
                 if (phase === 'search') {
                   payloadBody.tools = [{ google_search: {} }];
-                } else if (phase === 'device') {
+                } else if (phase === 'device' && isExplicitDeviceCommand) {
                   payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
                 }
               }
               const controller = new AbortController();
-              const timer = setTimeout(() => controller.abort(), isLastApkModel ? 16000 : 10000);
-              try {
-                return await fetch(
-                  `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
-                  {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payloadBody),
-                    signal: controller.signal,
-                  }
-                );
-              } finally {
+              const headerTimeoutMs = isLastApkModel ? 12000 : 7500;
+              const timer = setTimeout(() => controller.abort(), headerTimeoutMs);
+              const endpointUrl = useStreaming
+                ? `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${encodeURIComponent(currentKey)}`
+                : `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`;
+              const res = await fetch(endpointUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payloadBody),
+                signal: controller.signal,
+              });
+              const clearHeaderTimer = () => {
                 clearTimeout(timer);
-              }
+              };
+              return { res, controller, clearHeaderTimer };
             };
 
+            let activeController: AbortController | null = null;
+            let clearTimer: (() => void) | null = null;
             try {
-              let directRes = await callOnce(phase === 'search' || phase === 'device');
-              if (directRes.status === 400 && (phase === 'search' || phase === 'device')) {
-                // Retry cleanly without tools if this model/tier rejects tool declarations
-                directRes = await callOnce(false);
+              const canStream = typeof ReadableStream !== 'undefined' && typeof TextDecoder !== 'undefined';
+              const wantsTools = phase === 'search' || (phase === 'device' && isExplicitDeviceCommand);
+              let useTools = wantsTools;
+              let useThinking = true;
+
+              let callResult = await callStreamOrGenerate(useTools, useThinking, canStream);
+              activeController = callResult.controller;
+              clearTimer = callResult.clearHeaderTimer;
+              let directRes = callResult.res;
+
+              if (directRes.status === 400 && (useTools || useThinking)) {
+                clearTimer();
+                // Retry cleanly without tools/thinkingConfig if rejected by model tier
+                if (useThinking) {
+                  useThinking = false;
+                  callResult = await callStreamOrGenerate(useTools, false, canStream);
+                  activeController = callResult.controller;
+                  clearTimer = callResult.clearHeaderTimer;
+                  directRes = callResult.res;
+                }
+                if (directRes.status === 400 && useTools) {
+                  clearTimer();
+                  if (phase === 'search') {
+                    // Skip straight to rss_text instead of running ungrounded search phase
+                    jumpToNextPhase = true;
+                    abortModelLoop = true;
+                    break;
+                  }
+                  useTools = false;
+                  callResult = await callStreamOrGenerate(false, useThinking, canStream);
+                  activeController = callResult.controller;
+                  clearTimer = callResult.clearHeaderTimer;
+                  directRes = callResult.res;
+                }
               }
 
-              const json = await directRes.json().catch(() => null);
               if (!directRes.ok) {
+                clearTimer();
+                const json = await directRes.json().catch(() => null);
                 const apiErrMsg = json?.error?.message || `HTTP ${directRes.status}`;
                 const lowerErr = apiErrMsg.toLowerCase();
                 if (directRes.status === 401 || directRes.status === 403 || lowerErr.includes('api key not valid') || lowerErr.includes('api_key_invalid')) {
-                  invalidKeys.add(currentKey);
+                  apkDeadKeysSession.add(currentKey);
                   lastDirectErr = new Error(apiErrMsg);
                   break;
                 }
-                const isNotFound = directRes.status === 404 || lowerErr.includes('not found');
+                if (directRes.status === 429 || lowerErr.includes('quota') || lowerErr.includes('rate limit') || lowerErr.includes('resource_exhausted')) {
+                  apkRateLimitedUntil.set(currentKey, Date.now() + 90_000);
+                  lastDirectErr = new Error(apiErrMsg);
+                  break;
+                }
+                const isNotFound = directRes.status === 404
+                  || lowerErr.includes('not found')
+                  || lowerErr.includes('no longer available')
+                  || lowerErr.includes('deprecated')
+                  || lowerErr.includes('not supported');
                 if (!isNotFound || !lastDirectErr) {
                   lastDirectErr = new Error(apiErrMsg);
                 }
@@ -2238,69 +2421,201 @@ export async function sendMessageToGemini(
                   || lowerErr.includes('unavailable')
                   || lowerErr.includes('overloaded');
                 if (isTransientBusy && attempt + 1 < maxDirectAttempts) {
-                  await new Promise((r) => setTimeout(r, 500));
+                  await new Promise((r) => setTimeout(r, 300));
                   continue;
                 }
                 break;
               }
 
-              const responseParts: any[] = json?.candidates?.[0]?.content?.parts || [];
+              clearTimer();
               let streamedText = '';
-              const streamedActions: DeviceAction[] = [];
+              let bufferedSearchText = '';
+              const pendingFunctionCalls: Array<{ name: string; args: Record<string, any> }> = [];
               const directSources: GroundingSource[] = [...phaseSources];
 
-              // Extract grounding chunks if available
-              const gChunks = json?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-              for (const gc of gChunks) {
-                const uri = gc?.web?.uri || gc?.maps?.uri;
-                const title = gc?.web?.title || gc?.maps?.title || uri;
-                if (uri && !directSources.some(s => s.url === uri)) {
-                  directSources.push({ title, url: uri });
+              let midStreamErrorMsg = '';
+              const processCandidatePayload = (payload: any) => {
+                if (payload?.error?.message) {
+                  midStreamErrorMsg = String(payload.error.message);
+                  return;
                 }
+                const candidate = payload?.candidates?.[0];
+                const gChunks = candidate?.groundingMetadata?.groundingChunks || [];
+                for (const gc of gChunks) {
+                  const uri = gc?.web?.uri || gc?.maps?.uri;
+                  const title = gc?.web?.title || gc?.maps?.title || uri;
+                  if (uri && !directSources.some((s) => s.url === uri)) {
+                    directSources.push({ title, url: uri });
+                  }
+                }
+                const responseParts: any[] = candidate?.content?.parts || [];
+                for (const part of responseParts) {
+                  if (part?.text) {
+                    streamedText += part.text;
+                    if (phase === 'search' && directSources.length === 0) {
+                      bufferedSearchText += part.text;
+                    } else {
+                      if (bufferedSearchText) {
+                        onChunk?.(bufferedSearchText);
+                        bufferedSearchText = '';
+                      }
+                      onChunk?.(part.text);
+                    }
+                  } else if (part?.functionCall?.name) {
+                    pendingFunctionCalls.push({
+                      name: String(part.functionCall.name),
+                      args: { ...(part.functionCall.args || {}) },
+                    });
+                  }
+                }
+              };
+
+              if (canStream && directRes.body) {
+                const reader = directRes.body.getReader();
+                const decoder = new TextDecoder();
+                let sseBuffer = '';
+                let stallTimer = setTimeout(() => activeController?.abort(), 16000);
+                try {
+                  while (true) {
+                    const { value, done } = await reader.read();
+                    clearTimeout(stallTimer);
+                    if (done) break;
+                    stallTimer = setTimeout(() => activeController?.abort(), 16000);
+                    sseBuffer += decoder.decode(value, { stream: true });
+                    const lines = sseBuffer.split(/\r?\n/);
+                    sseBuffer = lines.pop() || '';
+                    for (const line of lines) {
+                      const trimmedLine = line.trim();
+                      if (!trimmedLine.startsWith('data:')) continue;
+                      const jsonStr = trimmedLine.slice(5).trim();
+                      if (!jsonStr || jsonStr === '[DONE]') continue;
+                      try {
+                        processCandidatePayload(JSON.parse(jsonStr));
+                      } catch {
+                        // skip malformed partial chunk
+                      }
+                    }
+                  }
+                  if (sseBuffer.trim().startsWith('data:')) {
+                    const jsonStr = sseBuffer.trim().slice(5).trim();
+                    if (jsonStr && jsonStr !== '[DONE]') {
+                      try {
+                        processCandidatePayload(JSON.parse(jsonStr));
+                      } catch {}
+                    }
+                  }
+                } catch (readErr: any) {
+                  if (!streamedText) {
+                    throw readErr;
+                  }
+                  midStreamErrorMsg = readErr?.message || 'Stream interrupted';
+                } finally {
+                  clearTimeout(stallTimer);
+                }
+              } else {
+                const json = await directRes.json().catch(() => null);
+                processCandidatePayload(json);
               }
 
-              for (const part of responseParts) {
-                if (part?.text) {
-                  streamedText += part.text;
-                } else if (part?.functionCall?.name) {
-                  const fcName = String(part.functionCall.name);
-                  const fcArgs = { ...(part.functionCall.args || {}) };
-                  if (fcName === 'open_app' && String(fcArgs.app_name || '').toLowerCase().includes('google search')) {
+              // If stream failed mid-sentence after outputting partial text, finish cleanly via non-streaming generateContent
+              if (midStreamErrorMsg && streamedText.trim()) {
+                try {
+                  const lastTurnParts = Array.isArray((phaseContents[phaseContents.length - 1] as any)?.parts)
+                    ? (phaseContents[phaseContents.length - 1] as any).parts
+                    : [{ text: latestUserText }];
+                  const rescueBody: Record<string, any> = {
+                    systemInstruction: { parts: [{ text: apkSystemInstruction }] },
+                    contents: [
+                      ...phaseContents.slice(0, -1),
+                      {
+                        role: 'user',
+                        parts: [
+                          ...lastTurnParts,
+                          {
+                            text: `\n\nContinue seamlessly from the EXACT character where your previous response stopped without repeating already sent text:\n\n[ALREADY SENT]:\n${streamedText}`,
+                          },
+                        ],
+                      },
+                    ],
+                  };
+                  const rescueRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
+                    {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(rescueBody),
+                    }
+                  );
+                  if (rescueRes.ok) {
+                    const rescueJson = await rescueRes.json().catch(() => null);
+                    const contText = rescueJson?.candidates?.[0]?.content?.parts
+                      ?.map((p: any) => p?.text || '')
+                      .join('') || '';
+                    if (contText) {
+                      const tail = streamedText.slice(-30);
+                      const overlapIdx = tail.length >= 6 ? contText.indexOf(tail) : -1;
+                      const cleanCont = overlapIdx >= 0 ? contText.slice(overlapIdx + tail.length) : contText;
+                      if (cleanCont) {
+                        streamedText += cleanCont;
+                        if (phase === 'search' && directSources.length === 0) {
+                          bufferedSearchText += cleanCont;
+                        } else {
+                          onChunk?.(cleanCont);
+                        }
+                      }
+                      midStreamErrorMsg = '';
+                    }
+                  }
+                } catch {}
+              } else if (midStreamErrorMsg && !streamedText.trim()) {
+                throw new Error(midStreamErrorMsg);
+              }
+
+              const streamedActions: DeviceAction[] = [];
+              for (const fc of pendingFunctionCalls) {
+                const fcName = fc.name;
+                const fcArgs = fc.args;
+                if (fcName === 'open_app' && String(fcArgs.app_name || '').toLowerCase().includes('google search')) {
+                  continue;
+                }
+                if (fcName === 'make_call' || fcName === 'send_sms' || fcName === 'open_whatsapp') {
+                  const p = String(fcArgs.phone_number || '').trim();
+                  const n = String(fcArgs.contact_name || '').trim();
+                  if ((!p && !n) || /^(unknown|someone|anybody|none)$/i.test(n)) {
                     continue;
                   }
-                  if (fcName === 'make_call' || fcName === 'send_sms' || fcName === 'open_whatsapp') {
-                    const p = String(fcArgs.phone_number || '').trim();
-                    const n = String(fcArgs.contact_name || '').trim();
-                    if ((!p && !n) || /^(unknown|someone|anybody|none)$/i.test(n)) {
-                      continue;
-                    }
-                  }
-                  if (fcName === 'open_youtube' && typeof fcArgs.query === 'string' && fcArgs.query.trim()) {
-                    const resolved = await resolveYouTubeVideoForApk(fcArgs.query);
-                    if (resolved) {
-                      fcArgs.videoId = resolved.videoId;
-                      fcArgs.videoTitle = resolved.title;
-                      fcArgs.channel = resolved.channel;
-                    }
-                  }
-                  const action = executeDeviceAction(fcName, fcArgs);
-                  if (action) streamedActions.push(action);
                 }
+                if (fcName === 'open_youtube' && typeof fcArgs.query === 'string' && fcArgs.query.trim()) {
+                  const resolved = await resolveYouTubeVideoForApk(fcArgs.query);
+                  if (resolved) {
+                    fcArgs.videoId = resolved.videoId;
+                    fcArgs.videoTitle = resolved.title;
+                    fcArgs.channel = resolved.channel;
+                  }
+                }
+                const action = executeDeviceAction(fcName, fcArgs);
+                if (action) streamedActions.push(action);
               }
 
-              if (directSources.length === 0) {
+              if (directSources.length === 0 && streamedText) {
                 const mdSources = extractMarkdownUrls(streamedText);
                 directSources.push(...mdSources);
               }
 
-              // Never accept ungrounded stale memory during 'search' if RSS fallback hasn't run yet
+              // If Search returned an ungrounded answer, immediately check RSS (don't waste 3 more models first)
               if (phase === 'search' && directSources.length === 0) {
+                if (streamedText.trim()) {
+                  ungroundedSearchFallbackText = streamedText;
+                  apkLastWorkingKey = currentKey;
+                }
+                jumpToNextPhase = true;
                 abortModelLoop = true;
                 break;
               }
 
-              if (streamedText) {
-                onChunk?.(streamedText);
+              if (bufferedSearchText) {
+                onChunk?.(bufferedSearchText);
+                bufferedSearchText = '';
               }
 
               if (directSources.length > 0) {
@@ -2308,17 +2623,19 @@ export async function sendMessageToGemini(
               }
 
               if (streamedText || streamedActions.length > 0) {
+                apkLastWorkingKey = currentKey;
                 return { streamedText, streamedActions, streamedSources: directSources };
               }
               break;
             } catch (directErr: any) {
+              clearTimer?.();
               lastDirectErr = directErr;
               if (directErr?.name === 'AbortError' && !isLastApkModel) {
                 abortModelLoop = true;
                 break;
               }
               if (attempt + 1 < maxDirectAttempts) {
-                await new Promise((r) => setTimeout(r, 450));
+                await new Promise((r) => setTimeout(r, 300));
                 continue;
               }
             }
@@ -2334,20 +2651,29 @@ export async function sendMessageToGemini(
   };
 
   const executeChatRequest = async (requestContents: any[], includeAudioFlag: boolean) => {
-    const res = await fetch(getEndpoint('/api/chat'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: requestContents,
-        userName,
-        hasAudioAttachment: includeAudioFlag,
-        selectedModel: selectedModel || 'Kevin 1.3 Pro',
-        customApiKey,
-        customApiKeys,
-        agentPermissions: perms,
-        savedContacts,
-      }),
-    });
+    const controller = new AbortController();
+    const connectTimeoutMs = isApk ? 14000 : 30000;
+    const connectTimer = setTimeout(() => controller.abort(), connectTimeoutMs);
+    let res: Response;
+    try {
+      res = await fetch(getEndpoint('/api/chat'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: requestContents,
+          userName,
+          hasAudioAttachment: includeAudioFlag,
+          selectedModel: selectedModel || 'Kevin 1.3 Pro',
+          customApiKey,
+          customApiKeys,
+          agentPermissions: perms,
+          savedContacts,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(connectTimer);
+    }
 
     if (!res.ok) {
       let errMessage = `HTTP ${res.status} Server error during chat`;
@@ -2438,17 +2764,17 @@ export async function sendMessageToGemini(
         fullResponse = directResult.streamedText;
         actions = directResult.streamedActions;
       } catch (directErr: any) {
-        try {
-          const backendResult = await executeChatRequest(contents, hasAudioAttachment);
-          fullResponse = backendResult.streamedText;
-          actions = backendResult.streamedActions;
-        } catch {
-          if (isTransientHighDemandError(directErr)) {
-            await new Promise((r) => setTimeout(r, 850));
-            const retryResult = await executeDirectGemini(contents, hasAudioAttachment);
-            fullResponse = retryResult.streamedText;
-            actions = retryResult.streamedActions;
-          } else {
+        if (isTransientHighDemandError(directErr)) {
+          await new Promise((r) => setTimeout(r, 450));
+          const retryResult = await executeDirectGemini(contents, hasAudioAttachment);
+          fullResponse = retryResult.streamedText;
+          actions = retryResult.streamedActions;
+        } else {
+          try {
+            const backendResult = await executeChatRequest(contents, hasAudioAttachment);
+            fullResponse = backendResult.streamedText;
+            actions = backendResult.streamedActions;
+          } catch {
             throw directErr;
           }
         }
@@ -2461,7 +2787,7 @@ export async function sendMessageToGemini(
       } catch (backendErr: any) {
         if (isTransientHighDemandError(backendErr)) {
           try {
-            await new Promise((r) => setTimeout(r, 850));
+            await new Promise((r) => setTimeout(r, 450));
             const retryBackend = await executeChatRequest(contents, hasAudioAttachment);
             fullResponse = retryBackend.streamedText;
             actions = retryBackend.streamedActions;

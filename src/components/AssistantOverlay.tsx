@@ -772,9 +772,14 @@ export default function AssistantOverlay({
         return;
       }
 
-      const prompt = transcript || 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.';
       const audioUrl = URL.createObjectURL(audioBlob);
-      await handleSend(prompt, audioBase64, recording.mimeType, undefined, transcript || '🎤 Voice Note', audioUrl);
+      const cleanTranscript = transcript.trim();
+      if (cleanTranscript) {
+        await handleSend(cleanTranscript, undefined, undefined, undefined, cleanTranscript, audioUrl);
+      } else {
+        const prompt = 'Listen to the attached voice message, understand it in Kinyarwanda or English, and answer or execute any requested action ONLY if explicitly spoken.';
+        await handleSend(prompt, audioBase64, recording.mimeType, undefined, '🎤 Voice Note', audioUrl);
+      }
     } catch (error) {
       setErrorMsg(error instanceof Error ? error.message : 'Unable to process the voice message.');
     } finally {

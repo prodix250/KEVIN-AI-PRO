@@ -522,7 +522,7 @@ async function startServer() {
         return;
       }
 
-      const sttModels = ['gemini-2.5-flash', 'gemini-3.5-transcribe', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+      const sttModels = ['gemini-3.5-transcribe', 'gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
       let lastErr: unknown = null;
       const invalidKeys = new Set<string>();
 
@@ -564,7 +564,9 @@ Listen carefully and accurately to this audio clip:
               },
               ...(model === 'gemini-4-hydrogen'
                 ? { config: { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } }
-                : {}),
+                : model.startsWith('gemini-2.5-')
+                  ? { config: { thinkingConfig: { thinkingBudget: 0 } } }
+                  : {}),
             });
             sttPromise.catch(() => {});
 
@@ -630,7 +632,7 @@ Listen carefully and accurately to this audio clip:
         return;
       }
 
-      const wakeModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-transcribe', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+      const wakeModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen', 'gemini-3.5-transcribe', 'gemini-2.5-flash'];
       let lastErr: unknown = null;
       const invalidKeys = new Set<string>();
 
@@ -669,6 +671,9 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                   },
                 ],
               },
+              ...(model.startsWith('gemini-2.5-')
+                ? { config: { thinkingConfig: { thinkingBudget: 0 } } }
+                : {}),
             });
             wakePromise.catch(() => {});
 
@@ -830,9 +835,10 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       ].filter(Boolean).join('\n');
 
       let lastErr: unknown = null;
+      const modelErrors: string[] = [];
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       const invalidKeys = new Set<string>();
-      const waModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+      const waModels = ['gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
 
       for (const model of waModels) {
         const waHasFallback = model !== waModels[waModels.length - 1];
@@ -857,7 +863,9 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                   systemInstruction,
                   ...(model === 'gemini-4-hydrogen'
                     ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-                    : {}),
+                    : model.startsWith('gemini-2.5-')
+                      ? { thinkingConfig: { thinkingBudget: 0 } }
+                      : {}),
                 },
               });
               waPromise.catch(() => {});
@@ -879,6 +887,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
               const msg = err instanceof Error ? err.message : String(err);
               const readable = extractReadableError(err);
               const combined = `${msg} ${readable}`;
+              modelErrors.push(`${model}: ${readable}`);
               if (isInvalidApiKeyError(err, combined)) {
                 console.warn(`[WhatsApp Key Rotation] Key #${keyIdx + 1} invalid (${readable}), rotating to next key...`);
                 invalidKeys.add(key);
@@ -898,7 +907,8 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
         }
       }
 
-      res.status(500).json({ error: extractReadableError(lastErr) });
+      console.error('All WhatsApp models failed:', modelErrors);
+      res.status(500).json({ error: modelErrors.join(' | ') || extractReadableError(lastErr) });
     } catch (error: any) {
       console.error('Server /api/whatsapp-reply error:', error);
       res.status(500).json({ error: extractReadableError(error) });
@@ -980,11 +990,12 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
             .join(' ')
             .trim()
         : '';
+      const needsContacts = Boolean(hasAudioAttachment) || /\b(hamagara|terefone|call|dial|sms|message|ubutumwa|ohereza|send|whatsapp|wa|contact|nimero|number)\b/i.test(latestUserText);
       const userQueryTokens = latestUserText
         .toLowerCase()
         .split(/\s+/)
         .filter((t: string) => t.length >= 2);
-      const filteredContacts = Array.isArray(savedContacts)
+      const filteredContacts = needsContacts && Array.isArray(savedContacts)
         ? savedContacts.filter((c) => c && typeof c.name === 'string' && typeof c.phone === 'string' && c.name.trim() && c.phone.trim())
         : [];
       const prioritizedContacts = userQueryTokens.length > 0
@@ -1002,7 +1013,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
           ]
         : filteredContacts;
       const contactsList = prioritizedContacts
-        .slice(0, 500)
+        .slice(0, 60)
         .map((c) => `${c.name!.trim()}: ${c.phone!.trim()}`);
       const contactsContext = contactsList.length > 0
         ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]`
@@ -1046,24 +1057,29 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       const effectiveContents = sanitizedContents.length > 0 ? sanitizedContents : (contents as any[]);
 
       let lastErr: unknown = null;
+      const chatModelErrors: string[] = [];
       let streamStarted = false;
       const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
+      const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
       const shouldTryWebSearch = Boolean(
         latestUserText
         && !hasAudioAttachment
         && !isExplicitDeviceCommand
-        && /\b(news|amakuru|agezweho|bigezweho|ibigezweho|mashya|masha|ubu|ubungubu|kuri ubu|uyu munsi|uyumunsi|ejo|ijoro ryashize|iki cyumweru|weather|iteganyagihe|forecast|meteo|météo|score|scores|match|matches|umukino|imikino|results|standings|table|ranking|amanota|shampiyona|champiyona|premier league|champions league|la liga|afcon|world cup|price|igiciro|ibiciro|dollar|idorari|exchange rate|bitcoin|crypto|current|currently|latest|recent|recently|update|updates|breaking|headlines|trending|yesterday|tonight|last night|internet|google|search|shaka|online|live|today|president|perezida|minister|minisiteri|minisitiri|winner|who won|watsinze|yatsinze|batsinze|what happened|byagenze gute|byabaye|rwanda|kigali|2025|2026|2027|uri he|mancity|man city|manutd|man utd|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr|kiyovu|mukura|amavubi|actualites|actualités|nouvelles|igihe|kigalitoday|rba|bbc)\b/i.test(latestUserText)
+        && !isAmakuruGreeting
+        && /\b(news|amakuru|agezweho|bigezweho|ibigezweho|mashya|masha|weather|iteganyagihe|forecast|meteo|météo|score|scores|match|matches|umukino|imikino|results|standings|table|ranking|amanota|shampiyona|champiyona|premier league|champions league|la liga|afcon|world cup|price|igiciro|ibiciro|dollar|idorari|exchange rate|bitcoin|crypto|latest|recent|recently|update|updates|breaking|headlines|trending|tonight|last night|internet|google|search|shaka|online|live|president|perezida|minister|minisiteri|minisitiri|winner|who won|watsinze|yatsinze|batsinze|mancity|man city|manutd|man utd|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr|kiyovu|mukura|amavubi|actualites|actualités|nouvelles|igihe|kigalitoday|rba|bbc)\b/i.test(latestUserText)
       );
       const modelsToTry = hasAudioAttachment
-        ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+        ? ['gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
         : shouldTryWebSearch
-          ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+          ? ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
           : selectedModel === 'Prodix pro'
-            ? ['gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
-            : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+            ? ['gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
+            : selectedModel === 'Kevin 1.3 Lite'
+              ? ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-2.5-flash']
+              : ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
 
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-      const firstModelTimeoutMs = shouldTryWebSearch ? 12000 : (hasAudioAttachment ? 10500 : 5500);
+      const firstModelTimeoutMs = shouldTryWebSearch ? 5000 : (hasAudioAttachment ? 8000 : 5000);
 
       const ensureStreamHeaders = () => {
         if (!streamStarted && !res.headersSent) {
@@ -1158,15 +1174,19 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
 
         const phaseModels = phase === 'rss_text'
           ? (selectedModel === 'Prodix pro'
-              ? ['gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
-              : ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'])
+              ? ['gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash']
+              : ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'])
           : modelsToTry;
 
+        let jumpToNextPhase = false;
         for (const modelName of phaseModels) {
+          if (jumpToNextPhase) break;
           const hasFallbackModel = modelName !== phaseModels[phaseModels.length - 1];
           const modelThinkingConfig = modelName === 'gemini-4-hydrogen'
             ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-            : {};
+            : modelName.startsWith('gemini-2.5-')
+              ? { thinkingConfig: { thinkingBudget: selectedModel === 'Prodix pro' ? 512 : 0 } }
+              : {};
 
           for (let keyIdx = 0; keyIdx < availableKeys.length; keyIdx++) {
             const key = availableKeys[keyIdx];
@@ -1189,16 +1209,16 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
             let abortModelLoop = false;
 
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
-              try {
-                const seenSourceUrls = new Set<string>();
-                const collectedSources: Array<{ title: string; url: string }> = [];
-                for (const ps of phaseSources) {
-                  if (ps.url && !seenSourceUrls.has(ps.url)) {
-                    seenSourceUrls.add(ps.url);
-                    collectedSources.push(ps);
-                  }
+              const seenSourceUrls = new Set<string>();
+              const collectedSources: Array<{ title: string; url: string }> = [];
+              for (const ps of phaseSources) {
+                if (ps.url && !seenSourceUrls.has(ps.url)) {
+                  seenSourceUrls.add(ps.url);
+                  collectedSources.push(ps);
                 }
-                let accumulatedText = '';
+              }
+              let accumulatedText = '';
+              try {
                 const bufferedSearchChunks: Array<{ functionCalls: any[]; textChunk?: string }> = [];
 
                 const consumeStream = async (toolMode: 'search' | 'device' | 'none') => {
@@ -1297,6 +1317,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
               } catch (error: any) {
                 lastErr = error;
                 const errorText = extractReadableError(error);
+                chatModelErrors.push(`${modelName}: ${errorText}`);
                 const rawText = error instanceof Error ? error.message : String(error);
                 const combinedText = `${rawText} ${errorText}`;
                 const isRotateKeyError = shouldRotateApiKey(error, combinedText);
@@ -1307,22 +1328,81 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                   || combinedText.toLowerCase().includes('overloaded');
                 const isModelNotFound = error?.status === 404
                   || combinedText.includes('404')
-                  || combinedText.includes('NOT_FOUND');
+                  || combinedText.includes('NOT_FOUND')
+                  || combinedText.toLowerCase().includes('no longer available');
 
                 if (streamStarted) {
+                  if (isUnavailableError && accumulatedText.trim()) {
+                    const continuePromptText = `Your previous reply was interrupted mid-sentence by a temporary connection drop. Continue seamlessly from the EXACT character where it stopped (do NOT repeat any words already written below, do NOT apologize or mention the interruption):\n\n[ALREADY SENT]:\n${accumulatedText}`;
+                    const lastTurnParts = Array.isArray((phaseContents[phaseContents.length - 1] as any)?.parts)
+                      ? (phaseContents[phaseContents.length - 1] as any).parts
+                      : [{ text: latestUserText }];
+                    const continuationContents = [
+                      ...phaseContents.slice(0, -1),
+                      {
+                        role: 'user',
+                        parts: [...lastTurnParts, { text: `\n\n${continuePromptText}` }],
+                      },
+                    ];
+                    const midRescueModels = Array.from(new Set(['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-4-hydrogen'])).slice(0, 2);
+                    for (const rescueModel of midRescueModels) {
+                      try {
+                        const rescuePromise = ai.models.generateContent({
+                          model: rescueModel,
+                          contents: continuationContents as any,
+                          config: {
+                            systemInstruction,
+                            ...(rescueModel === 'gemini-4-hydrogen'
+                              ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                              : rescueModel.startsWith('gemini-2.5-')
+                                ? { thinkingConfig: { thinkingBudget: 0 } }
+                                : {}),
+                          },
+                        });
+                        rescuePromise.catch(() => {});
+                        const rescueRes = await Promise.race([
+                          rescuePromise,
+                          new Promise<never>((_, reject) =>
+                            setTimeout(() => reject(new Error('503 Mid-stream rescue timed out')), 5000)
+                          ),
+                        ]);
+                        const contText = rescueRes.text || '';
+                        if (contText.trim()) {
+                          // Strip accidental overlap if model repeated the tail of accumulatedText
+                          const tail = accumulatedText.slice(-30);
+                          const overlapIdx = tail.length >= 6 ? contText.indexOf(tail) : -1;
+                          const cleanCont = overlapIdx >= 0 ? contText.slice(overlapIdx + tail.length) : contText;
+                          if (cleanCont) {
+                            await writePayloadChunk([], cleanCont);
+                          }
+                          if (collectedSources.length > 0) {
+                            ensureStreamHeaders();
+                            res.write(JSON.stringify({ type: 'sources', sources: collectedSources }) + '\n');
+                          }
+                          ensureStreamHeaders();
+                          res.write(JSON.stringify({ type: 'done' }) + '\n');
+                          res.end();
+                          return;
+                        }
+                      } catch {
+                        // try next mid-stream rescue model
+                      }
+                    }
+                  }
                   res.write(JSON.stringify({ type: 'error', error: errorText }) + '\n');
                   res.end();
                   return;
                 }
 
                 if (phase === 'search') {
-                  console.warn(`[Search Phase] ${modelName} key #${keyIdx + 1} failed (${errorText}). Trying next...`);
+                  console.warn(`[Search Phase] ${modelName} key #${keyIdx + 1} failed (${errorText}). Falling through...`);
                   if (isInvalidApiKeyError(error, combinedText)) {
                     invalidKeys.add(key);
+                    break;
                   }
-                  if (isModelNotFound || errorText === 'UNGROUNDED_SEARCH_FALLBACK_TO_RSS') {
-                    abortModelLoop = true;
-                  }
+                  // Jump straight to rss_text instead of burning 4 models x timeout on Google Search tool
+                  jumpToNextPhase = true;
+                  abortModelLoop = true;
                   break;
                 }
 
@@ -1353,7 +1433,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                     continue;
                   }
                   // Try bounded non-streaming generateContent rescue across reliable GA fallback models
-                  const rescueModels = Array.from(new Set([modelName, 'gemini-2.5-flash-lite', 'gemini-2.0-flash']));
+                  const rescueModels = Array.from(new Set([modelName, 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']));
                   for (const rescueModel of rescueModels) {
                     try {
                       const fallbackPromise = ai.models.generateContent({
@@ -1362,7 +1442,11 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                         config: {
                           systemInstruction,
                           ...(phase === 'device' ? { tools: [{ functionDeclarations: deviceActionDeclarations }] } : {}),
-                          ...(rescueModel === 'gemini-4-hydrogen' ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+                          ...(rescueModel === 'gemini-4-hydrogen'
+                            ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                            : rescueModel.startsWith('gemini-2.5-')
+                              ? { thinkingConfig: { thinkingBudget: 0 } }
+                              : {}),
                         },
                       });
                       fallbackPromise.catch(() => {});
@@ -1426,7 +1510,8 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       }
 
       if (!res.headersSent) {
-        res.status(500).json({ error: extractReadableError(lastErr) });
+        console.error('All /api/chat models failed:', chatModelErrors);
+        res.status(500).json({ error: chatModelErrors.join(' | ') || extractReadableError(lastErr) });
       }
     } catch (error: any) {
       console.error('Server /api/chat error:', error);

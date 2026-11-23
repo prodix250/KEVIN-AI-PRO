@@ -622,11 +622,10 @@ public class KevinWakeWordService extends Service {
 
     private WakeCheckResult callGeminiDirectWakeCheck(String audioBase64, List<String> keys) {
         String[] models = new String[] {
-                "gemini-2.5-flash",
-                "gemini-2.5-flash-lite",
-                "gemini-2.0-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-3.1-flash-lite",
                 "gemini-4-hydrogen",
-                "gemini-3.1-flash-lite"
+                "gemini-2.5-flash"
         };
         String prompt = "Listen strictly to this short audio clip. "
                 + "Set \"wake\":true ONLY if the speaker clearly and intentionally calls the assistant by saying \"Hi Kevin\", \"Hey Kevin\", \"Hello Kevin\", or \"OK Kevin\". "
@@ -638,63 +637,84 @@ public class KevinWakeWordService extends Service {
         for (String model : models) {
             for (int i = 0; i < Math.min(keys.size(), 2); i++) {
                 String key = keys.get(i);
-                HttpURLConnection conn = null;
-                try {
-                    URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
-                            + model + ":generateContent?key=" + URLEncoder.encode(key, "UTF-8"));
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setConnectTimeout(3500);
-                    conn.setReadTimeout(5000);
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setDoOutput(true);
+                boolean omitThinkingConfig = false;
+                for (int attempt = 0; attempt < 2; attempt++) {
+                    HttpURLConnection conn = null;
+                    try {
+                        URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
+                                + model + ":generateContent?key=" + URLEncoder.encode(key, "UTF-8"));
+                        conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("POST");
+                        conn.setConnectTimeout(3000);
+                        conn.setReadTimeout(4500);
+                        conn.setRequestProperty("Content-Type", "application/json");
+                        conn.setDoOutput(true);
 
-                    JSONObject inlineData = new JSONObject();
-                    inlineData.put("mimeType", "audio/wav");
-                    inlineData.put("data", audioBase64);
+                        JSONObject inlineData = new JSONObject();
+                        inlineData.put("mimeType", "audio/wav");
+                        inlineData.put("data", audioBase64);
 
-                    JSONObject audioPart = new JSONObject();
-                    audioPart.put("inlineData", inlineData);
+                        JSONObject audioPart = new JSONObject();
+                        audioPart.put("inlineData", inlineData);
 
-                    JSONObject textPart = new JSONObject();
-                    textPart.put("text", prompt);
+                        JSONObject textPart = new JSONObject();
+                        textPart.put("text", prompt);
 
-                    JSONArray parts = new JSONArray();
-                    parts.put(audioPart);
-                    parts.put(textPart);
+                        JSONArray parts = new JSONArray();
+                        parts.put(audioPart);
+                        parts.put(textPart);
 
-                    JSONObject content = new JSONObject();
-                    content.put("parts", parts);
+                        JSONObject content = new JSONObject();
+                        content.put("parts", parts);
 
-                    JSONArray contents = new JSONArray();
-                    contents.put(content);
+                        JSONArray contents = new JSONArray();
+                        contents.put(content);
 
-                    JSONObject body = new JSONObject();
-                    body.put("contents", contents);
+                        JSONObject body = new JSONObject();
+                        body.put("contents", contents);
 
-                    try (OutputStream os = conn.getOutputStream()) {
-                        os.write(body.toString().getBytes(StandardCharsets.UTF_8));
-                    }
-
-                    int code = conn.getResponseCode();
-                    if (code >= 200 && code < 300) {
-                        String respStr = readHttpStream(conn);
-                        JSONObject root = new JSONObject(respStr);
-                        JSONArray candidates = root.optJSONArray("candidates");
-                        if (candidates != null && candidates.length() > 0) {
-                            JSONObject cand = candidates.getJSONObject(0);
-                            JSONObject candContent = cand.optJSONObject("content");
-                            JSONArray respParts = candContent != null ? candContent.optJSONArray("parts") : null;
-                            if (respParts != null && respParts.length() > 0) {
-                                String rawText = respParts.getJSONObject(0).optString("text", "").trim();
-                                return parseWakeJson(rawText);
+                        JSONObject genConfig = new JSONObject();
+                        genConfig.put("temperature", 0.1);
+                        genConfig.put("maxOutputTokens", 120);
+                        if (!omitThinkingConfig) {
+                            if (model.startsWith("gemini-2.5")) {
+                                genConfig.put("thinkingConfig", new JSONObject().put("thinkingBudget", 0));
+                            } else if (model.contains("gemini-4")) {
+                                genConfig.put("thinkingConfig", new JSONObject().put("thinkingLevel", "LOW"));
                             }
                         }
+                        body.put("generationConfig", genConfig);
+
+                        try (OutputStream os = conn.getOutputStream()) {
+                            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                        }
+
+                        int code = conn.getResponseCode();
+                        if (code >= 200 && code < 300) {
+                            String respStr = readHttpStream(conn);
+                            JSONObject root = new JSONObject(respStr);
+                            JSONArray candidates = root.optJSONArray("candidates");
+                            if (candidates != null && candidates.length() > 0) {
+                                JSONObject cand = candidates.getJSONObject(0);
+                                JSONObject candContent = cand.optJSONObject("content");
+                                JSONArray respParts = candContent != null ? candContent.optJSONArray("parts") : null;
+                                if (respParts != null && respParts.length() > 0) {
+                                    String rawText = respParts.getJSONObject(0).optString("text", "").trim();
+                                    return parseWakeJson(rawText);
+                                }
+                            }
+                            break;
+                        } else if (code == 400 && !omitThinkingConfig) {
+                            omitThinkingConfig = true;
+                        } else {
+                            break;
+                        }
+                    } catch (Throwable t) {
+                        lastDiagnostic = "Direct check wait: " + t.getClass().getSimpleName();
+                        break;
+                    } finally {
+                        if (conn != null) conn.disconnect();
                     }
-                } catch (Throwable t) {
-                    lastDiagnostic = "Direct check wait: " + t.getClass().getSimpleName();
-                } finally {
-                    if (conn != null) conn.disconnect();
                 }
             }
         }

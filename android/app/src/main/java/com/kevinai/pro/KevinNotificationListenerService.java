@@ -485,16 +485,17 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         }
 
         String[] models = new String[] {
-                "gemini-2.5-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-4-hydrogen",
                 "gemini-3.1-flash-lite",
-                "gemini-2.5-flash-lite",
-                "gemini-2.0-flash"
+                "gemini-2.5-flash"
         };
         for (int mIdx = 0; mIdx < models.length; mIdx++) {
             String model = models[mIdx];
             boolean isLastModel = (mIdx == models.length - 1);
             for (String key : apiKeys) {
                 int maxAttempts = isLastModel ? 2 : 1;
+                boolean omitThinkingConfig = false;
                 for (int attempt = 0; attempt < maxAttempts; attempt++) {
                     HttpURLConnection conn = null;
                     try {
@@ -503,14 +504,26 @@ public class KevinNotificationListenerService extends NotificationListenerServic
                         URL url = new URL(endpoint);
                         conn = (HttpURLConnection) url.openConnection();
                         conn.setRequestMethod("POST");
-                        conn.setConnectTimeout(8_000);
-                        conn.setReadTimeout(12_000);
+                        conn.setConnectTimeout(5_000);
+                        conn.setReadTimeout(7_000);
                         conn.setRequestProperty("Content-Type", "application/json");
                         conn.setDoOutput(true);
 
                         JSONObject body = new JSONObject();
                         JSONObject sysPart = new JSONObject().put("text", sysPrompt);
                         body.put("systemInstruction", new JSONObject().put("parts", new JSONArray().put(sysPart)));
+
+                        JSONObject genConfig = new JSONObject();
+                        genConfig.put("temperature", 0.7);
+                        genConfig.put("maxOutputTokens", 160);
+                        if (!omitThinkingConfig) {
+                            if (model.startsWith("gemini-2.5")) {
+                                genConfig.put("thinkingConfig", new JSONObject().put("thinkingBudget", 0));
+                            } else if (model.contains("gemini-4")) {
+                                genConfig.put("thinkingConfig", new JSONObject().put("thinkingLevel", "LOW"));
+                            }
+                        }
+                        body.put("generationConfig", genConfig);
 
                         JSONObject userPart = new JSONObject().put("text", incoming.trim());
                         JSONObject userContent = new JSONObject()
@@ -552,6 +565,9 @@ public class KevinNotificationListenerService extends NotificationListenerServic
                                 }
                             }
                             break;
+                        } else if (code == 400 && !omitThinkingConfig) {
+                            omitThinkingConfig = true;
+                            maxAttempts = Math.max(maxAttempts, attempt + 2);
                         } else if (code == 503 && attempt + 1 < maxAttempts) {
                             try { Thread.sleep(350L); } catch (InterruptedException ignored) {}
                         } else {
