@@ -553,43 +553,49 @@ public class KevinAgentBridge {
     @JavascriptInterface
     public String fetchWebNewsRss(String query) {
         if (TextUtils.isEmpty(query)) return "";
-        HttpURLConnection conn = null;
-        try {
-            String rssUrl = "https://news.google.com/rss/search?q="
-                    + Uri.encode(query.trim())
-                    + "&hl=en&gl=US&ceid=US:en";
-            URL url = new URL(rssUrl);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setInstanceFollowRedirects(true);
-            conn.setConnectTimeout(4500);
-            conn.setReadTimeout(4500);
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty(
-                    "User-Agent",
-                    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-            );
-            int code = conn.getResponseCode();
-            if (code < 200 || code >= 300) {
-                return "";
-            }
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8)
-            );
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append('\n');
-                if (sb.length() > 200_000) break;
-            }
-            reader.close();
-            return sb.toString();
-        } catch (Exception ignored) {
-            return "";
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
+        String[] urls = new String[] {
+                "https://news.google.com/rss/search?q=" + Uri.encode(query.trim()) + "&hl=en&gl=US&ceid=US:en",
+                "https://news.google.com/rss/search?q=" + Uri.encode(query.trim()) + "&hl=en&gl=RW&ceid=RW:en"
+        };
+        for (String rssUrl : urls) {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL(rssUrl);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setInstanceFollowRedirects(true);
+                conn.setConnectTimeout(4500);
+                conn.setReadTimeout(4500);
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty(
+                        "User-Agent",
+                        "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                );
+                int code = conn.getResponseCode();
+                if (code < 200 || code >= 300) {
+                    continue;
+                }
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8)
+                );
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append('\n');
+                    if (sb.length() > 200_000) break;
+                }
+                reader.close();
+                String xml = sb.toString();
+                if (xml.contains("<item")) {
+                    return xml;
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
             }
         }
+        return "";
     }
 
     private File resolveLocalImageFile(String uriOrPath) {

@@ -1690,26 +1690,38 @@ export default function App() {
     } catch (error: any) {
       console.error("Error:", error);
       setIsTyping(false);
-      const errMsg = error?.message || String(error);
+      const rawErrMsg = error?.message || String(error);
+      let errMsg = rawErrMsg;
+      try {
+        const parsed = JSON.parse(rawErrMsg);
+        if (parsed?.error?.message) errMsg = String(parsed.error.message);
+        else if (parsed?.error && typeof parsed.error === 'string') errMsg = parsed.error;
+      } catch {}
+      const isLocalPreview = typeof window !== 'undefined' && (
+        window.location.hostname === 'localhost'
+        || window.location.hostname === '127.0.0.1'
+        || window.location.hostname.includes('ais-dev')
+        || window.location.hostname.includes('ais-pre')
+      ) && !isCapacitorApkRuntime();
       const isApkMissingKey = errMsg.includes('APK_NO_API_KEY')
-        || (isCapacitorApkRuntime() && getGeminiApiKeysArray().length === 0 && (errMsg.includes('Nta Gemini API key') || errMsg.includes('API key') || errMsg.includes('Failed to fetch')));
-      const isQuotaError = errMsg.includes('resource_exhausted') || errMsg.includes('Quota exceeded') || errMsg.includes('429') || errMsg.includes('quota');
+        || (getGeminiApiKeysArray().length === 0 && !isLocalPreview && (errMsg.includes('Nta Gemini API key') || errMsg.includes('API key') || errMsg.includes('Failed to fetch')));
+      const isQuotaError = errMsg.includes('resource_exhausted') || errMsg.includes('Quota exceeded') || errMsg.includes('429') || errMsg.toLowerCase().includes('quota');
       const isHighDemandError = errMsg.includes('503') || errMsg.toLowerCase().includes('high demand') || errMsg.toLowerCase().includes('unavailable');
       const isAuthError = errMsg.includes('API key not valid') || errMsg.includes('401') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('Secrets') || errMsg.includes('Nta Gemini API key');
       let displayMsg = "Mbabarira, habaye ikibazo cyo kohereza ubutumwa. Ongera ugerageze.";
       if (isApkMissingKey) {
-        displayMsg = "🔑 Nta Gemini API Key irabikwa kuri iyi porogaramu. Nyamuneka jya muri Settings > INJIZA KEVIN API KEYS ushyiremo API Key yawe kugira ngo Kevin AI ikore neza.";
+        displayMsg = "🔑 Nta Gemini API Key irashyirwaho kuri iyi porogaramu. Nyamuneka jya muri Settings > INJIZA KEVIN API KEYS ushyiremo API Key yawe kugira ngo Kevin AI ikore neza.";
         setKeysPool(getGeminiKeysPool());
         setShowApiKeyModal(true);
       } else if (isQuotaError) {
-        displayMsg = "⚠️ Umubare w'ubutumwa wemerewe muri aka kanya wuzuye (Rate Limit / Quota). Nyamuneka ongera ugerageze nyuma y'iminota mike cyangwa ushyiremo kevin api keys muri setting niba uzifite";
+        displayMsg = "⚠️ Umubare w'ubutumwa wemerewe muri aka kanya wuzuye (Rate Limit / Quota). Nyamuneka ongera ugerageze nyuma y'iminota mike cyangwa ushyiremo izindi Kevin API Keys muri Settings.";
       } else if (isHighDemandError) {
         displayMsg = "⚠️ Seriveri irimo gukoreshwa n'abantu benshi cyane muri aka kanya. Nyamuneka ongera wohereze nyuma y'amasegonda make.";
       } else if (isAuthError) {
-        displayMsg = isCapacitorApkRuntime()
+        displayMsg = isCapacitorApkRuntime() || !isLocalPreview
           ? "⚠️ API Key yawe ntiyemeye cyangwa ntabwo irashyirwaho. Nyamuneka genzura keys zawe muri Settings > INJIZA KEVIN API KEYS."
           : "⚠️ Nta API Key yabonetse cyangwa ntabwo yashyizweho neza. Nyamuneka yishyireho muri Settings > Secrets panel.";
-      } else if (errMsg && errMsg.length < 160 && !errMsg.includes("{") && !errMsg.includes("[object")) {
+      } else if (errMsg && errMsg.length < 220 && !errMsg.includes("[object")) {
         displayMsg = `⚠️ ${errMsg}`;
       }
 

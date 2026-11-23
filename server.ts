@@ -347,19 +347,22 @@ function buildCleanWebSearchQuery(rawQuery: string): string {
     .replace(/\bmancity\b/gi, 'Manchester City')
     .replace(/\bman\s*city\b/gi, 'Manchester City')
     .replace(/\bmanutd\b/gi, 'Manchester United')
+    .replace(/\bman\s*utd\b/gi, 'Manchester United')
     .replace(/\bbarca\b/gi, 'Barcelona');
   const stopWords = new Set([
-    'wampaye', 'ampaye', 'mbonera', 'mbwira', 'shaka', 'kuri', 'internet', 'google',
-    'amakuru', 'agezweho', 'mashya', 'mwikipe', 'ikipe', 'ya', 'yo', 'za', 'mu', 'muri',
-    'ubu', 'uyu', 'munsi', 'niba', 'hari', 'icyo', 'uko', 'bimeze', 'please', 'tell',
+    'wampaye', 'ampaye', 'mbonera', 'mbwira', 'wambwira', 'nyibarize', 'shaka', 'kuri', 'internet', 'google',
+    'amakuru', 'agezweho', 'bigezweho', 'ibigezweho', 'mashya', 'masha', 'mwikipe', 'ikipe', 'ya', 'yo', 'za', 'mu', 'muri',
+    'ubu', 'ubungubu', 'uyu', 'uyumunsi', 'munsi', 'ejo', 'niba', 'hari', 'icyo', 'uko', 'bimeze', 'ese', 'iki', 'gute',
+    'byagenze', 'byabaye', 'nde', 'ziri', 'kandi', 'cyane', 'yuyu', 'ryuyu', 'please', 'tell',
     'me', 'about', 'what', 'is', 'are', 'the', 'in', 'on', 'for', 'of', 'latest', 'news',
-    'current', 'today', 'now', 'give', 'search', 'online', 'live',
+    'current', 'today', 'now', 'give', 'search', 'online', 'live', 'recent', 'recently', 'update', 'updates',
+    'breaking', 'headlines', 'trending',
   ]);
   const tokens = expanded
     .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
     .split(/\s+/)
     .filter((w) => w.length > 1 && !stopWords.has(w.toLowerCase()));
-  return tokens.length > 0 ? tokens.join(' ').slice(0, 120) : expanded.trim().slice(0, 120);
+  return tokens.length > 0 ? tokens.join(' ').slice(0, 120) : 'Rwanda world breaking news';
 }
 
 async function fetchLiveWebSearchContext(rawQuery: string): Promise<{
@@ -372,43 +375,48 @@ async function fetchLiveWebSearchContext(rawQuery: string): Promise<{
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4500);
-    const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQuery)}&hl=en&gl=US&ceid=US:en`;
-    const response = await fetch(rssUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      },
-    });
-    clearTimeout(timer);
-    if (!response.ok) return { contextText: '', sources: [] };
-    const xml = await response.text();
-    const itemMatches = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 6);
-    const items: Array<{ title: string; url: string; pubDate: string; sourceName: string }> = [];
+    const rssUrls = [
+      `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQuery)}&hl=en&gl=US&ceid=US:en`,
+      `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQuery)}&hl=en&gl=RW&ceid=RW:en`,
+    ];
+    let items: Array<{ title: string; url: string; pubDate: string; sourceName: string }> = [];
+    for (const rssUrl of rssUrls) {
+      const response = await fetch(rssUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+      });
+      if (!response.ok) continue;
+      const xml = await response.text();
+      const itemMatches = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 6);
+      for (const match of itemMatches) {
+        const block = match[1];
+        const rawTitle = block.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '';
+        const rawLink = block.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '';
+        const rawDate = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '';
+        const rawSource = block.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] || '';
+        const sourceUrl = block.match(/<source[^>]*url="([^"]+)"/)?.[1] || '';
 
-    for (const match of itemMatches) {
-      const block = match[1];
-      const rawTitle = block.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '';
-      const rawLink = block.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '';
-      const rawDate = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '';
-      const rawSource = block.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] || '';
-      const sourceUrl = block.match(/<source[^>]*url="([^"]+)"/)?.[1] || '';
+        const title = decodeXmlEntities(rawTitle);
+        const url = decodeXmlEntities(rawLink) || decodeXmlEntities(sourceUrl);
+        const pubDate = decodeXmlEntities(rawDate);
+        const sourceName = decodeXmlEntities(rawSource);
 
-      const title = decodeXmlEntities(rawTitle);
-      const url = decodeXmlEntities(rawLink) || decodeXmlEntities(sourceUrl);
-      const pubDate = decodeXmlEntities(rawDate);
-      const sourceName = decodeXmlEntities(rawSource);
-
-      if (title && url) {
-        items.push({ title, url, pubDate, sourceName });
+        if (title && url) {
+          items.push({ title, url, pubDate, sourceName });
+        }
       }
+      if (items.length > 0) break;
     }
+    clearTimeout(timer);
 
     if (items.length === 0) return { contextText: '', sources: [] };
 
     const lines = items.map((it, idx) =>
       `${idx + 1}. "${it.title}"${it.sourceName ? ` (${it.sourceName})` : ''}${it.pubDate ? ` [${it.pubDate}]` : ''} — ${it.url}`
     );
-    const contextText = `[LIVE INTERNET NEWS & WEB SEARCH RESULTS FOR "${cleanQuery}"]:\nUse these verified, up-to-date real-time articles below to answer the user's question accurately in their language. Do NOT say you lack live internet access — summarize the latest developments directly from these current articles:\n${lines.join('\n')}`;
+    const contextText = `[LIVE INTERNET NEWS & WEB SEARCH RESULTS FOR "${cleanQuery}"]:\nCRITICAL: Today is ${new Date().toISOString().slice(0, 10)}. Use ONLY these verified, up-to-date real-time articles below to answer the user's question accurately in their language. Do NOT use outdated 2023/2024/2025 knowledge:\n${lines.join('\n')}`;
     const sources = items.map((it) => ({
       title: it.sourceName ? `${it.sourceName}: ${it.title}` : it.title,
       url: it.url,
@@ -1007,6 +1015,28 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
         realTimeContext,
       ].filter(Boolean).join('\n\n');
 
+      const sanitizedContents: any[] = [];
+      for (const turn of (contents as any[])) {
+        if (!turn || !Array.isArray(turn.parts) || turn.parts.length === 0) continue;
+        const role = turn.role === 'model' ? 'model' : 'user';
+        const firstText = String(turn.parts[0]?.text || '').trim();
+        if (role === 'model' && (
+          firstText.startsWith('⚠️')
+          || firstText.startsWith('🔑 Nta Gemini API Key')
+          || firstText.startsWith('Mbabarira, habaye ikibazo')
+        )) {
+          continue;
+        }
+        if (sanitizedContents.length === 0 && role !== 'user') continue;
+        const prev = sanitizedContents[sanitizedContents.length - 1];
+        if (prev && prev.role === role) {
+          prev.parts = [...prev.parts, ...turn.parts];
+        } else {
+          sanitizedContents.push({ role, parts: turn.parts });
+        }
+      }
+      const effectiveContents = sanitizedContents.length > 0 ? sanitizedContents : (contents as any[]);
+
       let lastErr: unknown = null;
       let streamStarted = false;
       const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
@@ -1014,7 +1044,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
         latestUserText
         && !hasAudioAttachment
         && !isExplicitDeviceCommand
-        && /\b(news|amakuru|agezweho|ubu|weather|score|match|price|current|latest|internet|google|search|shaka|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|ikipe|perezida|uri he|amakuru mashya|mancity|man city|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr)\b/i.test(latestUserText)
+        && /\b(news|amakuru|agezweho|bigezweho|ibigezweho|mashya|masha|ubu|ubungubu|kuri ubu|uyu munsi|uyumunsi|ejo|ijoro ryashize|iki cyumweru|weather|iteganyagihe|forecast|meteo|météo|score|scores|match|matches|umukino|imikino|results|standings|table|ranking|amanota|shampiyona|champiyona|premier league|champions league|la liga|afcon|world cup|price|igiciro|ibiciro|dollar|idorari|exchange rate|bitcoin|crypto|current|currently|latest|recent|recently|update|updates|breaking|headlines|trending|yesterday|tonight|last night|internet|google|search|shaka|online|live|today|president|perezida|minister|minisiteri|minisitiri|winner|who won|watsinze|yatsinze|batsinze|what happened|byagenze gute|byabaye|rwanda|kigali|2025|2026|2027|uri he|mancity|man city|manutd|man utd|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr|kiyovu|mukura|amavubi|actualites|actualités|nouvelles|igihe|kigalitoday|rba|bbc)\b/i.test(latestUserText)
       );
       const modelsToTry = hasAudioAttachment
         ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
@@ -1079,9 +1109,12 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
         : ['device'];
 
       let rssCache: { contextText: string; sources: Array<{ title: string; url: string }> } | null = null;
+      if (shouldTryWebSearch) {
+        rssCache = await fetchLiveWebSearchContext(latestUserText).catch(() => ({ contextText: '', sources: [] }));
+      }
 
       for (const phase of phases) {
-        let phaseContents = contents as any[];
+        let phaseContents = effectiveContents;
         let phaseSources: Array<{ title: string; url: string }> = [];
 
         if (phase === 'rss_text') {
@@ -1091,10 +1124,28 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
           if (rssCache.contextText) {
             phaseSources = rssCache.sources;
             phaseContents = [
-              ...(contents as any[]),
-              { role: 'user', parts: [{ text: rssCache.contextText }] },
+              ...effectiveContents.slice(0, -1),
+              {
+                role: 'user',
+                parts: [
+                  ...((effectiveContents[effectiveContents.length - 1] as any)?.parts || []),
+                  { text: `\n\n${rssCache.contextText}` },
+                ],
+              },
             ];
           }
+        } else if (phase === 'search' && rssCache?.contextText) {
+          phaseSources = rssCache.sources;
+          phaseContents = [
+            ...effectiveContents.slice(0, -1),
+            {
+              role: 'user',
+              parts: [
+                ...((effectiveContents[effectiveContents.length - 1] as any)?.parts || []),
+                { text: `\n\n${rssCache.contextText}` },
+              ],
+            },
+          ];
         }
 
         const phaseModels = phase === 'rss_text'
@@ -1140,6 +1191,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                   }
                 }
                 let accumulatedText = '';
+                const bufferedSearchChunks: Array<{ functionCalls: any[]; textChunk?: string }> = [];
 
                 const consumeStream = async (toolMode: 'search' | 'device' | 'none') => {
                   const streamPromise = ai.models.generateContentStream({
@@ -1182,7 +1234,11 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                     if (chunk.text) {
                       accumulatedText += chunk.text;
                     }
-                    await writePayloadChunk(functionCalls, chunk.text);
+                    if (phase === 'search') {
+                      bufferedSearchChunks.push({ functionCalls, textChunk: chunk.text });
+                    } else {
+                      await writePayloadChunk(functionCalls, chunk.text);
+                    }
                   }
                 };
 
@@ -1207,6 +1263,17 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                       seenSourceUrls.add(url);
                       collectedSources.push({ title, url });
                     }
+                  }
+                }
+
+                // If Google Search phase returned ungrounded stale text with zero sources, fall through to rss_text instead of flushing stale data
+                if (phase === 'search' && collectedSources.length === 0) {
+                  throw new Error('UNGROUNDED_SEARCH_FALLBACK_TO_RSS');
+                }
+
+                if (phase === 'search' && bufferedSearchChunks.length > 0) {
+                  for (const item of bufferedSearchChunks) {
+                    await writePayloadChunk(item.functionCalls, item.textChunk);
                   }
                 }
 
@@ -1245,7 +1312,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                   if (isInvalidApiKeyError(error, combinedText)) {
                     invalidKeys.add(key);
                   }
-                  if (isModelNotFound) {
+                  if (isModelNotFound || errorText === 'UNGROUNDED_SEARCH_FALLBACK_TO_RSS') {
                     abortModelLoop = true;
                   }
                   break;

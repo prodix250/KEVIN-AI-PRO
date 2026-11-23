@@ -23767,7 +23767,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-D5H9MqIj.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-vfiksRcG.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -25525,19 +25525,24 @@ async function resolveYouTubeVideoForApk(query) {
   return null;
 }
 function buildApkCleanWebSearchQuery(rawQuery) {
-  const expanded = rawQuery.replace(/\bmancity\b/gi, "Manchester City").replace(/\bman\s*city\b/gi, "Manchester City").replace(/\bmanutd\b/gi, "Manchester United").replace(/\bbarca\b/gi, "Barcelona");
+  const expanded = rawQuery.replace(/\bmancity\b/gi, "Manchester City").replace(/\bman\s*city\b/gi, "Manchester City").replace(/\bmanutd\b/gi, "Manchester United").replace(/\bman\s*utd\b/gi, "Manchester United").replace(/\bbarca\b/gi, "Barcelona");
   const stopWords = /* @__PURE__ */ new Set([
     "wampaye",
     "ampaye",
     "mbonera",
     "mbwira",
+    "wambwira",
+    "nyibarize",
     "shaka",
     "kuri",
     "internet",
     "google",
     "amakuru",
     "agezweho",
+    "bigezweho",
+    "ibigezweho",
     "mashya",
+    "masha",
     "mwikipe",
     "ikipe",
     "ya",
@@ -25546,13 +25551,27 @@ function buildApkCleanWebSearchQuery(rawQuery) {
     "mu",
     "muri",
     "ubu",
+    "ubungubu",
     "uyu",
+    "uyumunsi",
     "munsi",
+    "ejo",
     "niba",
     "hari",
     "icyo",
     "uko",
     "bimeze",
+    "ese",
+    "iki",
+    "gute",
+    "byagenze",
+    "byabaye",
+    "nde",
+    "ziri",
+    "kandi",
+    "cyane",
+    "yuyu",
+    "ryuyu",
     "please",
     "tell",
     "me",
@@ -25573,13 +25592,23 @@ function buildApkCleanWebSearchQuery(rawQuery) {
     "give",
     "search",
     "online",
-    "live"
+    "live",
+    "recent",
+    "recently",
+    "update",
+    "updates",
+    "breaking",
+    "headlines",
+    "trending"
   ]);
   const tokens = expanded.replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/).filter((w2) => w2.length > 1 && !stopWords.has(w2.toLowerCase()));
-  return tokens.length > 0 ? tokens.join(" ").slice(0, 120) : expanded.trim().slice(0, 120);
+  return tokens.length > 0 ? tokens.join(" ").slice(0, 120) : "Rwanda world breaking news";
+}
+function decodeApkXmlEntities(text2) {
+  return text2.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'").trim();
 }
 function parseRssXmlForApk(xml2, cleanQuery) {
-  var _a2, _b2, _c, _d, _e2, _f, _g, _h;
+  var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k, _l, _m;
   if (!xml2 || !xml2.includes("<item")) return { contextText: "", sources: [] };
   const items = [];
   try {
@@ -25601,12 +25630,27 @@ function parseRssXmlForApk(xml2, cleanQuery) {
     }
   } catch {
   }
+  if (items.length === 0) {
+    const itemMatches = [...xml2.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 6);
+    for (const match of itemMatches) {
+      const block = match[1];
+      const title = decodeApkXmlEntities(((_i = block.match(/<title>([\s\S]*?)<\/title>/)) == null ? void 0 : _i[1]) || "");
+      const link2 = decodeApkXmlEntities(((_j = block.match(/<link>([\s\S]*?)<\/link>/)) == null ? void 0 : _j[1]) || "");
+      const pubDate = decodeApkXmlEntities(((_k = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/)) == null ? void 0 : _k[1]) || "");
+      const sourceName = decodeApkXmlEntities(((_l = block.match(/<source[^>]*>([\s\S]*?)<\/source>/)) == null ? void 0 : _l[1]) || "");
+      const sourceUrl = decodeApkXmlEntities(((_m = block.match(/<source[^>]*url="([^"]+)"/)) == null ? void 0 : _m[1]) || "");
+      const url = link2 || sourceUrl;
+      if (title && url) {
+        items.push({ title, url, pubDate, sourceName });
+      }
+    }
+  }
   if (items.length === 0) return { contextText: "", sources: [] };
   const lines = items.map(
     (it2, idx) => `${idx + 1}. "${it2.title}"${it2.sourceName ? ` (${it2.sourceName})` : ""}${it2.pubDate ? ` [${it2.pubDate}]` : ""} — ${it2.url}`
   );
   const contextText = `[LIVE INTERNET NEWS & WEB SEARCH RESULTS FOR "${cleanQuery}"]:
-Use these verified, up-to-date real-time articles below to answer the user's question accurately in their language. Do NOT say you lack live internet access — summarize the latest developments directly from these current articles:
+CRITICAL: Today is ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}. Use ONLY these verified, up-to-date real-time articles below to answer the user's question accurately in their language. NEVER use outdated 2023/2024/2025 information:
 ${lines.join("\n")}`;
   const sources = items.map((it2) => ({
     title: it2.sourceName ? `${it2.sourceName}: ${it2.title}` : it2.title,
@@ -25924,10 +25968,19 @@ async function generateWhatsAppAutoReply(sender, incomingMessage, replyStyle) {
   }
 }
 async function sendMessageToGemini(history, latestMessage, onChunk, attachments, selectedModel, onAction, audioBase64, audioMimeType, onSources) {
-  const contents = history.map((msg) => {
+  const cleanedHistory = history.filter((msg) => {
+    const t2 = ((msg == null ? void 0 : msg.text) || "").trim();
+    if (!t2 && !(msg == null ? void 0 : msg.image)) return false;
+    if (msg.sender === "kevin" && (t2.startsWith("⚠️") || t2.startsWith("🔑 Nta Gemini API Key") || t2.startsWith("Mbabarira, habaye ikibazo"))) {
+      return false;
+    }
+    return true;
+  }).slice(-20);
+  const rawContents = cleanedHistory.map((msg, idx) => {
     var _a2;
     const historyParts = [{ text: msg.text || "..." }];
-    if (typeof msg.image === "string" && msg.image && !/^https?:\/\//i.test(msg.image)) {
+    const isRecentTurn = idx >= cleanedHistory.length - 2;
+    if (isRecentTurn && typeof msg.image === "string" && msg.image && !/^https?:\/\//i.test(msg.image)) {
       const imageMimeType = ((_a2 = msg.image.match(/^data:([^;]+);base64,/i)) == null ? void 0 : _a2[1]) || "image/jpeg";
       const imageData = cleanBase64(msg.image);
       if (imageData) {
@@ -25944,6 +25997,18 @@ async function sendMessageToGemini(history, latestMessage, onChunk, attachments,
       parts: historyParts
     };
   });
+  const contents = [];
+  for (const turn of rawContents) {
+    if (contents.length === 0 && turn.role !== "user") {
+      continue;
+    }
+    const prev = contents[contents.length - 1];
+    if (prev && prev.role === turn.role) {
+      prev.parts = [...prev.parts, ...turn.parts];
+    } else {
+      contents.push(turn);
+    }
+  }
   const attachmentList = attachments ? Array.isArray(attachments) ? attachments : [attachments] : [];
   const hasAudioAttachment = Boolean(audioBase64) || attachmentList.some((attachment) => {
     var _a2;
@@ -26007,92 +26072,140 @@ ${att.textContent}` });
       });
     }
   }
-  contents.push({ role: "user", parts });
+  if (contents.length > 0 && contents[contents.length - 1].role === "user") {
+    contents[contents.length - 1].parts.push(...parts);
+  } else {
+    contents.push({ role: "user", parts });
+  }
   const userName = typeof window !== "undefined" ? safeStorageGet("kevin_user_name") || safeStorageGet("kevin_ai_user_name") || "Incuti yanjye" : "Incuti yanjye";
   const customApiKey = getUserCustomApiKey();
   const customApiKeys = getGeminiApiKeysArray();
   const perms = getAgentPermissions();
   const savedContacts = getSavedContacts();
   const isApk = isCapacitorApkRuntime();
-  const executeDirectApkGemini = async (requestContents, includeAudioFlag) => {
-    var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k, _l, _m;
+  const executeDirectGemini = async (requestContents, includeAudioFlag) => {
+    var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
     const latestUserText = Array.isArray(requestContents) && requestContents.length > 0 ? (((_a2 = requestContents[requestContents.length - 1]) == null ? void 0 : _a2.parts) || []).map((p2) => typeof (p2 == null ? void 0 : p2.text) === "string" ? p2.text : "").join(" ").trim() : "";
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
     const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
-      latestUserText && !includeAudioFlag && !isExplicitDeviceCommand && /\b(news|amakuru|agezweho|ubu|weather|score|match|price|current|latest|internet|google|search|shaka|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|ikipe|perezida|uri he|amakuru mashya|mancity|man city|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr)\b/i.test(latestUserText)
+      latestUserText && !includeAudioFlag && !isExplicitDeviceCommand && /\b(news|amakuru|agezweho|bigezweho|ibigezweho|mashya|masha|ubu|ubungubu|kuri ubu|uyu munsi|uyumunsi|ejo|ijoro ryashize|iki cyumweru|weather|iteganyagihe|forecast|meteo|météo|score|scores|match|matches|umukino|imikino|results|standings|table|ranking|amanota|shampiyona|champiyona|premier league|champions league|la liga|afcon|world cup|price|igiciro|ibiciro|dollar|idorari|exchange rate|bitcoin|crypto|current|currently|latest|recent|recently|update|updates|breaking|headlines|trending|yesterday|tonight|last night|internet|google|search|shaka|online|live|today|president|perezida|minister|minisiteri|minisitiri|winner|who won|watsinze|yatsinze|batsinze|what happened|byagenze gute|byabaye|rwanda|kigali|2025|2026|2027|uri he|mancity|man city|manutd|man utd|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr|kiyovu|mukura|amavubi|actualites|actualités|nouvelles|igihe|kigalitoday|rba|bbc)\b/i.test(latestUserText)
     );
+    let rssCache = null;
+    if (shouldTryWebSearch) {
+      rssCache = await fetchLiveWebSearchForApk(latestUserText).catch(() => ({ contextText: "", sources: [] }));
+    }
     const phases = shouldTryWebSearch ? ["search", "rss_text"] : ["device"];
     const invalidKeys = /* @__PURE__ */ new Set();
     let lastDirectErr = null;
-    let rssCache = null;
     for (const phase of phases) {
       let phaseContents = requestContents;
       let phaseSources = [];
       if (phase === "rss_text") {
         if (!rssCache) {
-          rssCache = await fetchLiveWebSearchForApk(latestUserText);
+          rssCache = await fetchLiveWebSearchForApk(latestUserText).catch(() => ({ contextText: "", sources: [] }));
         }
         if (rssCache.contextText) {
           phaseSources = rssCache.sources;
           phaseContents = [
-            ...requestContents,
-            { role: "user", parts: [{ text: rssCache.contextText }] }
+            ...requestContents.slice(0, -1),
+            {
+              role: "user",
+              parts: [
+                ...((_b2 = requestContents[requestContents.length - 1]) == null ? void 0 : _b2.parts) || [],
+                { text: `
+
+${rssCache.contextText}` }
+              ]
+            }
           ];
         }
+      } else if (phase === "search" && (rssCache == null ? void 0 : rssCache.contextText)) {
+        phaseSources = rssCache.sources;
+        phaseContents = [
+          ...requestContents.slice(0, -1),
+          {
+            role: "user",
+            parts: [
+              ...((_c = requestContents[requestContents.length - 1]) == null ? void 0 : _c.parts) || [],
+              { text: `
+
+${rssCache.contextText}` }
+            ]
+          }
+        ];
       }
-      const apkModels = includeAudioFlag ? ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"] : phase === "search" ? ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"] : selectedModel === "Kevin 1.3 Lite" ? ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-2.0-flash"] : ["gemini-2.5-flash", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
+      const apkModels = includeAudioFlag ? ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"] : phase === "search" ? ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"] : selectedModel === "Kevin 1.3 Lite" ? ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-2.0-flash"] : ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
       for (const modelName of apkModels) {
         const isLastApkModel = modelName === apkModels[apkModels.length - 1];
         for (const currentKey of customApiKeys) {
           if (invalidKeys.has(currentKey)) continue;
           const maxDirectAttempts = isLastApkModel ? 2 : 1;
           for (let attempt = 0; attempt < maxDirectAttempts; attempt++) {
-            try {
+            const callOnce = async (useTools) => {
               const payloadBody = {
                 systemInstruction: { parts: [{ text: apkSystemInstruction }] },
                 contents: phaseContents
               };
-              if (phase === "search") {
-                payloadBody.tools = [{ google_search: {} }];
-              } else if (phase === "device") {
-                payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
-              }
-              const directRes = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(payloadBody)
+              if (useTools) {
+                if (phase === "search") {
+                  payloadBody.tools = [{ google_search: {} }];
+                } else if (phase === "device") {
+                  payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
                 }
-              );
+              }
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), 16e3);
+              try {
+                return await fetch(
+                  `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payloadBody),
+                    signal: controller.signal
+                  }
+                );
+              } finally {
+                clearTimeout(timer);
+              }
+            };
+            try {
+              let directRes = await callOnce(phase === "search" || phase === "device");
+              if (directRes.status === 400 && (phase === "search" || phase === "device")) {
+                directRes = await callOnce(false);
+              }
               const json2 = await directRes.json().catch(() => null);
               if (!directRes.ok) {
-                const apiErrMsg = ((_b2 = json2 == null ? void 0 : json2.error) == null ? void 0 : _b2.message) || `HTTP ${directRes.status}`;
+                const apiErrMsg = ((_d = json2 == null ? void 0 : json2.error) == null ? void 0 : _d.message) || `HTTP ${directRes.status}`;
                 const lowerErr = apiErrMsg.toLowerCase();
                 if (directRes.status === 401 || directRes.status === 403 || lowerErr.includes("api key not valid") || lowerErr.includes("api_key_invalid")) {
                   invalidKeys.add(currentKey);
+                  lastDirectErr = new Error(apiErrMsg);
                   break;
                 }
+                const isNotFound = directRes.status === 404 || lowerErr.includes("not found");
+                if (!isNotFound || !lastDirectErr) {
+                  lastDirectErr = new Error(apiErrMsg);
+                }
                 const isTransientBusy = directRes.status === 503 || lowerErr.includes("high demand") || lowerErr.includes("unavailable") || lowerErr.includes("overloaded");
-                lastDirectErr = new Error(apiErrMsg);
                 if (isTransientBusy && attempt + 1 < maxDirectAttempts) {
                   await new Promise((r2) => setTimeout(r2, 500));
                   continue;
                 }
-                if (directRes.status === 404 || lowerErr.includes("not found")) {
+                if (isNotFound) {
                   break;
                 }
                 break;
               }
-              const responseParts = ((_e2 = (_d = (_c = json2 == null ? void 0 : json2.candidates) == null ? void 0 : _c[0]) == null ? void 0 : _d.content) == null ? void 0 : _e2.parts) || [];
+              const responseParts = ((_g = (_f = (_e2 = json2 == null ? void 0 : json2.candidates) == null ? void 0 : _e2[0]) == null ? void 0 : _f.content) == null ? void 0 : _g.parts) || [];
               let streamedText = "";
               const streamedActions = [];
               const directSources = [...phaseSources];
-              const gChunks = ((_h = (_g = (_f = json2 == null ? void 0 : json2.candidates) == null ? void 0 : _f[0]) == null ? void 0 : _g.groundingMetadata) == null ? void 0 : _h.groundingChunks) || [];
+              const gChunks = ((_j = (_i = (_h = json2 == null ? void 0 : json2.candidates) == null ? void 0 : _h[0]) == null ? void 0 : _i.groundingMetadata) == null ? void 0 : _j.groundingChunks) || [];
               for (const gc of gChunks) {
-                const uri = ((_i = gc == null ? void 0 : gc.web) == null ? void 0 : _i.uri) || ((_j = gc == null ? void 0 : gc.maps) == null ? void 0 : _j.uri);
-                const title = ((_k = gc == null ? void 0 : gc.web) == null ? void 0 : _k.title) || ((_l = gc == null ? void 0 : gc.maps) == null ? void 0 : _l.title) || uri;
+                const uri = ((_k = gc == null ? void 0 : gc.web) == null ? void 0 : _k.uri) || ((_l = gc == null ? void 0 : gc.maps) == null ? void 0 : _l.uri);
+                const title = ((_m = gc == null ? void 0 : gc.web) == null ? void 0 : _m.title) || ((_n = gc == null ? void 0 : gc.maps) == null ? void 0 : _n.title) || uri;
                 if (uri && !directSources.some((s2) => s2.url === uri)) {
                   directSources.push({ title, url: uri });
                 }
@@ -26100,7 +26213,7 @@ ${att.textContent}` });
               for (const part of responseParts) {
                 if (part == null ? void 0 : part.text) {
                   streamedText += part.text;
-                } else if ((_m = part == null ? void 0 : part.functionCall) == null ? void 0 : _m.name) {
+                } else if ((_o = part == null ? void 0 : part.functionCall) == null ? void 0 : _o.name) {
                   const fcName = String(part.functionCall.name);
                   const fcArgs = { ...part.functionCall.args || {} };
                   if (fcName === "open_app" && String(fcArgs.app_name || "").toLowerCase().includes("google search")) {
@@ -26130,11 +26243,7 @@ ${att.textContent}` });
                 directSources.push(...mdSources);
               }
               if (phase === "search" && directSources.length === 0) {
-                const lowerReply = streamedText.toLowerCase();
-                const looksUngrounded = lowerReply.includes("live search") || lowerReply.includes("real-time") || lowerReply.includes("ntabwo mbasha gushakisha") || lowerReply.includes("cannot access") || lowerReply.includes("don't have access");
-                if (looksUngrounded) {
-                  break;
-                }
+                break;
               }
               if (streamedText) {
                 onChunk == null ? void 0 : onChunk(streamedText);
@@ -26157,7 +26266,7 @@ ${att.textContent}` });
         }
       }
     }
-    throw lastDirectErr instanceof Error ? lastDirectErr : new Error("Direct Gemini request failed in Android APK.");
+    throw lastDirectErr instanceof Error ? lastDirectErr : new Error("Direct Gemini request failed.");
   };
   const executeChatRequest = async (requestContents, includeAudioFlag) => {
     const res = await fetch(getEndpoint("/api/chat"), {
@@ -26175,7 +26284,7 @@ ${att.textContent}` });
       })
     });
     if (!res.ok) {
-      let errMessage = "Server error during chat";
+      let errMessage = `HTTP ${res.status} Server error during chat`;
       try {
         const errJson = await res.json();
         if (errJson.error) errMessage = errJson.error;
@@ -26247,7 +26356,7 @@ ${att.textContent}` });
   if (isApk) {
     if (customApiKeys.length > 0) {
       try {
-        const directResult = await executeDirectApkGemini(contents, hasAudioAttachment);
+        const directResult = await executeDirectGemini(contents, hasAudioAttachment);
         fullResponse = directResult.streamedText;
         actions = directResult.streamedActions;
       } catch (directErr) {
@@ -26258,7 +26367,7 @@ ${att.textContent}` });
         } catch {
           if (isTransientHighDemandError(directErr)) {
             await new Promise((r2) => setTimeout(r2, 850));
-            const retryResult = await executeDirectApkGemini(contents, hasAudioAttachment);
+            const retryResult = await executeDirectGemini(contents, hasAudioAttachment);
             fullResponse = retryResult.streamedText;
             actions = retryResult.streamedActions;
           } else {
@@ -26293,7 +26402,25 @@ ${att.textContent}` });
       actions = result2.streamedActions;
     } catch (err) {
       const isHighDemand = isTransientHighDemandError(err);
-      if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
+      if (customApiKeys.length > 0) {
+        try {
+          const directFallback = await executeDirectGemini(contents, hasAudioAttachment);
+          fullResponse = directFallback.streamedText;
+          actions = directFallback.streamedActions;
+        } catch (directWebErr) {
+          if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
+            const textOnlyContents = [
+              ...contents.slice(0, -1),
+              { role: "user", parts: [{ text: prompt }] }
+            ];
+            const fallbackResult = await executeChatRequest(textOnlyContents, false);
+            fullResponse = fallbackResult.streamedText;
+            actions = fallbackResult.streamedActions;
+          } else {
+            throw directWebErr;
+          }
+        }
+      } else if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
         const textOnlyContents = [
           ...contents.slice(0, -1),
           { role: "user", parts: [{ text: prompt }] }
@@ -37167,7 +37294,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-CU5ah_1Z.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-CBGXP8zS.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -103027,7 +103154,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-zjTHYTss.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-DYuWshLL.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -104514,6 +104641,7 @@ function App() {
     return { groups, totalFiltered: filtered.length };
   };
   const handleSendMessage = async (overrideInput, overrideAttachment, audioBase64, audioMimeType, audioUrl) => {
+    var _a3;
     const textToSend = overrideInput !== void 0 ? overrideInput : input;
     if (textToSend.trim() === "" && attachedImages.length === 0 && !attachedImage && !overrideAttachment) return;
     setIsGenerating(true);
@@ -104693,23 +104821,31 @@ Click the **${docName}** file below to download and view the complete document.`
     } catch (error) {
       console.error("Error:", error);
       setIsTyping(false);
-      const errMsg = (error == null ? void 0 : error.message) || String(error);
-      const isApkMissingKey = errMsg.includes("APK_NO_API_KEY") || isCapacitorApkRuntime() && getGeminiApiKeysArray().length === 0 && (errMsg.includes("Nta Gemini API key") || errMsg.includes("API key") || errMsg.includes("Failed to fetch"));
-      const isQuotaError = errMsg.includes("resource_exhausted") || errMsg.includes("Quota exceeded") || errMsg.includes("429") || errMsg.includes("quota");
+      const rawErrMsg = (error == null ? void 0 : error.message) || String(error);
+      let errMsg = rawErrMsg;
+      try {
+        const parsed = JSON.parse(rawErrMsg);
+        if ((_a3 = parsed == null ? void 0 : parsed.error) == null ? void 0 : _a3.message) errMsg = String(parsed.error.message);
+        else if ((parsed == null ? void 0 : parsed.error) && typeof parsed.error === "string") errMsg = parsed.error;
+      } catch {
+      }
+      const isLocalPreview = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname.includes("ais-dev") || window.location.hostname.includes("ais-pre")) && !isCapacitorApkRuntime();
+      const isApkMissingKey = errMsg.includes("APK_NO_API_KEY") || getGeminiApiKeysArray().length === 0 && !isLocalPreview && (errMsg.includes("Nta Gemini API key") || errMsg.includes("API key") || errMsg.includes("Failed to fetch"));
+      const isQuotaError = errMsg.includes("resource_exhausted") || errMsg.includes("Quota exceeded") || errMsg.includes("429") || errMsg.toLowerCase().includes("quota");
       const isHighDemandError = errMsg.includes("503") || errMsg.toLowerCase().includes("high demand") || errMsg.toLowerCase().includes("unavailable");
       const isAuthError = errMsg.includes("API key not valid") || errMsg.includes("401") || errMsg.includes("UNAUTHENTICATED") || errMsg.includes("Secrets") || errMsg.includes("Nta Gemini API key");
       let displayMsg = "Mbabarira, habaye ikibazo cyo kohereza ubutumwa. Ongera ugerageze.";
       if (isApkMissingKey) {
-        displayMsg = "🔑 Nta Gemini API Key irabikwa kuri iyi porogaramu. Nyamuneka jya muri Settings > INJIZA KEVIN API KEYS ushyiremo API Key yawe kugira ngo Kevin AI ikore neza.";
+        displayMsg = "🔑 Nta Gemini API Key irashyirwaho kuri iyi porogaramu. Nyamuneka jya muri Settings > INJIZA KEVIN API KEYS ushyiremo API Key yawe kugira ngo Kevin AI ikore neza.";
         setKeysPool(getGeminiKeysPool());
         setShowApiKeyModal(true);
       } else if (isQuotaError) {
-        displayMsg = "⚠️ Umubare w'ubutumwa wemerewe muri aka kanya wuzuye (Rate Limit / Quota). Nyamuneka ongera ugerageze nyuma y'iminota mike cyangwa ushyiremo kevin api keys muri setting niba uzifite";
+        displayMsg = "⚠️ Umubare w'ubutumwa wemerewe muri aka kanya wuzuye (Rate Limit / Quota). Nyamuneka ongera ugerageze nyuma y'iminota mike cyangwa ushyiremo izindi Kevin API Keys muri Settings.";
       } else if (isHighDemandError) {
         displayMsg = "⚠️ Seriveri irimo gukoreshwa n'abantu benshi cyane muri aka kanya. Nyamuneka ongera wohereze nyuma y'amasegonda make.";
       } else if (isAuthError) {
-        displayMsg = isCapacitorApkRuntime() ? "⚠️ API Key yawe ntiyemeye cyangwa ntabwo irashyirwaho. Nyamuneka genzura keys zawe muri Settings > INJIZA KEVIN API KEYS." : "⚠️ Nta API Key yabonetse cyangwa ntabwo yashyizweho neza. Nyamuneka yishyireho muri Settings > Secrets panel.";
-      } else if (errMsg && errMsg.length < 160 && !errMsg.includes("{") && !errMsg.includes("[object")) {
+        displayMsg = isCapacitorApkRuntime() || !isLocalPreview ? "⚠️ API Key yawe ntiyemeye cyangwa ntabwo irashyirwaho. Nyamuneka genzura keys zawe muri Settings > INJIZA KEVIN API KEYS." : "⚠️ Nta API Key yabonetse cyangwa ntabwo yashyizweho neza. Nyamuneka yishyireho muri Settings > Secrets panel.";
+      } else if (errMsg && errMsg.length < 220 && !errMsg.includes("[object")) {
         displayMsg = `⚠️ ${errMsg}`;
       }
       const errorMsg = {

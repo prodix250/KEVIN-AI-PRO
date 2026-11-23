@@ -1498,19 +1498,34 @@ function buildApkCleanWebSearchQuery(rawQuery: string): string {
     .replace(/\bmancity\b/gi, 'Manchester City')
     .replace(/\bman\s*city\b/gi, 'Manchester City')
     .replace(/\bmanutd\b/gi, 'Manchester United')
+    .replace(/\bman\s*utd\b/gi, 'Manchester United')
     .replace(/\bbarca\b/gi, 'Barcelona');
   const stopWords = new Set([
-    'wampaye', 'ampaye', 'mbonera', 'mbwira', 'shaka', 'kuri', 'internet', 'google',
-    'amakuru', 'agezweho', 'mashya', 'mwikipe', 'ikipe', 'ya', 'yo', 'za', 'mu', 'muri',
-    'ubu', 'uyu', 'munsi', 'niba', 'hari', 'icyo', 'uko', 'bimeze', 'please', 'tell',
+    'wampaye', 'ampaye', 'mbonera', 'mbwira', 'wambwira', 'nyibarize', 'shaka', 'kuri', 'internet', 'google',
+    'amakuru', 'agezweho', 'bigezweho', 'ibigezweho', 'mashya', 'masha', 'mwikipe', 'ikipe', 'ya', 'yo', 'za', 'mu', 'muri',
+    'ubu', 'ubungubu', 'uyu', 'uyumunsi', 'munsi', 'ejo', 'niba', 'hari', 'icyo', 'uko', 'bimeze', 'ese', 'iki', 'gute',
+    'byagenze', 'byabaye', 'nde', 'ziri', 'kandi', 'cyane', 'yuyu', 'ryuyu', 'please', 'tell',
     'me', 'about', 'what', 'is', 'are', 'the', 'in', 'on', 'for', 'of', 'latest', 'news',
-    'current', 'today', 'now', 'give', 'search', 'online', 'live',
+    'current', 'today', 'now', 'give', 'search', 'online', 'live', 'recent', 'recently', 'update', 'updates',
+    'breaking', 'headlines', 'trending',
   ]);
   const tokens = expanded
     .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
     .split(/\s+/)
     .filter((w) => w.length > 1 && !stopWords.has(w.toLowerCase()));
-  return tokens.length > 0 ? tokens.join(' ').slice(0, 120) : expanded.trim().slice(0, 120);
+  return tokens.length > 0 ? tokens.join(' ').slice(0, 120) : 'Rwanda world breaking news';
+}
+
+function decodeApkXmlEntities(text: string): string {
+  return text
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .trim();
 }
 
 function parseRssXmlForApk(xml: string, cleanQuery: string): {
@@ -1539,12 +1554,28 @@ function parseRssXmlForApk(xml: string, cleanQuery: string): {
     }
   } catch {}
 
+  if (items.length === 0) {
+    const itemMatches = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 6);
+    for (const match of itemMatches) {
+      const block = match[1];
+      const title = decodeApkXmlEntities(block.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '');
+      const link = decodeApkXmlEntities(block.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '');
+      const pubDate = decodeApkXmlEntities(block.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '');
+      const sourceName = decodeApkXmlEntities(block.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] || '');
+      const sourceUrl = decodeApkXmlEntities(block.match(/<source[^>]*url="([^"]+)"/)?.[1] || '');
+      const url = link || sourceUrl;
+      if (title && url) {
+        items.push({ title, url, pubDate, sourceName });
+      }
+    }
+  }
+
   if (items.length === 0) return { contextText: '', sources: [] };
 
   const lines = items.map((it, idx) =>
     `${idx + 1}. "${it.title}"${it.sourceName ? ` (${it.sourceName})` : ''}${it.pubDate ? ` [${it.pubDate}]` : ''} — ${it.url}`
   );
-  const contextText = `[LIVE INTERNET NEWS & WEB SEARCH RESULTS FOR "${cleanQuery}"]:\nUse these verified, up-to-date real-time articles below to answer the user's question accurately in their language. Do NOT say you lack live internet access — summarize the latest developments directly from these current articles:\n${lines.join('\n')}`;
+  const contextText = `[LIVE INTERNET NEWS & WEB SEARCH RESULTS FOR "${cleanQuery}"]:\nCRITICAL: Today is ${new Date().toISOString().slice(0, 10)}. Use ONLY these verified, up-to-date real-time articles below to answer the user's question accurately in their language. NEVER use outdated 2023/2024/2025 information:\n${lines.join('\n')}`;
   const sources: GroundingSource[] = items.map((it) => ({
     title: it.sourceName ? `${it.sourceName}: ${it.title}` : it.title,
     url: it.url,
@@ -1917,9 +1948,25 @@ export async function sendMessageToGemini(
   audioMimeType?: string,
   onSources?: (sources: GroundingSource[]) => void
 ): Promise<string> {
-  const contents: any[] = history.map((msg: any) => {
+  const cleanedHistory = history
+    .filter((msg) => {
+      const t = (msg?.text || '').trim();
+      if (!t && !msg?.image) return false;
+      if (msg.sender === 'kevin' && (
+        t.startsWith('⚠️')
+        || t.startsWith('🔑 Nta Gemini API Key')
+        || t.startsWith('Mbabarira, habaye ikibazo')
+      )) {
+        return false;
+      }
+      return true;
+    })
+    .slice(-20);
+
+  const rawContents: any[] = cleanedHistory.map((msg: any, idx: number) => {
     const historyParts: any[] = [{ text: msg.text || "..." }];
-    if (typeof msg.image === "string" && msg.image && !/^https?:\/\//i.test(msg.image)) {
+    const isRecentTurn = idx >= cleanedHistory.length - 2;
+    if (isRecentTurn && typeof msg.image === "string" && msg.image && !/^https?:\/\//i.test(msg.image)) {
       const imageMimeType = msg.image.match(/^data:([^;]+);base64,/i)?.[1] || "image/jpeg";
       const imageData = cleanBase64(msg.image);
       if (imageData) {
@@ -1936,6 +1983,20 @@ export async function sendMessageToGemini(
       parts: historyParts,
     };
   });
+
+  // Ensure Gemini REST API turn rules: start with 'user' and strictly alternate user / model
+  const contents: any[] = [];
+  for (const turn of rawContents) {
+    if (contents.length === 0 && turn.role !== 'user') {
+      continue;
+    }
+    const prev = contents[contents.length - 1];
+    if (prev && prev.role === turn.role) {
+      prev.parts = [...prev.parts, ...turn.parts];
+    } else {
+      contents.push(turn);
+    }
+  }
 
   const attachmentList: Array<AttachmentItem | Blob> = attachments
     ? (Array.isArray(attachments) ? attachments : [attachments])
@@ -2010,7 +2071,11 @@ export async function sendMessageToGemini(
     }
   }
 
-  contents.push({ role: "user", parts });
+  if (contents.length > 0 && contents[contents.length - 1].role === 'user') {
+    contents[contents.length - 1].parts.push(...parts);
+  } else {
+    contents.push({ role: "user", parts });
+  }
 
   const userName = typeof window !== 'undefined'
     ? safeStorageGet('kevin_user_name') || safeStorageGet('kevin_ai_user_name') || 'Incuti yanjye'
@@ -2022,7 +2087,7 @@ export async function sendMessageToGemini(
   const savedContacts = getSavedContacts();
   const isApk = isCapacitorApkRuntime();
 
-  const executeDirectApkGemini = async (requestContents: any[], includeAudioFlag: boolean) => {
+  const executeDirectGemini = async (requestContents: any[], includeAudioFlag: boolean) => {
     const latestUserText = Array.isArray(requestContents) && requestContents.length > 0
       ? ((requestContents[requestContents.length - 1] as any)?.parts || [])
           .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
@@ -2035,15 +2100,19 @@ export async function sendMessageToGemini(
       latestUserText
       && !includeAudioFlag
       && !isExplicitDeviceCommand
-      && /\b(news|amakuru|agezweho|ubu|weather|score|match|price|current|latest|internet|google|search|shaka|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|ikipe|perezida|uri he|amakuru mashya|mancity|man city|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr)\b/i.test(latestUserText)
+      && /\b(news|amakuru|agezweho|bigezweho|ibigezweho|mashya|masha|ubu|ubungubu|kuri ubu|uyu munsi|uyumunsi|ejo|ijoro ryashize|iki cyumweru|weather|iteganyagihe|forecast|meteo|météo|score|scores|match|matches|umukino|imikino|results|standings|table|ranking|amanota|shampiyona|champiyona|premier league|champions league|la liga|afcon|world cup|price|igiciro|ibiciro|dollar|idorari|exchange rate|bitcoin|crypto|current|currently|latest|recent|recently|update|updates|breaking|headlines|trending|yesterday|tonight|last night|internet|google|search|shaka|online|live|today|president|perezida|minister|minisiteri|minisitiri|winner|who won|watsinze|yatsinze|batsinze|what happened|byagenze gute|byabaye|rwanda|kigali|2025|2026|2027|uri he|mancity|man city|manutd|man utd|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr|kiyovu|mukura|amavubi|actualites|actualités|nouvelles|igihe|kigalitoday|rba|bbc)\b/i.test(latestUserText)
     );
+
+    let rssCache: { contextText: string; sources: GroundingSource[] } | null = null;
+    if (shouldTryWebSearch) {
+      rssCache = await fetchLiveWebSearchForApk(latestUserText).catch(() => ({ contextText: '', sources: [] }));
+    }
 
     const phases: Array<'search' | 'rss_text' | 'device'> = shouldTryWebSearch
       ? ['search', 'rss_text']
       : ['device'];
     const invalidKeys = new Set<string>();
     let lastDirectErr: unknown = null;
-    let rssCache: { contextText: string; sources: GroundingSource[] } | null = null;
 
     for (const phase of phases) {
       let phaseContents = requestContents;
@@ -2051,24 +2120,42 @@ export async function sendMessageToGemini(
 
       if (phase === 'rss_text') {
         if (!rssCache) {
-          rssCache = await fetchLiveWebSearchForApk(latestUserText);
+          rssCache = await fetchLiveWebSearchForApk(latestUserText).catch(() => ({ contextText: '', sources: [] }));
         }
         if (rssCache.contextText) {
           phaseSources = rssCache.sources;
           phaseContents = [
-            ...requestContents,
-            { role: 'user', parts: [{ text: rssCache.contextText }] },
+            ...requestContents.slice(0, -1),
+            {
+              role: 'user',
+              parts: [
+                ...((requestContents[requestContents.length - 1] as any)?.parts || []),
+                { text: `\n\n${rssCache.contextText}` },
+              ],
+            },
           ];
         }
+      } else if (phase === 'search' && rssCache?.contextText) {
+        phaseSources = rssCache.sources;
+        phaseContents = [
+          ...requestContents.slice(0, -1),
+          {
+            role: 'user',
+            parts: [
+              ...((requestContents[requestContents.length - 1] as any)?.parts || []),
+              { text: `\n\n${rssCache.contextText}` },
+            ],
+          },
+        ];
       }
 
       const apkModels = includeAudioFlag
-        ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+        ? ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
         : phase === 'search'
-          ? ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
+          ? ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
           : selectedModel === 'Kevin 1.3 Lite'
             ? ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.0-flash']
-            : ['gemini-2.5-flash', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+            : ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 
       for (const modelName of apkModels) {
         const isLastApkModel = modelName === apkModels[apkModels.length - 1];
@@ -2076,25 +2163,41 @@ export async function sendMessageToGemini(
           if (invalidKeys.has(currentKey)) continue;
           const maxDirectAttempts = isLastApkModel ? 2 : 1;
           for (let attempt = 0; attempt < maxDirectAttempts; attempt++) {
-            try {
+            const callOnce = async (useTools: boolean): Promise<Response> => {
               const payloadBody: Record<string, any> = {
                 systemInstruction: { parts: [{ text: apkSystemInstruction }] },
                 contents: phaseContents,
               };
-              if (phase === 'search') {
-                payloadBody.tools = [{ google_search: {} }];
-              } else if (phase === 'device') {
-                payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
-              }
-
-              const directRes = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(payloadBody),
+              if (useTools) {
+                if (phase === 'search') {
+                  payloadBody.tools = [{ google_search: {} }];
+                } else if (phase === 'device') {
+                  payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
                 }
-              );
+              }
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), 16000);
+              try {
+                return await fetch(
+                  `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(currentKey)}`,
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payloadBody),
+                    signal: controller.signal,
+                  }
+                );
+              } finally {
+                clearTimeout(timer);
+              }
+            };
+
+            try {
+              let directRes = await callOnce(phase === 'search' || phase === 'device');
+              if (directRes.status === 400 && (phase === 'search' || phase === 'device')) {
+                // Retry cleanly without tools if this model/tier rejects tool declarations
+                directRes = await callOnce(false);
+              }
 
               const json = await directRes.json().catch(() => null);
               if (!directRes.ok) {
@@ -2102,18 +2205,22 @@ export async function sendMessageToGemini(
                 const lowerErr = apiErrMsg.toLowerCase();
                 if (directRes.status === 401 || directRes.status === 403 || lowerErr.includes('api key not valid') || lowerErr.includes('api_key_invalid')) {
                   invalidKeys.add(currentKey);
+                  lastDirectErr = new Error(apiErrMsg);
                   break;
+                }
+                const isNotFound = directRes.status === 404 || lowerErr.includes('not found');
+                if (!isNotFound || !lastDirectErr) {
+                  lastDirectErr = new Error(apiErrMsg);
                 }
                 const isTransientBusy = directRes.status === 503
                   || lowerErr.includes('high demand')
                   || lowerErr.includes('unavailable')
                   || lowerErr.includes('overloaded');
-                lastDirectErr = new Error(apiErrMsg);
                 if (isTransientBusy && attempt + 1 < maxDirectAttempts) {
                   await new Promise((r) => setTimeout(r, 500));
                   continue;
                 }
-                if (directRes.status === 404 || lowerErr.includes('not found')) {
+                if (isNotFound) {
                   break;
                 }
                 break;
@@ -2168,17 +2275,9 @@ export async function sendMessageToGemini(
                 directSources.push(...mdSources);
               }
 
-              // If Gemini Search Grounding returned text without any sources and claimed it cannot browse live, fall through to rss_text
+              // Never accept ungrounded stale memory during 'search' if RSS fallback hasn't run yet
               if (phase === 'search' && directSources.length === 0) {
-                const lowerReply = streamedText.toLowerCase();
-                const looksUngrounded = lowerReply.includes('live search')
-                  || lowerReply.includes('real-time')
-                  || lowerReply.includes('ntabwo mbasha gushakisha')
-                  || lowerReply.includes('cannot access')
-                  || lowerReply.includes("don't have access");
-                if (looksUngrounded) {
-                  break;
-                }
+                break;
               }
 
               if (streamedText) {
@@ -2207,7 +2306,7 @@ export async function sendMessageToGemini(
 
     throw lastDirectErr instanceof Error
       ? lastDirectErr
-      : new Error('Direct Gemini request failed in Android APK.');
+      : new Error('Direct Gemini request failed.');
   };
 
   const executeChatRequest = async (requestContents: any[], includeAudioFlag: boolean) => {
@@ -2227,7 +2326,7 @@ export async function sendMessageToGemini(
     });
 
     if (!res.ok) {
-      let errMessage = 'Server error during chat';
+      let errMessage = `HTTP ${res.status} Server error during chat`;
       try {
         const errJson = await res.json();
         if (errJson.error) errMessage = errJson.error;
@@ -2262,7 +2361,6 @@ export async function sendMessageToGemini(
         try {
           data = JSON.parse(line);
         } catch {
-          // ignore incomplete JSON lines
           continue;
         }
         if (data.type === 'text' && data.text) {
@@ -2312,11 +2410,10 @@ export async function sendMessageToGemini(
   if (isApk) {
     if (customApiKeys.length > 0) {
       try {
-        const directResult = await executeDirectApkGemini(contents, hasAudioAttachment);
+        const directResult = await executeDirectGemini(contents, hasAudioAttachment);
         fullResponse = directResult.streamedText;
         actions = directResult.streamedActions;
       } catch (directErr: any) {
-        // Fallback to absolute production backend URL if direct Gemini call fails
         try {
           const backendResult = await executeChatRequest(contents, hasAudioAttachment);
           fullResponse = backendResult.streamedText;
@@ -2324,7 +2421,7 @@ export async function sendMessageToGemini(
         } catch {
           if (isTransientHighDemandError(directErr)) {
             await new Promise((r) => setTimeout(r, 850));
-            const retryResult = await executeDirectApkGemini(contents, hasAudioAttachment);
+            const retryResult = await executeDirectGemini(contents, hasAudioAttachment);
             fullResponse = retryResult.streamedText;
             actions = retryResult.streamedActions;
           } else {
@@ -2333,7 +2430,6 @@ export async function sendMessageToGemini(
         }
       }
     } else {
-      // No keys stored yet in APK localStorage: try production backend first (with silent 503 retry), else prompt user cleanly
       try {
         const backendResult = await executeChatRequest(contents, hasAudioAttachment);
         fullResponse = backendResult.streamedText;
@@ -2361,8 +2457,26 @@ export async function sendMessageToGemini(
     } catch (err: any) {
       const isHighDemand = isTransientHighDemandError(err);
 
-      // If audio inlineData hit high demand and we already have a transcribed prompt, seamlessly retry with text
-      if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
+      // If user has custom API key(s) saved on Web (Vercel/GitHub Pages) and backend failed/500, call Gemini directly
+      if (customApiKeys.length > 0) {
+        try {
+          const directFallback = await executeDirectGemini(contents, hasAudioAttachment);
+          fullResponse = directFallback.streamedText;
+          actions = directFallback.streamedActions;
+        } catch (directWebErr: any) {
+          if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
+            const textOnlyContents = [
+              ...contents.slice(0, -1),
+              { role: 'user', parts: [{ text: prompt }] },
+            ];
+            const fallbackResult = await executeChatRequest(textOnlyContents, false);
+            fullResponse = fallbackResult.streamedText;
+            actions = fallbackResult.streamedActions;
+          } else {
+            throw directWebErr;
+          }
+        }
+      } else if (isHighDemand && hasAudioAttachment && !isGenericAudioPlaceholder && prompt) {
         const textOnlyContents = [
           ...contents.slice(0, -1),
           { role: 'user', parts: [{ text: prompt }] },
