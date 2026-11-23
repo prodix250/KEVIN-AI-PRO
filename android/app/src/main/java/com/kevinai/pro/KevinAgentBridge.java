@@ -40,6 +40,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.text.Normalizer;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -226,6 +227,14 @@ public class KevinAgentBridge {
         });
     }
 
+    private String normalizeForSearch(String input) {
+        if (TextUtils.isEmpty(input)) return "";
+        String decomposed = Normalizer.normalize(input, Normalizer.Form.NFD);
+        return decomposed.replaceAll("\\p{InCombiningDiacriticalMarks}+", "")
+                .toLowerCase(Locale.ROOT)
+                .trim();
+    }
+
     @JavascriptInterface
     public String lookupContactsJson(String query) {
         if (ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_CONTACTS)
@@ -234,11 +243,11 @@ public class KevinAgentBridge {
         }
         JSONArray results = new JSONArray();
         Set<String> seenPhones = new LinkedHashSet<>();
-        String normalizedQuery = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        String normalizedQuery = normalizeForSearch(query);
         String[] queryTokens = TextUtils.isEmpty(normalizedQuery)
                 ? new String[0]
                 : normalizedQuery.split("\\s+");
-        int limit = TextUtils.isEmpty(normalizedQuery) ? 150 : 30;
+        int limit = TextUtils.isEmpty(normalizedQuery) ? 5000 : 100;
 
         String[] projection = new String[] {
                 ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
@@ -262,12 +271,17 @@ public class KevinAgentBridge {
 
                 String cleanPhone = rawNum.trim().replaceAll("[^\\d+*#]", "");
                 if (cleanPhone.length() < 3) continue;
+                String digitsOnly = cleanPhone.replaceAll("[^\\d]", "");
 
                 if (queryTokens.length > 0) {
-                    String lowerName = name.toLowerCase(Locale.ROOT);
+                    String normalizedName = normalizeForSearch(name);
                     boolean allMatch = true;
                     for (String token : queryTokens) {
-                        if (!lowerName.contains(token) && !cleanPhone.contains(token)) {
+                        String tokenDigits = token.replaceAll("[^\\d]", "");
+                        boolean matchesName = normalizedName.contains(token);
+                        boolean matchesPhone = cleanPhone.contains(token)
+                                || (!TextUtils.isEmpty(tokenDigits) && digitsOnly.contains(tokenDigits));
+                        if (!matchesName && !matchesPhone) {
                             allMatch = false;
                             break;
                         }
@@ -275,7 +289,7 @@ public class KevinAgentBridge {
                     if (!allMatch) continue;
                 }
 
-                String dedupKey = name.toLowerCase(Locale.ROOT) + "|" + cleanPhone.replaceAll("[^\\d]", "");
+                String dedupKey = name.toLowerCase(Locale.ROOT) + "|" + digitsOnly;
                 if (seenPhones.contains(dedupKey)) continue;
                 seenPhones.add(dedupKey);
 
@@ -324,7 +338,47 @@ public class KevinAgentBridge {
                 userName,
                 backendBaseUrl
         );
+        if (waAutoReplyEnabled) {
+            KevinNotificationListenerService.scanActiveWhatsAppNotifications(activity, false);
+        }
         dispatchAgentStatus();
+    }
+
+    @JavascriptInterface
+    public String scanAndReplyWhatsAppChats() {
+        boolean hasNotifAccess = isNotificationListenerEnabled();
+        boolean hasAcc = isAccessibilityEnabled();
+        String waPkg = findInstalledWhatsAppPackage();
+        int activeNotifQueued = hasNotifAccess
+                ? KevinNotificationListenerService.scanActiveWhatsAppNotifications(activity, true)
+                : 0;
+        boolean openedWhatsAppForScan = false;
+
+        if (waPkg != null && hasAcc) {
+            Intent launchIntent = activity.getPackageManager().getLaunchIntentForPackage(waPkg);
+            if (launchIntent != null) {
+                KevinAgentPrefs.armWhatsAppScan(activity, 45_000L);
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                activity.runOnUiThread(() -> {
+                    try {
+                        activity.startActivity(launchIntent);
+                    } catch (Exception ignored) {}
+                });
+                openedWhatsAppForScan = true;
+            }
+        }
+
+        try {
+            JSONObject res = new JSONObject();
+            res.put("activeNotifQueued", activeNotifQueued);
+            res.put("openedWhatsAppForScan", openedWhatsAppForScan);
+            res.put("hasNotificationAccess", hasNotifAccess);
+            res.put("hasAccessibility", hasAcc);
+            res.put("whatsappInstalled", waPkg != null);
+            return res.toString();
+        } catch (Exception e) {
+            return "{\"activeNotifQueued\":0,\"openedWhatsAppForScan\":false}";
+        }
     }
 
     @JavascriptInterface

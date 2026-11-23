@@ -574,10 +574,25 @@ export default function App() {
   const [isTestingWaReply, setIsTestingWaReply] = useState(false);
   const [isTranscribingSTT, setIsTranscribingSTT] = useState(false);
   const vcfInputRef = useRef<HTMLInputElement | null>(null);
+  const autoSyncedContactsRef = useRef(false);
 
   useEffect(() => {
     saveAgentPermissions(agentPermissions);
   }, []);
+
+  useEffect(() => {
+    if (!nativeAgentStatus.isAndroid || !nativeAgentStatus.hasContactsPermission || autoSyncedContactsRef.current) {
+      return;
+    }
+    autoSyncedContactsRef.current = true;
+    importContactsFromDevice()
+      .then((res) => {
+        if (Array.isArray(res.contacts) && res.contacts.length > 0) {
+          setSavedContacts(res.contacts);
+        }
+      })
+      .catch(() => {});
+  }, [nativeAgentStatus.isAndroid, nativeAgentStatus.hasContactsPermission]);
 
   useEffect(() => {
     const handlePerms = (e: Event) => {
@@ -791,12 +806,12 @@ export default function App() {
       const transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
       if (transcript) {
         setInput(prev => (prev ? `${prev.trim()} ${transcript}` : transcript));
-        showToastMessage('🎙️ Amajwi yahinduwe inyandiko (STT)!');
+        showToastMessage('🎙️ Byanditswe!');
       } else {
         showToastMessage('Ntacyo ijwi ryabashije kumvikana. Ongera ugerageze.');
       }
     } catch (error) {
-      showToastMessage(error instanceof Error ? error.message : 'STT transcription failed.');
+      showToastMessage(error instanceof Error ? error.message : 'Byanze gusoma amajwi.');
     } finally {
       setIsTranscribingSTT(false);
       voiceStoppingRef.current = false;
@@ -1134,46 +1149,64 @@ export default function App() {
     }
   };
 
-  const stateRef = useRef({
-    drawerOpen,
-    attachmentPopupOpen,
-    emojiPickerOpen,
-    isWelcomeScreen: messages.length === 0
-  });
-
-  useEffect(() => {
-    stateRef.current = {
-      drawerOpen,
-      attachmentPopupOpen,
-      emojiPickerOpen,
-      isWelcomeScreen: messages.length === 0
-    };
-  }, [drawerOpen, attachmentPopupOpen, emojiPickerOpen, messages]);
+  const backButtonHandlerRef = useRef<() => void>(() => {});
+  backButtonHandlerRef.current = () => {
+    if (previewImage) { setPreviewImage(null); return; }
+    if (showAssistantOverlay) { setShowAssistantOverlay(false); return; }
+    if (showAgentModal) { setShowAgentModal(false); return; }
+    if (showSettingsModal) { setShowSettingsModal(false); return; }
+    if (showApiKeyModal) { setShowApiKeyModal(false); return; }
+    if (showCustomInstructionsModal) { setShowCustomInstructionsModal(false); return; }
+    if (showAbout) { setShowAbout(false); return; }
+    if (showClearConfirm) { setShowClearConfirm(false); return; }
+    if (menuOpen) { setMenuOpen(false); return; }
+    if (attachmentPopupOpen) { setAttachmentPopupOpen(false); return; }
+    if (emojiPickerOpen) { setEmojiPickerOpen(false); return; }
+    if (drawerOpen) { setDrawerOpen(false); return; }
+    if (messages.length > 0) {
+      const currentMsgs = messages;
+      const updatedSessions = sessions.map(s => {
+        if (s.id !== currentSessionId) return s;
+        let title = s.title;
+        if ((s.title === "New Chat" || s.title === "Ibiganiro bishya") && currentMsgs.length > 0) {
+          const firstUserMsg = currentMsgs.find(m => m.sender === 'user');
+          if (firstUserMsg && firstUserMsg.text.trim()) {
+            const clean = firstUserMsg.text.trim().replace(/^[\s#*`\-]+/, '').slice(0, 36);
+            title = clean.length > 0 ? clean : "Chat";
+          }
+        }
+        return { ...s, messages: currentMsgs, title, timestamp: s.timestamp || Date.now() };
+      });
+      const existingEmpty = updatedSessions.find(s => s.id !== currentSessionId && s.messages.length === 0);
+      if (existingEmpty) {
+        saveChatHistory(updatedSessions);
+        setSessions(updatedSessions);
+        setCurrentSessionId(existingEmpty.id);
+        setMessages([]);
+      } else {
+        const freshSession: ChatSession = {
+          id: Date.now(),
+          title: "New Chat",
+          messages: [],
+          timestamp: Date.now(),
+        };
+        const nextSessions = [freshSession, ...updatedSessions];
+        saveChatHistory(nextSessions);
+        setSessions(nextSessions);
+        setCurrentSessionId(freshSession.id);
+        setMessages([]);
+      }
+      return;
+    }
+    CapApp.exitApp();
+  };
 
   useEffect(() => {
     let backButtonListener: any;
     const initBackButton = async () => {
       try {
         backButtonListener = await CapApp.addListener('backButton', () => {
-          const st = stateRef.current;
-          if (st.attachmentPopupOpen) {
-            setAttachmentPopupOpen(false);
-            return;
-          }
-          if (st.emojiPickerOpen) {
-            setEmojiPickerOpen(false);
-            return;
-          }
-          if (st.drawerOpen) {
-            setDrawerOpen(false);
-            return;
-          }
-          if (!st.isWelcomeScreen) {
-            setMessages([]);
-            updateSessionMessages([]);
-            return;
-          }
-          CapApp.exitApp();
+          backButtonHandlerRef.current();
         });
       } catch (e) {
         console.log("CapApp backButton not supported on web preview", e);
@@ -1725,9 +1758,25 @@ export default function App() {
                 <span className="text-white font-bold">Kevin</span>
                 <span className="text-[#00FF88] font-extrabold ml-1">AI</span>
               </h1>
-              <p className="text-[11px] text-green-100 dark:text-[#8696a0] flex items-center gap-1.5 mt-0.5">
-                {isTyping ? (
-                  <span className="text-[#00FF88] animate-pulse font-medium">typing...</span>
+              <p className="text-[11px] text-green-100 dark:text-[#8696a0] flex items-center gap-1.5 mt-0.5 min-h-[16px]">
+                {(isTyping || isTranscribingSTT) ? (
+                  <span className="inline-flex items-center gap-1 py-0.5" aria-label="Kevin AI is active">
+                    <motion.span
+                      animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
+                      transition={{ repeat: Infinity, duration: 0.9, delay: 0, ease: 'easeInOut' }}
+                      className="w-1.5 h-1.5 rounded-full bg-[#00FF88]"
+                    />
+                    <motion.span
+                      animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
+                      transition={{ repeat: Infinity, duration: 0.9, delay: 0.16, ease: 'easeInOut' }}
+                      className="w-1.5 h-1.5 rounded-full bg-[#00FF88]"
+                    />
+                    <motion.span
+                      animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
+                      transition={{ repeat: Infinity, duration: 0.9, delay: 0.32, ease: 'easeInOut' }}
+                      className="w-1.5 h-1.5 rounded-full bg-[#00FF88]"
+                    />
+                  </span>
                 ) : (
                   <>
                     <span className="w-1.5 h-1.5 rounded-full bg-[#25D366] inline-block"></span>
@@ -1756,6 +1805,22 @@ export default function App() {
                     <div className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200" onClick={() => { toggleTheme(); setMenuOpen(false); }}>
                       {theme === 'dark' ? <Sun size={16} className="text-amber-400" /> : <Moon size={16} className="text-indigo-500" />} 
                       <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+                    </div>
+                    <div
+                      className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
+                      onClick={() => { setNativeAgentStatus(getNativeAgentStatus()); setMenuOpen(false); setShowAgentModal(true); }}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Bot size={16} className="text-[#00a884]" />
+                        <span>Kevin Permission</span>
+                      </div>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                        agentPermissions.autoSend || agentPermissions.whatsappAutoReply
+                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                          : 'text-gray-400 dark:text-gray-500'
+                      }`}>
+                        {agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? 'ACTIVE' : 'SETUP'}
+                      </span>
                     </div>
                     <div className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200" onClick={() => { setShowAbout(true); setMenuOpen(false); }}>
                       <Info size={16} className="text-blue-400" />
@@ -2278,7 +2343,7 @@ export default function App() {
                             {message.action.name === 'open_youtube' || message.action.name === 'open_audiomack' ? '▶️' :
                               message.action.name === 'make_call' ? '📞' :
                               message.action.name === 'send_sms' ? '📩' :
-                              message.action.name === 'open_whatsapp' || message.action.name === 'configure_whatsapp_autoreply' ? '💬' :
+                              message.action.name === 'open_whatsapp' || message.action.name === 'configure_whatsapp_autoreply' || message.action.name === 'scan_whatsapp_chats' ? '💬' :
                               message.action.name === 'open_camera' ? '📸' : '🚀'}
                           </div>
                           <div className="flex-1 min-w-0">
@@ -2303,6 +2368,12 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => {
+                                if (message.action!.name === 'scan_whatsapp_chats') {
+                                  setNativeAgentStatus(getNativeAgentStatus());
+                                  setShowAgentModal(true);
+                                  showToastMessage('Emera WA Notif cyangwa Accessibility muri Kevin Permission.');
+                                  return;
+                                }
                                 if (message.action!.name === 'make_call') {
                                   updateAgentPerms({ autoCall: true });
                                 } else {
@@ -2319,7 +2390,11 @@ export default function App() {
                               }}
                               className="shrink-0 rounded-full bg-[#25D366] hover:bg-[#1ebe5b] px-3 py-1.5 text-xs font-bold text-white cursor-pointer shadow-sm"
                             >
-                              {message.action.name === 'make_call' ? 'Emerera & Hamagara' : 'Emerera & Ohereza'}
+                              {message.action.name === 'make_call'
+                                ? 'Emerera & Hamagara'
+                                : message.action.name === 'scan_whatsapp_chats'
+                                  ? 'Fungura Permission'
+                                  : 'Emerera & Ohereza'}
                             </button>
                           ) : message.action.status === 'dialed_needs_permission' ? (
                             <button
@@ -2466,12 +2541,24 @@ export default function App() {
                   </div>
                 </motion.div>
               ))}
-              {isTyping && (
-                <motion.div key="typing-indicator" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex justify-start">
-                  <div className="bg-white dark:bg-[#202c33] p-3.5 rounded-2xl shadow-xs rounded-tl-none flex gap-1.5 items-center">
-                    <span className="w-2.5 h-2.5 bg-gray-400 dark:bg-[#8696a0] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
-                    <span className="w-2.5 h-2.5 bg-gray-400 dark:bg-[#8696a0] rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
-                    <span className="w-2.5 h-2.5 bg-gray-400 dark:bg-[#8696a0] rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
+              {(isTyping || isTranscribingSTT) && (
+                <motion.div key="typing-indicator" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex justify-start">
+                  <div className="bg-white dark:bg-[#202c33] px-4 py-3.5 rounded-2xl shadow-xs rounded-tl-none flex gap-1.5 items-center">
+                    <motion.span
+                      animate={{ y: [0, -5, 0], opacity: [0.45, 1, 0.45] }}
+                      transition={{ repeat: Infinity, duration: 0.9, delay: 0, ease: 'easeInOut' }}
+                      className="w-2 h-2 bg-gray-500 dark:bg-[#8696a0] rounded-full"
+                    />
+                    <motion.span
+                      animate={{ y: [0, -5, 0], opacity: [0.45, 1, 0.45] }}
+                      transition={{ repeat: Infinity, duration: 0.9, delay: 0.16, ease: 'easeInOut' }}
+                      className="w-2 h-2 bg-gray-500 dark:bg-[#8696a0] rounded-full"
+                    />
+                    <motion.span
+                      animate={{ y: [0, -5, 0], opacity: [0.45, 1, 0.45] }}
+                      transition={{ repeat: Infinity, duration: 0.9, delay: 0.32, ease: 'easeInOut' }}
+                      className="w-2 h-2 bg-gray-500 dark:bg-[#8696a0] rounded-full"
+                    />
                   </div>
                 </motion.div>
               )}
@@ -2581,9 +2668,9 @@ export default function App() {
                   type="button"
                   onClick={() => void transcribeRecordingToInput()}
                   className="px-2.5 py-1 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] text-white text-[11px] font-bold cursor-pointer"
-                  title="Hindura amajwi mu nyandiko (STT)"
+                  title="Andika amajwi"
                 >
-                  STT → Text
+                  Text
                 </button>
                 <span className="text-gray-500 dark:text-[#8696a0] font-mono text-xs">
                   {Math.floor(recordingTime / 60).toString().padStart(2, '0')}:
@@ -2597,7 +2684,7 @@ export default function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder={isTranscribingSTT ? "Guhindura amajwi mu nyandiko (STT)..." : "Type a message..."}
+              placeholder="Type a message..."
               className="flex-1 px-4 py-2.5 rounded-full bg-white dark:bg-[#2a3942] text-[15px] sm:text-base font-bold focus:outline-none text-gray-900 dark:text-[#e9edef] placeholder:text-gray-400 dark:placeholder:text-[#8696a0] placeholder:font-normal"
             />
           )}
@@ -3336,24 +3423,63 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">💬 WhatsApp Auto-Reply Agent</p>
-                      <p className="text-xs text-gray-500 dark:text-[#8696a0]">
-                        Kevin AI ajya agusubiriza ubutumwa bwinjiye kuri WhatsApp mu izina ryawe.
-                      </p>
+                  <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">💬 WhatsApp Auto-Reply Agent</p>
+                        <p className="text-xs text-gray-500 dark:text-[#8696a0]">
+                          Kevin AI ajya areba chat za WhatsApp zose akagusubiriza ubutumwa butarasubizwa.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={agentPermissions.whatsappAutoReply}
+                        onClick={() => updateAgentPerms({ whatsappAutoReply: !agentPermissions.whatsappAutoReply })}
+                        className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${
+                          agentPermissions.whatsappAutoReply ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-gray-700'
+                        }`}
+                      >
+                        <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.whatsappAutoReply ? 'translate-x-5' : 'translate-x-0'}`} />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={agentPermissions.whatsappAutoReply}
-                      onClick={() => updateAgentPerms({ whatsappAutoReply: !agentPermissions.whatsappAutoReply })}
-                      className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${
-                        agentPermissions.whatsappAutoReply ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-gray-700'
-                      }`}
-                    >
-                      <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.whatsappAutoReply ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
+                    {nativeAgentStatus.isAndroid && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!agentPermissions.whatsappAutoReply) {
+                            updateAgentPerms({ whatsappAutoReply: true });
+                          }
+                          const raw = (window as any).KevinAgentBridge?.scanAndReplyWhatsAppChats?.();
+                          try {
+                            const res = JSON.parse(raw || '{}') as {
+                              activeNotifQueued?: number;
+                              openedWhatsAppForScan?: boolean;
+                              hasNotificationAccess?: boolean;
+                              hasAccessibility?: boolean;
+                              whatsappInstalled?: boolean;
+                            };
+                            if (!res.hasNotificationAccess && !res.hasAccessibility) {
+                              showToastMessage('Emera "WA Notif" cyangwa "Accessibility" hasi kugira ngo Kevin AI isubize chat za WhatsApp.');
+                            } else if (res.openedWhatsAppForScan) {
+                              setShowAgentModal(false);
+                              showToastMessage(`💬 Kevin AI ifunguye WhatsApp ngo isubize ubutumwa budasubije!`);
+                            } else {
+                              showToastMessage(
+                                res.activeNotifQueued && res.activeNotifQueued > 0
+                                  ? `💬 Kevin AI irimo gusubiza notifications ${res.activeNotifQueued} za WhatsApp!`
+                                  : '💬 Notifications za WhatsApp zarasuzumwe. Emera na Accessibility kugira ngo inarebe chat zose.'
+                              );
+                            }
+                          } catch {
+                            showToastMessage('💬 Gusuzuma WhatsApp byatangiye!');
+                          }
+                        }}
+                        className="w-full py-2 px-3 rounded-lg bg-[#00a884]/15 hover:bg-[#00a884]/25 border border-[#00a884]/35 text-[#075E54] dark:text-[#00FF88] text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <span>🔎 Reba &amp; Subiza Chat za WhatsApp zose</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 

@@ -23745,7 +23745,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-bKwK6e7-.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-CLk_cwF-.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -24558,8 +24558,11 @@ async function importContactsFromDevice() {
   }
   return { added: 0, source: "unsupported", contacts: getSavedContacts() };
 }
+function normalizeContactSearchText(val) {
+  return String(val || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
 function resolveContactMatches(query) {
-  const cleanQuery = query.trim().toLowerCase();
+  const cleanQuery = normalizeContactSearchText(query);
   if (!cleanQuery) return [];
   const tokens = cleanQuery.split(/\s+/).filter(Boolean);
   const combined = [...getSavedContacts()];
@@ -24583,16 +24586,20 @@ function resolveContactMatches(query) {
   }
   const deduped = /* @__PURE__ */ new Map();
   for (const c2 of combined) {
-    const lowerName = c2.name.toLowerCase();
-    const matchesAll = tokens.every((t2) => lowerName.includes(t2) || c2.phone.includes(t2));
+    const lowerName = normalizeContactSearchText(c2.name);
+    const digitsOnly = c2.phone.replace(/[^\d]/g, "");
+    const matchesAll = tokens.every((t2) => {
+      const tDigits = t2.replace(/[^\d]/g, "");
+      return lowerName.includes(t2) || c2.phone.includes(t2) || tDigits.length >= 2 && digitsOnly.includes(tDigits);
+    });
     if (!matchesAll) continue;
     const key = `${lowerName}|${normalizePhoneKey(c2.phone)}`;
     if (!deduped.has(key)) deduped.set(key, c2);
   }
   const allMatches = Array.from(deduped.values());
-  const exactMatches = allMatches.filter((c2) => c2.name.toLowerCase() === cleanQuery);
+  const exactMatches = allMatches.filter((c2) => normalizeContactSearchText(c2.name) === cleanQuery);
   if (exactMatches.length === 1) return exactMatches;
-  return allMatches.slice(0, 8);
+  return allMatches.slice(0, 12);
 }
 function readNativeCompressedImage(uriOrPath, options) {
   if (typeof window === "undefined" || !uriOrPath) return null;
@@ -24776,7 +24783,7 @@ function saveChatHistory(history) {
   }
 }
 function runDeviceAction(action, forceExecute = false) {
-  var _a2, _b2, _c, _d, _e2, _f, _g, _h;
+  var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k;
   const bridge = window.KevinAgentBridge;
   const perms = getAgentPermissions();
   if (action.name === "open_camera") {
@@ -24890,7 +24897,47 @@ function runDeviceAction(action, forceExecute = false) {
     return true;
   }
   if (action.name === "configure_whatsapp_autoreply") {
+    const enabled = ((_i = action.args) == null ? void 0 : _i.enabled) !== false;
+    const replyStyle = typeof ((_j = action.args) == null ? void 0 : _j.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
+    saveAgentPermissions({
+      ...perms,
+      whatsappAutoReply: enabled,
+      whatsappReplyStyle: replyStyle
+    });
+    if (enabled && (bridge == null ? void 0 : bridge.scanAndReplyWhatsAppChats)) {
+      try {
+        const scanRaw = bridge.scanAndReplyWhatsAppChats();
+        action.args = { ...action.args, scanResult: JSON.parse(scanRaw || "{}") };
+      } catch {
+      }
+    }
+    action.status = "executed";
     return true;
+  }
+  if (action.name === "scan_whatsapp_chats") {
+    const replyStyle = typeof ((_k = action.args) == null ? void 0 : _k.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
+    if (!perms.whatsappAutoReply || replyStyle !== perms.whatsappReplyStyle) {
+      saveAgentPermissions({
+        ...perms,
+        whatsappAutoReply: true,
+        whatsappReplyStyle: replyStyle
+      });
+    }
+    if (bridge == null ? void 0 : bridge.scanAndReplyWhatsAppChats) {
+      try {
+        const parsed = JSON.parse(bridge.scanAndReplyWhatsAppChats() || "{}");
+        action.args = { ...action.args, scanResult: parsed };
+        if (!parsed.hasNotificationAccess && !parsed.hasAccessibility) {
+          action.status = "needs_permission";
+          return false;
+        }
+        action.status = "executed";
+        return true;
+      } catch {
+      }
+    }
+    action.status = "needs_permission";
+    return false;
   }
   const intentUrl = action.intentUrl;
   const fallbackUrl = action.fallbackUrl || action.url;
@@ -25025,9 +25072,33 @@ function executeDeviceAction(name2, args) {
     runDeviceAction(actionObj, false);
     return actionObj;
   }
+  if (name2 === "configure_whatsapp_autoreply") {
+    const enabled = args.enabled !== false;
+    label = enabled ? "Fungura WhatsApp Auto-Reply" : "Funga WhatsApp Auto-Reply";
+    const actionObj = {
+      name: name2,
+      args,
+      label,
+      status: "executed"
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+  if (name2 === "scan_whatsapp_chats") {
+    label = "Reba & Subiza WhatsApp zose";
+    const actionObj = {
+      name: name2,
+      args,
+      label,
+      status: "executed"
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
   return null;
 }
 function actionConfirmation(action) {
+  var _a2, _b2;
   if (action.name === "open_youtube") {
     return `▶ Yamaze gufungura YouTube ngo icurange: **${action.videoTitle || "Indirimbo"}** 🎶✨`;
   }
@@ -25046,6 +25117,21 @@ function actionConfirmation(action) {
   }
   if (action.name === "open_whatsapp") {
     return `💚 WhatsApp ifunguwe kuri **${action.contactName || action.phoneNumber}**!`;
+  }
+  if (action.name === "configure_whatsapp_autoreply") {
+    const enabled = ((_a2 = action.args) == null ? void 0 : _a2.enabled) !== false;
+    return enabled ? `💬 WhatsApp Auto-Reply yafunguwe! Kevin AI irahita isubiza ubutumwa bwinjiye kuri WhatsApp.` : `🔕 WhatsApp Auto-Reply yahagaritswe.`;
+  }
+  if (action.name === "scan_whatsapp_chats") {
+    const sr = ((_b2 = action.args) == null ? void 0 : _b2.scanResult) || {};
+    if (action.status === "needs_permission") {
+      return `⚠️ Kugira ngo Kevin AI irebe chat za WhatsApp zose, emera **WA Notif** cyangwa **Accessibility** muri **Kevin Permission**.`;
+    }
+    const notifCount = Number(sr.activeNotifQueued || 0);
+    if (sr.openedWhatsAppForScan) {
+      return `💬 Kevin AI ifunguye WhatsApp ngo irebe kandi isubize chat zose zitarasubizwa${notifCount > 0 ? ` (hamwe na notifications ${notifCount})` : ""}! ✨`;
+    }
+    return `💬 Kevin AI irimo gusuzuma no gusubiza ubutumwa bwa WhatsApp budasubije (notifications ${notifCount})!`;
   }
   if (action.name === "open_camera") {
     return `📷 Kamera irafunguwe!`;
@@ -25310,6 +25396,28 @@ const APK_DEVICE_ACTION_DECLARATIONS = [
     }
   },
   {
+    name: "configure_whatsapp_autoreply",
+    description: "Enable or disable automatic AI replying to incoming WhatsApp messages.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        enabled: { type: "BOOLEAN", description: "Whether WhatsApp auto-reply should be enabled." },
+        reply_style: { type: "STRING", description: "Optional reply instructions." }
+      },
+      required: ["enabled"]
+    }
+  },
+  {
+    name: "scan_whatsapp_chats",
+    description: "Scan all unread/unreplied WhatsApp chats and notifications on the phone and automatically reply to messages that have not yet been answered.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        reply_style: { type: "STRING", description: "Optional reply instructions." }
+      }
+    }
+  },
+  {
     name: "open_camera",
     description: "Open the device camera.",
     parameters: {
@@ -25493,7 +25601,7 @@ ${lines.join("\n")}`,
   }
   return { contextText: "", sources: [] };
 }
-function buildApkSystemInstruction(userName, hasAudioAttachment, savedContacts, perms) {
+function buildApkSystemInstruction(userName, hasAudioAttachment, savedContacts, perms, latestUserText = "") {
   var _a2;
   const now2 = /* @__PURE__ */ new Date();
   const realTimeContext = `[REAL-TIME CONTEXT: Today is ${now2.toLocaleDateString("en-US", {
@@ -25507,10 +25615,37 @@ function buildApkSystemInstruction(userName, hasAudioAttachment, savedContacts, 
     minute: "2-digit",
     timeZone: "Africa/Kigali"
   })}.]`;
-  const contactsList = savedContacts.filter((c2) => {
+  let effectiveContacts = savedContacts;
+  if (typeof window !== "undefined" && effectiveContacts.length < 50) {
+    try {
+      const bridge = window.KevinAgentBridge;
+      if (bridge == null ? void 0 : bridge.lookupContactsJson) {
+        const nativeAll = JSON.parse(bridge.lookupContactsJson(""));
+        if (Array.isArray(nativeAll) && nativeAll.length > effectiveContacts.length) {
+          effectiveContacts = mergeContactsBatch(nativeAll).contacts;
+        }
+      }
+    } catch {
+    }
+  }
+  const userTokens = normalizeContactSearchText(latestUserText).split(/\s+/).filter((t2) => t2.length >= 2);
+  const validContacts = effectiveContacts.filter((c2) => {
     var _a3, _b2;
     return c2 && ((_a3 = c2.name) == null ? void 0 : _a3.trim()) && ((_b2 = c2.phone) == null ? void 0 : _b2.trim());
-  }).slice(0, 40).map((c2) => `${c2.name.trim()}: ${c2.phone.trim()}`);
+  });
+  const prioritized = userTokens.length > 0 ? [
+    ...validContacts.filter((c2) => {
+      const nm = normalizeContactSearchText(c2.name);
+      const ph = c2.phone.replace(/[^\d]/g, "");
+      return userTokens.some((tok) => nm.includes(tok) || ph && ph.includes(tok));
+    }),
+    ...validContacts.filter((c2) => {
+      const nm = normalizeContactSearchText(c2.name);
+      const ph = c2.phone.replace(/[^\d]/g, "");
+      return !userTokens.some((tok) => nm.includes(tok) || ph && ph.includes(tok));
+    })
+  ] : validContacts;
+  const contactsList = prioritized.slice(0, 500).map((c2) => `${c2.name.trim()}: ${c2.phone.trim()}`);
   const customInstructions = ((_a2 = safeStorageGet("kevin_ai_custom_instructions")) == null ? void 0 : _a2.trim()) || "";
   return [
     `You are Kevin AI, created in Rwanda by Uwumukiza Kevin (born October 28, 2003, Rwamagana District, Gahengeri Sector; studies IT at University of Rwanda UR-CST; Motto: 'UKORA GAKE BIKAGENDA CYANE').`,
@@ -25520,8 +25655,8 @@ function buildApkSystemInstruction(userName, hasAudioAttachment, savedContacts, 
     customInstructions ? `USER CUSTOM INSTRUCTIONS:
 ${customInstructions}` : "",
     hasAudioAttachment ? `The user sent a voice note/audio message. Listen attentively in Kinyarwanda, English, French, or Swahili and respond directly or execute requested tool actions immediately.` : "",
-    contactsList.length > 0 ? `[SAVED CONTACTS: ${contactsList.join(" | ")}]` : "",
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. Always execute requested device actions immediately using tool calls.]`,
+    contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(" | ")}]` : "",
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Always execute requested device actions immediately using tool calls.]`,
     realTimeContext
   ].filter(Boolean).join("\n\n");
 }
@@ -25747,9 +25882,9 @@ ${att.textContent}` });
   const isApk = isCapacitorApkRuntime();
   const executeDirectApkGemini = async (requestContents, includeAudioFlag) => {
     var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k, _l, _m;
-    const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms);
     const latestUserText = Array.isArray(requestContents) && requestContents.length > 0 ? (((_a2 = requestContents[requestContents.length - 1]) == null ? void 0 : _a2.parts) || []).map((p2) => typeof (p2 == null ? void 0 : p2.text) === "string" ? p2.text : "").join(" ").trim() : "";
-    const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps)\b/i.test(latestUserText);
+    const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
+    const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText && !includeAudioFlag && !isExplicitDeviceCommand && /\b(news|amakuru|agezweho|ubu|weather|score|match|price|current|latest|internet|google|search|shaka|online|live|today|president|minister|winner|who won|what happened|2025|2026|iteganyagihe|igiciro|umukino|ikipe|perezida|uri he|amakuru mashya|mancity|man city|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr)\b/i.test(latestUserText)
     );
@@ -36846,7 +36981,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-zPyXWTgT.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-BKSjXsUe.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -102005,7 +102140,7 @@ function AssistantOverlay({
       const transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
       if (transcript) {
         setPromptText((prev) => prev ? `${prev.trim()} ${transcript}` : transcript);
-        showAudioStatus("🎙️ Amajwi yahinduwe inyandiko (STT)!");
+        showAudioStatus("🎙️ Byanditswe!");
         setTimeout(() => {
           var _a2;
           return (_a2 = textareaRef.current) == null ? void 0 : _a2.focus();
@@ -102014,7 +102149,7 @@ function AssistantOverlay({
         showAudioStatus("Ntacyo ijwi ryabashije kumvikana. Ongera ugerageze.");
       }
     } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : "STT transcription failed.");
+      setErrorMsg(error instanceof Error ? error.message : "Byanze gusoma amajwi.");
     } finally {
       setIsTranscribing(false);
       voiceStoppingRef.current = false;
@@ -102152,7 +102287,32 @@ function AssistantOverlay({
                     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-extrabold tracking-tight text-[#075E54] dark:text-[#00FF88]", children: "Kevin AI" }),
                     /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { size: 13, className: "text-[#00a884]" })
                   ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-gray-500 dark:text-[#8696a0] truncate", children: isRecording ? "Ndumva... Vuga icyo ushaka" : isTranscribing ? "Guhindura amajwi mu nyandiko (STT)..." : isLoading ? "Ndabikora ako kanya..." : "Nakufasha iki uyu munsi?" })
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] text-gray-500 dark:text-[#8696a0] truncate min-h-[16px] flex items-center", children: isRecording ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Ndumva... Vuga icyo ushaka" }) : isTranscribing || isLoading ? /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "inline-flex items-center gap-1 py-0.5", "aria-label": "Kevin AI is active", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      motion.span,
+                      {
+                        animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
+                        transition: { repeat: Infinity, duration: 0.9, delay: 0, ease: "easeInOut" },
+                        className: "w-1.5 h-1.5 rounded-full bg-[#00a884]"
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      motion.span,
+                      {
+                        animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
+                        transition: { repeat: Infinity, duration: 0.9, delay: 0.16, ease: "easeInOut" },
+                        className: "w-1.5 h-1.5 rounded-full bg-[#00a884]"
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      motion.span,
+                      {
+                        animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
+                        transition: { repeat: Infinity, duration: 0.9, delay: 0.32, ease: "easeInOut" },
+                        className: "w-1.5 h-1.5 rounded-full bg-[#00a884]"
+                      }
+                    )
+                  ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Nakufasha iki uyu munsi?" }) })
                 ] })
               ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1 shrink-0", children: [
@@ -102188,7 +102348,7 @@ function AssistantOverlay({
                 )
               ] })
             ] }),
-            (submittedPrompt || replyText || action || errorMsg) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-h-[38vh] overflow-y-auto px-4 py-2 space-y-2.5 border-t border-gray-100 dark:border-[#202c33]", children: [
+            (submittedPrompt || replyText || action || errorMsg || isTranscribing || isLoading) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-h-[38vh] overflow-y-auto px-4 py-2 space-y-2.5 border-t border-gray-100 dark:border-[#202c33]", children: [
               submittedPrompt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-end gap-1", children: [
                 submittedAudioUrl && /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "audio",
@@ -102325,6 +102485,32 @@ function AssistantOverlay({
                   }) })
                 ] })
               ] }),
+              (isTranscribing || isLoading) && !replyText && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-start", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-100 dark:bg-[#202c33] px-3.5 py-2.5 rounded-2xl rounded-tl-xs flex items-center gap-1.5 shadow-2xs", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  motion.span,
+                  {
+                    animate: { y: [0, -4.5, 0], opacity: [0.45, 1, 0.45] },
+                    transition: { repeat: Infinity, duration: 0.9, delay: 0, ease: "easeInOut" },
+                    className: "w-2 h-2 rounded-full bg-gray-500 dark:bg-[#8696a0]"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  motion.span,
+                  {
+                    animate: { y: [0, -4.5, 0], opacity: [0.45, 1, 0.45] },
+                    transition: { repeat: Infinity, duration: 0.9, delay: 0.16, ease: "easeInOut" },
+                    className: "w-2 h-2 rounded-full bg-gray-500 dark:bg-[#8696a0]"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  motion.span,
+                  {
+                    animate: { y: [0, -4.5, 0], opacity: [0.45, 1, 0.45] },
+                    transition: { repeat: Infinity, duration: 0.9, delay: 0.32, ease: "easeInOut" },
+                    className: "w-2 h-2 rounded-full bg-gray-500 dark:bg-[#8696a0]"
+                  }
+                )
+              ] }) }),
               errorMsg && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-xl px-3 py-2 space-y-2", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: errorMsg }),
                 errorMsg.includes("APK_NO_API_KEY") && isDedicatedOverlay && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -102441,8 +102627,8 @@ function AssistantOverlay({
                       type: "button",
                       onClick: () => void transcribeRecordingToInput(),
                       className: "px-2.5 py-1 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] text-white text-[11px] font-bold cursor-pointer",
-                      title: "Hindura amajwi mu nyandiko (STT)",
-                      children: "STT → Text"
+                      title: "Andika amajwi",
+                      children: "Text"
                     }
                   ),
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-gray-500 dark:text-[#8696a0] font-mono text-xs", children: [
@@ -102464,7 +102650,7 @@ function AssistantOverlay({
                       void handleSend();
                     }
                   },
-                  placeholder: isTranscribing ? "Guhindura amajwi mu nyandiko (STT)..." : submittedPrompt || replyText ? "Baza ikindi cyangwa utegeke..." : "Andika, vuga, cyangwa usangize ifoto...",
+                  placeholder: submittedPrompt || replyText ? "Baza ikindi cyangwa utegeke..." : "Andika, vuga, cyangwa usangize ifoto...",
                   className: `w-full bg-transparent resize-none focus:outline-none text-gray-900 dark:text-[#e9edef] placeholder:text-gray-400 dark:placeholder:text-[#8696a0] ${submittedPrompt || replyText ? "text-sm py-1.5" : "text-lg sm:text-xl font-medium py-2 leading-snug"}`
                 }
               ),
@@ -102542,7 +102728,7 @@ function AssistantOverlay({
                   {
                     type: "button",
                     onClick: () => void toggleVoice(),
-                    title: isRecording ? "Ohereza amajwi" : "Fata amajwi (Voice + STT)",
+                    title: isRecording ? "Ohereza amajwi" : "Fata amajwi",
                     className: `w-12 h-12 rounded-full flex items-center justify-center text-white shadow-lg transition-all cursor-pointer relative ${isRecording ? "bg-red-500 animate-pulse ring-4 ring-red-500/30 scale-105" : "bg-gradient-to-tr from-[#075E54] to-[#00a884] hover:scale-105 ring-4 ring-[#00FF88]/25"}`,
                     children: /* @__PURE__ */ jsxRuntimeExports.jsx(Mic, { size: 21 })
                   }
@@ -102654,7 +102840,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-Bc0Q6m4z.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-lEn5iqa7.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -103326,9 +103512,22 @@ function App() {
   const [isTestingWaReply, setIsTestingWaReply] = reactExports.useState(false);
   const [isTranscribingSTT, setIsTranscribingSTT] = reactExports.useState(false);
   const vcfInputRef = reactExports.useRef(null);
+  const autoSyncedContactsRef = reactExports.useRef(false);
   reactExports.useEffect(() => {
     saveAgentPermissions(agentPermissions);
   }, []);
+  reactExports.useEffect(() => {
+    if (!nativeAgentStatus.isAndroid || !nativeAgentStatus.hasContactsPermission || autoSyncedContactsRef.current) {
+      return;
+    }
+    autoSyncedContactsRef.current = true;
+    importContactsFromDevice().then((res) => {
+      if (Array.isArray(res.contacts) && res.contacts.length > 0) {
+        setSavedContacts(res.contacts);
+      }
+    }).catch(() => {
+    });
+  }, [nativeAgentStatus.isAndroid, nativeAgentStatus.hasContactsPermission]);
   reactExports.useEffect(() => {
     const handlePerms = (e) => {
       const detail = e.detail;
@@ -103519,12 +103718,12 @@ function App() {
       const transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
       if (transcript) {
         setInput((prev) => prev ? `${prev.trim()} ${transcript}` : transcript);
-        showToastMessage("🎙️ Amajwi yahinduwe inyandiko (STT)!");
+        showToastMessage("🎙️ Byanditswe!");
       } else {
         showToastMessage("Ntacyo ijwi ryabashije kumvikana. Ongera ugerageze.");
       }
     } catch (error) {
-      showToastMessage(error instanceof Error ? error.message : "STT transcription failed.");
+      showToastMessage(error instanceof Error ? error.message : "Byanze gusoma amajwi.");
     } finally {
       setIsTranscribingSTT(false);
       voiceStoppingRef.current = false;
@@ -103827,44 +104026,100 @@ function App() {
       showToastMessage("Could not select images. Please try again.");
     }
   };
-  const stateRef = reactExports.useRef({
-    drawerOpen,
-    attachmentPopupOpen,
-    emojiPickerOpen,
-    isWelcomeScreen: messages2.length === 0
+  const backButtonHandlerRef = reactExports.useRef(() => {
   });
-  reactExports.useEffect(() => {
-    stateRef.current = {
-      drawerOpen,
-      attachmentPopupOpen,
-      emojiPickerOpen,
-      isWelcomeScreen: messages2.length === 0
-    };
-  }, [drawerOpen, attachmentPopupOpen, emojiPickerOpen, messages2]);
+  backButtonHandlerRef.current = () => {
+    if (previewImage) {
+      setPreviewImage(null);
+      return;
+    }
+    if (showAssistantOverlay) {
+      setShowAssistantOverlay(false);
+      return;
+    }
+    if (showAgentModal) {
+      setShowAgentModal(false);
+      return;
+    }
+    if (showSettingsModal) {
+      setShowSettingsModal(false);
+      return;
+    }
+    if (showApiKeyModal) {
+      setShowApiKeyModal(false);
+      return;
+    }
+    if (showCustomInstructionsModal) {
+      setShowCustomInstructionsModal(false);
+      return;
+    }
+    if (showAbout) {
+      setShowAbout(false);
+      return;
+    }
+    if (showClearConfirm) {
+      setShowClearConfirm(false);
+      return;
+    }
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    if (attachmentPopupOpen) {
+      setAttachmentPopupOpen(false);
+      return;
+    }
+    if (emojiPickerOpen) {
+      setEmojiPickerOpen(false);
+      return;
+    }
+    if (drawerOpen) {
+      setDrawerOpen(false);
+      return;
+    }
+    if (messages2.length > 0) {
+      const currentMsgs = messages2;
+      const updatedSessions = sessions.map((s2) => {
+        if (s2.id !== currentSessionId) return s2;
+        let title = s2.title;
+        if ((s2.title === "New Chat" || s2.title === "Ibiganiro bishya") && currentMsgs.length > 0) {
+          const firstUserMsg = currentMsgs.find((m2) => m2.sender === "user");
+          if (firstUserMsg && firstUserMsg.text.trim()) {
+            const clean = firstUserMsg.text.trim().replace(/^[\s#*`\-]+/, "").slice(0, 36);
+            title = clean.length > 0 ? clean : "Chat";
+          }
+        }
+        return { ...s2, messages: currentMsgs, title, timestamp: s2.timestamp || Date.now() };
+      });
+      const existingEmpty = updatedSessions.find((s2) => s2.id !== currentSessionId && s2.messages.length === 0);
+      if (existingEmpty) {
+        saveChatHistory(updatedSessions);
+        setSessions(updatedSessions);
+        setCurrentSessionId(existingEmpty.id);
+        setMessages([]);
+      } else {
+        const freshSession = {
+          id: Date.now(),
+          title: "New Chat",
+          messages: [],
+          timestamp: Date.now()
+        };
+        const nextSessions = [freshSession, ...updatedSessions];
+        saveChatHistory(nextSessions);
+        setSessions(nextSessions);
+        setCurrentSessionId(freshSession.id);
+        setMessages([]);
+      }
+      return;
+    }
+    App$1.exitApp();
+  };
   reactExports.useEffect(() => {
     let backButtonListener;
     const initBackButton = async () => {
       try {
         backButtonListener = await App$1.addListener("backButton", () => {
-          const st2 = stateRef.current;
-          if (st2.attachmentPopupOpen) {
-            setAttachmentPopupOpen(false);
-            return;
-          }
-          if (st2.emojiPickerOpen) {
-            setEmojiPickerOpen(false);
-            return;
-          }
-          if (st2.drawerOpen) {
-            setDrawerOpen(false);
-            return;
-          }
-          if (!st2.isWelcomeScreen) {
-            setMessages([]);
-            updateSessionMessages([]);
-            return;
-          }
-          App$1.exitApp();
+          backButtonHandlerRef.current();
         });
       } catch (e) {
         console.log("CapApp backButton not supported on web preview", e);
@@ -104293,7 +104548,32 @@ Click the **${docName}** file below to download and view the complete document.`
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-white font-bold", children: "Kevin" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[#00FF88] font-extrabold ml-1", children: "AI" })
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-green-100 dark:text-[#8696a0] flex items-center gap-1.5 mt-0.5", children: isTyping ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[#00FF88] animate-pulse font-medium", children: "typing..." }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-green-100 dark:text-[#8696a0] flex items-center gap-1.5 mt-0.5 min-h-[16px]", children: isTyping || isTranscribingSTT ? /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "inline-flex items-center gap-1 py-0.5", "aria-label": "Kevin AI is active", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              motion.span,
+              {
+                animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
+                transition: { repeat: Infinity, duration: 0.9, delay: 0, ease: "easeInOut" },
+                className: "w-1.5 h-1.5 rounded-full bg-[#00FF88]"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              motion.span,
+              {
+                animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
+                transition: { repeat: Infinity, duration: 0.9, delay: 0.16, ease: "easeInOut" },
+                className: "w-1.5 h-1.5 rounded-full bg-[#00FF88]"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              motion.span,
+              {
+                animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
+                transition: { repeat: Infinity, duration: 0.9, delay: 0.32, ease: "easeInOut" },
+                className: "w-1.5 h-1.5 rounded-full bg-[#00FF88]"
+              }
+            )
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-1.5 h-1.5 rounded-full bg-[#25D366] inline-block" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "online" })
           ] }) })
@@ -104320,6 +104600,24 @@ Click the **${docName}** file below to download and view the complete document.`
                 theme === "dark" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Sun, { size: 16, className: "text-amber-400" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Moon, { size: 16, className: "text-indigo-500" }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: theme === "dark" ? "Light Mode" : "Dark Mode" })
               ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "div",
+                {
+                  className: "px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200",
+                  onClick: () => {
+                    setNativeAgentStatus(getNativeAgentStatus());
+                    setMenuOpen(false);
+                    setShowAgentModal(true);
+                  },
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(Bot, { size: 16, className: "text-[#00a884]" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Kevin Permission" })
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `text-[10px] font-bold px-1.5 py-0.5 rounded-full ${agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "text-gray-400 dark:text-gray-500"}`, children: agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? "ACTIVE" : "SETUP" })
+                  ]
+                }
+              ),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200", onClick: () => {
                 setShowAbout(true);
                 setMenuOpen(false);
@@ -104799,7 +105097,7 @@ Click the **${docName}** file below to download and view the complete document.`
                     }
                   ) }),
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-xl bg-[#075E54] text-white flex items-center justify-center text-lg shrink-0", children: message.action.name === "open_youtube" || message.action.name === "open_audiomack" ? "▶️" : message.action.name === "make_call" ? "📞" : message.action.name === "send_sms" ? "📩" : message.action.name === "open_whatsapp" || message.action.name === "configure_whatsapp_autoreply" ? "💬" : message.action.name === "open_camera" ? "📸" : "🚀" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-xl bg-[#075E54] text-white flex items-center justify-center text-lg shrink-0", children: message.action.name === "open_youtube" || message.action.name === "open_audiomack" ? "▶️" : message.action.name === "make_call" ? "📞" : message.action.name === "send_sms" ? "📩" : message.action.name === "open_whatsapp" || message.action.name === "configure_whatsapp_autoreply" || message.action.name === "scan_whatsapp_chats" ? "💬" : message.action.name === "open_camera" ? "📸" : "🚀" }),
                     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
                       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-800 dark:text-[#e9edef] truncate", children: message.action.label }),
                       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0] truncate", children: message.action.name === "open_youtube" && message.action.channel ? `${message.action.channel} • Playing Now` : message.action.status === "choose_contact" ? "Hitamo contact imwe hasi" : message.action.status === "contact_not_found" ? "Contact ntirabikwa — shyiramo nimero cyangwa import" : message.action.status === "dialed_needs_permission" ? "Dialer yafunguwe — emera Direct Call permission" : message.action.status === "needs_permission" ? "Permission ikenewe kugira ngo ikore ako kanya" : message.action.status === "executed" ? "Byakozwe ako kanya (Full Agent)" : "Kevin AI Device Action" })
@@ -104809,6 +105107,12 @@ Click the **${docName}** file below to download and view the complete document.`
                       {
                         type: "button",
                         onClick: () => {
+                          if (message.action.name === "scan_whatsapp_chats") {
+                            setNativeAgentStatus(getNativeAgentStatus());
+                            setShowAgentModal(true);
+                            showToastMessage("Emera WA Notif cyangwa Accessibility muri Kevin Permission.");
+                            return;
+                          }
                           if (message.action.name === "make_call") {
                             updateAgentPerms({ autoCall: true });
                           } else {
@@ -104822,7 +105126,7 @@ Click the **${docName}** file below to download and view the complete document.`
                           );
                         },
                         className: "shrink-0 rounded-full bg-[#25D366] hover:bg-[#1ebe5b] px-3 py-1.5 text-xs font-bold text-white cursor-pointer shadow-sm",
-                        children: message.action.name === "make_call" ? "Emerera & Hamagara" : "Emerera & Ohereza"
+                        children: message.action.name === "make_call" ? "Emerera & Hamagara" : message.action.name === "scan_whatsapp_chats" ? "Fungura Permission" : "Emerera & Ohereza"
                       }
                     ) : message.action.status === "dialed_needs_permission" ? /* @__PURE__ */ jsxRuntimeExports.jsx(
                       "button",
@@ -104968,10 +105272,31 @@ Click the **${docName}** file below to download and view the complete document.`
         },
         message.id
       )),
-      isTyping && /* @__PURE__ */ jsxRuntimeExports.jsx(motion.div, { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, className: "flex justify-start", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white dark:bg-[#202c33] p-3.5 rounded-2xl shadow-xs rounded-tl-none flex gap-1.5 items-center", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-2.5 h-2.5 bg-gray-400 dark:bg-[#8696a0] rounded-full animate-bounce", style: { animationDelay: "0ms" } }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-2.5 h-2.5 bg-gray-400 dark:bg-[#8696a0] rounded-full animate-bounce", style: { animationDelay: "150ms" } }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-2.5 h-2.5 bg-gray-400 dark:bg-[#8696a0] rounded-full animate-bounce", style: { animationDelay: "300ms" } })
+      (isTyping || isTranscribingSTT) && /* @__PURE__ */ jsxRuntimeExports.jsx(motion.div, { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0 }, className: "flex justify-start", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white dark:bg-[#202c33] px-4 py-3.5 rounded-2xl shadow-xs rounded-tl-none flex gap-1.5 items-center", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          motion.span,
+          {
+            animate: { y: [0, -5, 0], opacity: [0.45, 1, 0.45] },
+            transition: { repeat: Infinity, duration: 0.9, delay: 0, ease: "easeInOut" },
+            className: "w-2 h-2 bg-gray-500 dark:bg-[#8696a0] rounded-full"
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          motion.span,
+          {
+            animate: { y: [0, -5, 0], opacity: [0.45, 1, 0.45] },
+            transition: { repeat: Infinity, duration: 0.9, delay: 0.16, ease: "easeInOut" },
+            className: "w-2 h-2 bg-gray-500 dark:bg-[#8696a0] rounded-full"
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          motion.span,
+          {
+            animate: { y: [0, -5, 0], opacity: [0.45, 1, 0.45] },
+            transition: { repeat: Infinity, duration: 0.9, delay: 0.32, ease: "easeInOut" },
+            className: "w-2 h-2 bg-gray-500 dark:bg-[#8696a0] rounded-full"
+          }
+        )
       ] }) }, "typing-indicator")
     ] }) }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("footer", { className: "p-2.5 bg-[#F0F2F5] dark:bg-[#202c33] dark:border-t dark:border-[#222e35] flex flex-col gap-2 sticky bottom-0 relative", children: [
@@ -105063,8 +105388,8 @@ Click the **${docName}** file below to download and view the complete document.`
                 type: "button",
                 onClick: () => void transcribeRecordingToInput(),
                 className: "px-2.5 py-1 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] text-white text-[11px] font-bold cursor-pointer",
-                title: "Hindura amajwi mu nyandiko (STT)",
-                children: "STT → Text"
+                title: "Andika amajwi",
+                children: "Text"
               }
             ),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-gray-500 dark:text-[#8696a0] font-mono text-xs", children: [
@@ -105080,7 +105405,7 @@ Click the **${docName}** file below to download and view the complete document.`
             value: input,
             onChange: (e) => setInput(e.target.value),
             onKeyDown: (e) => e.key === "Enter" && handleSendMessage(),
-            placeholder: isTranscribingSTT ? "Guhindura amajwi mu nyandiko (STT)..." : "Type a message...",
+            placeholder: "Type a message...",
             className: "flex-1 px-4 py-2.5 rounded-full bg-white dark:bg-[#2a3942] text-[15px] sm:text-base font-bold focus:outline-none text-gray-900 dark:text-[#e9edef] placeholder:text-gray-400 dark:placeholder:text-[#8696a0] placeholder:font-normal"
           }
         ),
@@ -105847,20 +106172,52 @@ Click the **${docName}** file below to download and view the complete document.`
                   }
                 )
               ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942]", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-900 dark:text-[#e9edef]", children: "💬 WhatsApp Auto-Reply Agent" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0]", children: "Kevin AI ajya agusubiriza ubutumwa bwinjiye kuri WhatsApp mu izina ryawe." })
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2.5", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-900 dark:text-[#e9edef]", children: "💬 WhatsApp Auto-Reply Agent" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0]", children: "Kevin AI ajya areba chat za WhatsApp zose akagusubiriza ubutumwa butarasubizwa." })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "button",
+                    {
+                      type: "button",
+                      role: "switch",
+                      "aria-checked": agentPermissions.whatsappAutoReply,
+                      onClick: () => updateAgentPerms({ whatsappAutoReply: !agentPermissions.whatsappAutoReply }),
+                      className: `w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${agentPermissions.whatsappAutoReply ? "bg-[#00a884]" : "bg-gray-300 dark:bg-gray-700"}`,
+                      children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.whatsappAutoReply ? "translate-x-5" : "translate-x-0"}` })
+                    }
+                  )
                 ] }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                nativeAgentStatus.isAndroid && /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "button",
                   {
                     type: "button",
-                    role: "switch",
-                    "aria-checked": agentPermissions.whatsappAutoReply,
-                    onClick: () => updateAgentPerms({ whatsappAutoReply: !agentPermissions.whatsappAutoReply }),
-                    className: `w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${agentPermissions.whatsappAutoReply ? "bg-[#00a884]" : "bg-gray-300 dark:bg-gray-700"}`,
-                    children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `w-5 h-5 rounded-full bg-white shadow transition-transform ${agentPermissions.whatsappAutoReply ? "translate-x-5" : "translate-x-0"}` })
+                    onClick: () => {
+                      var _a3, _b3;
+                      if (!agentPermissions.whatsappAutoReply) {
+                        updateAgentPerms({ whatsappAutoReply: true });
+                      }
+                      const raw = (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.scanAndReplyWhatsAppChats) == null ? void 0 : _b3.call(_a3);
+                      try {
+                        const res = JSON.parse(raw || "{}");
+                        if (!res.hasNotificationAccess && !res.hasAccessibility) {
+                          showToastMessage('Emera "WA Notif" cyangwa "Accessibility" hasi kugira ngo Kevin AI isubize chat za WhatsApp.');
+                        } else if (res.openedWhatsAppForScan) {
+                          setShowAgentModal(false);
+                          showToastMessage(`💬 Kevin AI ifunguye WhatsApp ngo isubize ubutumwa budasubije!`);
+                        } else {
+                          showToastMessage(
+                            res.activeNotifQueued && res.activeNotifQueued > 0 ? `💬 Kevin AI irimo gusubiza notifications ${res.activeNotifQueued} za WhatsApp!` : "💬 Notifications za WhatsApp zarasuzumwe. Emera na Accessibility kugira ngo inarebe chat zose."
+                          );
+                        }
+                      } catch {
+                        showToastMessage("💬 Gusuzuma WhatsApp byatangiye!");
+                      }
+                    },
+                    className: "w-full py-2 px-3 rounded-lg bg-[#00a884]/15 hover:bg-[#00a884]/25 border border-[#00a884]/35 text-[#075E54] dark:text-[#00FF88] text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-colors",
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "🔎 Reba & Subiza Chat za WhatsApp zose" })
                   }
                 )
               ] })

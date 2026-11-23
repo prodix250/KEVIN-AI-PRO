@@ -109,6 +109,7 @@ You are a full autonomous agent with direct permission-backed control over apps 
 - Direct SMS Sending: When the user asks to send an SMS/text message (e.g., 'ohereza ubutumwa kuri 078...', 'send sms to Aline'), ALWAYS call send_sms(phone_number, message, contact_name) immediately (never tell the user to open their SMS app manually, and never invent a missing number).
 - Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately. For phone numbers in Rwanda, ensure the country code +250 is used (e.g. +250788123456 or 250788123456 instead of 0788123456) so WhatsApp can deliver the message immediately without missing country code errors.
 - WhatsApp Auto-Reply Mode: When the user asks you to automatically reply to incoming WhatsApp messages on their behalf (e.g., 'ujye unsubiriza kuri whatsapp', 'enable whatsapp auto reply'), ALWAYS call configure_whatsapp_autoreply(enabled, reply_style).
+- Check All WhatsApp Chats & Reply to Unreplied Messages: When the user asks you to check their WhatsApp chats and reply to unread/unreplied messages (e.g., 'reba muri whatsapp zanjye usubize ubutumwa budasubije', 'check all whatsapp chats and reply'), ALWAYS call scan_whatsapp_chats().
 - Calls & Other Apps: Use make_call, open_audiomack, open_lark_player, open_camera, or open_app immediately whenever requested.`;
 
 const deviceActionDeclarations: FunctionDeclaration[] = [
@@ -187,6 +188,16 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
         reply_style: { type: "string", description: "Instructions for how Kevin AI should reply on WhatsApp." }
       },
       required: ["enabled"]
+    }
+  },
+  {
+    name: "scan_whatsapp_chats",
+    description: "Scan all unread/unreplied WhatsApp chats and notifications on the user's phone and automatically reply to messages that have not yet been answered.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: {
+        reply_style: { type: "string", description: "Optional tone or style instruction for replying." }
+      }
     }
   },
   {
@@ -869,14 +880,38 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
 - Respond directly, helpfully, and naturally in their spoken language (if spoken in Kinyarwanda, reply in authentic, fluent Kinyarwanda).
 - If the user gave an action command (like playing a song on YouTube, calling someone, sending an SMS or WhatsApp message), immediately execute the corresponding tool function (open_youtube, make_call, send_sms, open_whatsapp).`
         : '';
-      const contactsList = Array.isArray(savedContacts)
-        ? savedContacts
-            .filter((c) => c && typeof c.name === 'string' && typeof c.phone === 'string' && c.name.trim() && c.phone.trim())
-            .slice(0, 40)
-            .map((c) => `${c.name!.trim()}: ${c.phone!.trim()}`)
+      const latestUserText = Array.isArray(contents) && contents.length > 0
+        ? ((contents[contents.length - 1] as any)?.parts || [])
+            .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+            .join(' ')
+            .trim()
+        : '';
+      const userQueryTokens = latestUserText
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((t: string) => t.length >= 2);
+      const filteredContacts = Array.isArray(savedContacts)
+        ? savedContacts.filter((c) => c && typeof c.name === 'string' && typeof c.phone === 'string' && c.name.trim() && c.phone.trim())
         : [];
+      const prioritizedContacts = userQueryTokens.length > 0
+        ? [
+            ...filteredContacts.filter((c) => {
+              const nm = c.name!.toLowerCase();
+              const ph = c.phone!.replace(/[^\d]/g, '');
+              return userQueryTokens.some((tok: string) => nm.includes(tok) || (ph && ph.includes(tok)));
+            }),
+            ...filteredContacts.filter((c) => {
+              const nm = c.name!.toLowerCase();
+              const ph = c.phone!.replace(/[^\d]/g, '');
+              return !userQueryTokens.some((tok: string) => nm.includes(tok) || (ph && ph.includes(tok)));
+            }),
+          ]
+        : filteredContacts;
+      const contactsList = prioritizedContacts
+        .slice(0, 500)
+        .map((c) => `${c.name!.trim()}: ${c.phone!.trim()}`);
       const contactsContext = contactsList.length > 0
-        ? `[SAVED CONTACTS: ${contactsList.join(' | ')}]`
+        ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]`
         : '';
       const agentContext = `[AGENT PERMISSIONS: autoSend=${Boolean(agentPermissions?.autoSend)}, autoCall=${agentPermissions?.autoCall !== false}, autoPlayYouTube=${agentPermissions?.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(agentPermissions?.whatsappAutoReply)}. Always execute requested actions immediately using tool calls.]`;
 
@@ -892,13 +927,7 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
 
       let lastErr: unknown = null;
       let streamStarted = false;
-      const latestUserText = Array.isArray(contents) && contents.length > 0
-        ? ((contents[contents.length - 1] as any)?.parts || [])
-            .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
-            .join(' ')
-            .trim()
-        : '';
-      const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps)\b/i.test(latestUserText);
+      const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
       const shouldTryWebSearch = Boolean(
         latestUserText
         && !hasAudioAttachment

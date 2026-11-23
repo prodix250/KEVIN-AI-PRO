@@ -18,6 +18,8 @@ public final class KevinAgentPrefs {
     private static final String KEY_AUTO_LIVE_SCREEN_ON_HOME = "auto_live_screen_on_home";
     private static final String KEY_WAKE_WORD_ENABLED = "wake_word_enabled";
     private static final String KEY_PENDING_WA_UNTIL = "pending_wa_until";
+    private static final String KEY_PENDING_WA_SCAN_UNTIL = "pending_wa_scan_until";
+    private static final String KEY_WA_SCAN_REPLIED_COUNT = "wa_scan_replied_count";
     private static final String KEY_PENDING_YT_UNTIL = "pending_yt_until";
 
     private KevinAgentPrefs() {}
@@ -143,5 +145,31 @@ public final class KevinAgentPrefs {
 
     public static void clearPendingYouTubePlay(Context context) {
         prefs(context).edit().putLong(KEY_PENDING_YT_UNTIL, 0L).apply();
+    }
+
+    public static void armWhatsAppScan(Context context, long durationMs) {
+        prefs(context).edit()
+                .putLong(KEY_PENDING_WA_SCAN_UNTIL, System.currentTimeMillis() + durationMs)
+                .putInt(KEY_WA_SCAN_REPLIED_COUNT, 0)
+                .apply();
+    }
+
+    public static boolean isWhatsAppScanActive(Context context) {
+        long until = prefs(context).getLong(KEY_PENDING_WA_SCAN_UNTIL, 0L);
+        return until > System.currentTimeMillis();
+    }
+
+    public static void clearWhatsAppScan(Context context) {
+        prefs(context).edit().putLong(KEY_PENDING_WA_SCAN_UNTIL, 0L).apply();
+    }
+
+    public static int incrementWhatsAppScanCount(Context context) {
+        int next = prefs(context).getInt(KEY_WA_SCAN_REPLIED_COUNT, 0) + 1;
+        prefs(context).edit().putInt(KEY_WA_SCAN_REPLIED_COUNT, next).apply();
+        return next;
+    }
+
+    public static int getWhatsAppScanCount(Context context) {
+        return prefs(context).getInt(KEY_WA_SCAN_REPLIED_COUNT, 0);
     }
 }

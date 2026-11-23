@@ -386,8 +386,16 @@ export async function importContactsFromDevice(): Promise<{
   return { added: 0, source: 'unsupported', contacts: getSavedContacts() };
 }
 
+function normalizeContactSearchText(val: string): string {
+  return String(val || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 export function resolveContactMatches(query: string): SavedContact[] {
-  const cleanQuery = query.trim().toLowerCase();
+  const cleanQuery = normalizeContactSearchText(query);
   if (!cleanQuery) return [];
   const tokens = cleanQuery.split(/\s+/).filter(Boolean);
 
@@ -414,17 +422,21 @@ export function resolveContactMatches(query: string): SavedContact[] {
 
   const deduped = new Map<string, SavedContact>();
   for (const c of combined) {
-    const lowerName = c.name.toLowerCase();
-    const matchesAll = tokens.every((t) => lowerName.includes(t) || c.phone.includes(t));
+    const lowerName = normalizeContactSearchText(c.name);
+    const digitsOnly = c.phone.replace(/[^\d]/g, '');
+    const matchesAll = tokens.every((t) => {
+      const tDigits = t.replace(/[^\d]/g, '');
+      return lowerName.includes(t) || c.phone.includes(t) || (tDigits.length >= 2 && digitsOnly.includes(tDigits));
+    });
     if (!matchesAll) continue;
     const key = `${lowerName}|${normalizePhoneKey(c.phone)}`;
     if (!deduped.has(key)) deduped.set(key, c);
   }
 
   const allMatches = Array.from(deduped.values());
-  const exactMatches = allMatches.filter((c) => c.name.toLowerCase() === cleanQuery);
+  const exactMatches = allMatches.filter((c) => normalizeContactSearchText(c.name) === cleanQuery);
   if (exactMatches.length === 1) return exactMatches;
-  return allMatches.slice(0, 8);
+  return allMatches.slice(0, 12);
 }
 
 export function readNativeCompressedImage(
@@ -777,7 +789,55 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
   }
 
   if (action.name === 'configure_whatsapp_autoreply') {
+    const enabled = action.args?.enabled !== false;
+    const replyStyle = typeof action.args?.reply_style === 'string' && action.args.reply_style.trim()
+      ? action.args.reply_style.trim()
+      : perms.whatsappReplyStyle;
+    saveAgentPermissions({
+      ...perms,
+      whatsappAutoReply: enabled,
+      whatsappReplyStyle: replyStyle,
+    });
+    if (enabled && bridge?.scanAndReplyWhatsAppChats) {
+      try {
+        const scanRaw = bridge.scanAndReplyWhatsAppChats();
+        action.args = { ...action.args, scanResult: JSON.parse(scanRaw || '{}') };
+      } catch {}
+    }
+    action.status = 'executed';
     return true;
+  }
+
+  if (action.name === 'scan_whatsapp_chats') {
+    const replyStyle = typeof action.args?.reply_style === 'string' && action.args.reply_style.trim()
+      ? action.args.reply_style.trim()
+      : perms.whatsappReplyStyle;
+    if (!perms.whatsappAutoReply || replyStyle !== perms.whatsappReplyStyle) {
+      saveAgentPermissions({
+        ...perms,
+        whatsappAutoReply: true,
+        whatsappReplyStyle: replyStyle,
+      });
+    }
+    if (bridge?.scanAndReplyWhatsAppChats) {
+      try {
+        const parsed = JSON.parse(bridge.scanAndReplyWhatsAppChats() || '{}') as {
+          activeNotifQueued?: number;
+          openedWhatsAppForScan?: boolean;
+          hasNotificationAccess?: boolean;
+          hasAccessibility?: boolean;
+        };
+        action.args = { ...action.args, scanResult: parsed };
+        if (!parsed.hasNotificationAccess && !parsed.hasAccessibility) {
+          action.status = 'needs_permission';
+          return false;
+        }
+        action.status = 'executed';
+        return true;
+      } catch {}
+    }
+    action.status = 'needs_permission';
+    return false;
   }
 
   const intentUrl = action.intentUrl;
@@ -939,6 +999,31 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
     return actionObj;
   }
 
+  if (name === "configure_whatsapp_autoreply") {
+    const enabled = args.enabled !== false;
+    label = enabled ? "Fungura WhatsApp Auto-Reply" : "Funga WhatsApp Auto-Reply";
+    const actionObj: DeviceAction = {
+      name,
+      args,
+      label,
+      status: 'executed',
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+
+  if (name === "scan_whatsapp_chats") {
+    label = "Reba & Subiza WhatsApp zose";
+    const actionObj: DeviceAction = {
+      name,
+      args,
+      label,
+      status: 'executed',
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+
   return null;
 }
 
@@ -961,6 +1046,23 @@ function actionConfirmation(action: DeviceAction): string {
   }
   if (action.name === 'open_whatsapp') {
     return `💚 WhatsApp ifunguwe kuri **${action.contactName || action.phoneNumber}**!`;
+  }
+  if (action.name === 'configure_whatsapp_autoreply') {
+    const enabled = action.args?.enabled !== false;
+    return enabled
+      ? `💬 WhatsApp Auto-Reply yafunguwe! Kevin AI irahita isubiza ubutumwa bwinjiye kuri WhatsApp.`
+      : `🔕 WhatsApp Auto-Reply yahagaritswe.`;
+  }
+  if (action.name === 'scan_whatsapp_chats') {
+    const sr = action.args?.scanResult || {};
+    if (action.status === 'needs_permission') {
+      return `⚠️ Kugira ngo Kevin AI irebe chat za WhatsApp zose, emera **WA Notif** cyangwa **Accessibility** muri **Kevin Permission**.`;
+    }
+    const notifCount = Number(sr.activeNotifQueued || 0);
+    if (sr.openedWhatsAppForScan) {
+      return `💬 Kevin AI ifunguye WhatsApp ngo irebe kandi isubize chat zose zitarasubizwa${notifCount > 0 ? ` (hamwe na notifications ${notifCount})` : ''}! ✨`;
+    }
+    return `💬 Kevin AI irimo gusuzuma no gusubiza ubutumwa bwa WhatsApp budasubije (notifications ${notifCount})!`;
   }
   if (action.name === 'open_camera') {
     return `📷 Kamera irafunguwe!`;
@@ -1263,6 +1365,28 @@ const APK_DEVICE_ACTION_DECLARATIONS = [
     },
   },
   {
+    name: 'configure_whatsapp_autoreply',
+    description: 'Enable or disable automatic AI replying to incoming WhatsApp messages.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        enabled: { type: 'BOOLEAN', description: 'Whether WhatsApp auto-reply should be enabled.' },
+        reply_style: { type: 'STRING', description: 'Optional reply instructions.' },
+      },
+      required: ['enabled'],
+    },
+  },
+  {
+    name: 'scan_whatsapp_chats',
+    description: 'Scan all unread/unreplied WhatsApp chats and notifications on the phone and automatically reply to messages that have not yet been answered.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        reply_style: { type: 'STRING', description: 'Optional reply instructions.' },
+      },
+    },
+  },
+  {
     name: 'open_camera',
     description: 'Open the device camera.',
     parameters: {
@@ -1426,7 +1550,8 @@ function buildApkSystemInstruction(
   userName: string,
   hasAudioAttachment: boolean,
   savedContacts: SavedContact[],
-  perms: AgentPermissions
+  perms: AgentPermissions,
+  latestUserText = ''
 ): string {
   const now = new Date();
   const realTimeContext = `[REAL-TIME CONTEXT: Today is ${now.toLocaleDateString('en-US', {
@@ -1440,9 +1565,38 @@ function buildApkSystemInstruction(
     minute: '2-digit',
     timeZone: 'Africa/Kigali',
   })}.]`;
-  const contactsList = savedContacts
-    .filter((c) => c && c.name?.trim() && c.phone?.trim())
-    .slice(0, 40)
+  let effectiveContacts = savedContacts;
+  if (typeof window !== 'undefined' && effectiveContacts.length < 50) {
+    try {
+      const bridge = (window as any).KevinAgentBridge;
+      if (bridge?.lookupContactsJson) {
+        const nativeAll = JSON.parse(bridge.lookupContactsJson('')) as Array<{ name: string; phone: string }>;
+        if (Array.isArray(nativeAll) && nativeAll.length > effectiveContacts.length) {
+          effectiveContacts = mergeContactsBatch(nativeAll).contacts;
+        }
+      }
+    } catch {}
+  }
+  const userTokens = normalizeContactSearchText(latestUserText)
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+  const validContacts = effectiveContacts.filter((c) => c && c.name?.trim() && c.phone?.trim());
+  const prioritized = userTokens.length > 0
+    ? [
+        ...validContacts.filter((c) => {
+          const nm = normalizeContactSearchText(c.name);
+          const ph = c.phone.replace(/[^\d]/g, '');
+          return userTokens.some((tok) => nm.includes(tok) || (ph && ph.includes(tok)));
+        }),
+        ...validContacts.filter((c) => {
+          const nm = normalizeContactSearchText(c.name);
+          const ph = c.phone.replace(/[^\d]/g, '');
+          return !userTokens.some((tok) => nm.includes(tok) || (ph && ph.includes(tok)));
+        }),
+      ]
+    : validContacts;
+  const contactsList = prioritized
+    .slice(0, 500)
     .map((c) => `${c.name.trim()}: ${c.phone.trim()}`);
   const customInstructions = safeStorageGet('kevin_ai_custom_instructions')?.trim() || '';
 
@@ -1455,8 +1609,8 @@ function buildApkSystemInstruction(
     hasAudioAttachment
       ? `The user sent a voice note/audio message. Listen attentively in Kinyarwanda, English, French, or Swahili and respond directly or execute requested tool actions immediately.`
       : '',
-    contactsList.length > 0 ? `[SAVED CONTACTS: ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. Always execute requested device actions immediately using tool calls.]`,
+    contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Always execute requested device actions immediately using tool calls.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }
@@ -1728,14 +1882,14 @@ export async function sendMessageToGemini(
   const isApk = isCapacitorApkRuntime();
 
   const executeDirectApkGemini = async (requestContents: any[], includeAudioFlag: boolean) => {
-    const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms);
     const latestUserText = Array.isArray(requestContents) && requestContents.length > 0
       ? ((requestContents[requestContents.length - 1] as any)?.parts || [])
           .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
           .join(' ')
           .trim()
       : '';
-    const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps)\b/i.test(latestUserText);
+    const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
+    const isExplicitDeviceCommand = /\b(hamagara|terefone|call|sms|ohereza|send|whatsapp|youtube|curanga|play|audiomack|lark|kamera|camera|fungura|open|instagram|tiktok|spotify|maps|subiza|budasubije|unread)\b/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText
       && !includeAudioFlag

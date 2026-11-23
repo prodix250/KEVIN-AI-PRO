@@ -169,7 +169,6 @@
     --animate-spin: spin 1s linear infinite;
     --animate-ping: ping 1s cubic-bezier(0, 0, .2, 1) infinite;
     --animate-pulse: pulse 2s cubic-bezier(.4, 0, .6, 1) infinite;
-    --animate-bounce: bounce 1s infinite;
     --blur-xs: 4px;
     --blur-sm: 8px;
     --blur-md: 12px;
@@ -901,6 +900,10 @@
     max-height: 420px;
   }
 
+  .min-h-\[16px\] {
+    min-height: 16px;
+  }
+
   .min-h-\[36px\] {
     min-height: 36px;
   }
@@ -919,6 +922,10 @@
 
   .w-1\.5 {
     width: calc(var(--spacing) * 1.5);
+  }
+
+  .w-2 {
+    width: calc(var(--spacing) * 2);
   }
 
   .w-2\.5 {
@@ -1077,10 +1084,6 @@
 
   .transform {
     transform: var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, );
-  }
-
-  .animate-bounce {
-    animation: var(--animate-bounce);
   }
 
   .animate-ping {
@@ -1311,6 +1314,10 @@
     border-top-left-radius: 0;
   }
 
+  .rounded-tl-xs {
+    border-top-left-radius: var(--radius-xs);
+  }
+
   .rounded-r-xl {
     border-top-right-radius: var(--radius-xl);
     border-bottom-right-radius: var(--radius-xl);
@@ -1355,6 +1362,10 @@
 
   .border-\[\#00a884\]\/30 {
     border-color: oklab(65.0927% -.126487 .021335 / .3);
+  }
+
+  .border-\[\#00a884\]\/35 {
+    border-color: oklab(65.0927% -.126487 .021335 / .35);
   }
 
   .border-\[\#00a884\]\/40 {
@@ -1799,8 +1810,8 @@
     background-color: var(--color-gray-300);
   }
 
-  .bg-gray-400 {
-    background-color: var(--color-gray-400);
+  .bg-gray-500 {
+    background-color: var(--color-gray-500);
   }
 
   .bg-gray-800 {
@@ -2112,6 +2123,10 @@
 
   .py-2\.5 {
     padding-block: calc(var(--spacing) * 2.5);
+  }
+
+  .py-3\.5 {
+    padding-block: calc(var(--spacing) * 3.5);
   }
 
   .py-10 {
@@ -5304,17 +5319,5 @@ pre code.hljs {
 @keyframes pulse {
   50% {
     opacity: .5;
-  }
-}
-
-@keyframes bounce {
-  0%, 100% {
-    animation-timing-function: cubic-bezier(.8, 0, 1, 1);
-    transform: translateY(-25%);
-  }
-
-  50% {
-    animation-timing-function: cubic-bezier(0, 0, .2, 1);
-    transform: none;
   }
 }

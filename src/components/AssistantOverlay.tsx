@@ -699,13 +699,13 @@ export default function AssistantOverlay({
       const transcript = await transcribeAudioWithSTT(audioBase64, recording.mimeType);
       if (transcript) {
         setPromptText((prev) => (prev ? `${prev.trim()} ${transcript}` : transcript));
-        showAudioStatus('🎙️ Amajwi yahinduwe inyandiko (STT)!');
+        showAudioStatus('🎙️ Byanditswe!');
         setTimeout(() => textareaRef.current?.focus(), 60);
       } else {
         showAudioStatus('Ntacyo ijwi ryabashije kumvikana. Ongera ugerageze.');
       }
     } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : 'STT transcription failed.');
+      setErrorMsg(error instanceof Error ? error.message : 'Byanze gusoma amajwi.');
     } finally {
       setIsTranscribing(false);
       voiceStoppingRef.current = false;
@@ -866,15 +866,31 @@ export default function AssistantOverlay({
                     </span>
                     <Sparkles size={13} className="text-[#00a884]" />
                   </div>
-                  <p className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate">
-                    {isRecording
-                      ? 'Ndumva... Vuga icyo ushaka'
-                      : isTranscribing
-                        ? 'Guhindura amajwi mu nyandiko (STT)...'
-                        : isLoading
-                          ? 'Ndabikora ako kanya...'
-                          : 'Nakufasha iki uyu munsi?'}
-                  </p>
+                  <div className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate min-h-[16px] flex items-center">
+                    {isRecording ? (
+                      <span>Ndumva... Vuga icyo ushaka</span>
+                    ) : (isTranscribing || isLoading) ? (
+                      <span className="inline-flex items-center gap-1 py-0.5" aria-label="Kevin AI is active">
+                        <motion.span
+                          animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
+                          transition={{ repeat: Infinity, duration: 0.9, delay: 0, ease: 'easeInOut' }}
+                          className="w-1.5 h-1.5 rounded-full bg-[#00a884]"
+                        />
+                        <motion.span
+                          animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
+                          transition={{ repeat: Infinity, duration: 0.9, delay: 0.16, ease: 'easeInOut' }}
+                          className="w-1.5 h-1.5 rounded-full bg-[#00a884]"
+                        />
+                        <motion.span
+                          animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
+                          transition={{ repeat: Infinity, duration: 0.9, delay: 0.32, ease: 'easeInOut' }}
+                          className="w-1.5 h-1.5 rounded-full bg-[#00a884]"
+                        />
+                      </span>
+                    ) : (
+                      <span>Nakufasha iki uyu munsi?</span>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -909,7 +925,7 @@ export default function AssistantOverlay({
             </div>
 
             {/* Compact Response Area (when active) */}
-            {(submittedPrompt || replyText || action || errorMsg) && (
+            {(submittedPrompt || replyText || action || errorMsg || isTranscribing || isLoading) && (
               <div className="max-h-[38vh] overflow-y-auto px-4 py-2 space-y-2.5 border-t border-gray-100 dark:border-[#202c33]">
                 {submittedPrompt && (
                   <div className="flex flex-col items-end gap-1">
@@ -1061,6 +1077,28 @@ export default function AssistantOverlay({
                   </div>
                 )}
 
+                {(isTranscribing || isLoading) && !replyText && (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-100 dark:bg-[#202c33] px-3.5 py-2.5 rounded-2xl rounded-tl-xs flex items-center gap-1.5 shadow-2xs">
+                      <motion.span
+                        animate={{ y: [0, -4.5, 0], opacity: [0.45, 1, 0.45] }}
+                        transition={{ repeat: Infinity, duration: 0.9, delay: 0, ease: 'easeInOut' }}
+                        className="w-2 h-2 rounded-full bg-gray-500 dark:bg-[#8696a0]"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -4.5, 0], opacity: [0.45, 1, 0.45] }}
+                        transition={{ repeat: Infinity, duration: 0.9, delay: 0.16, ease: 'easeInOut' }}
+                        className="w-2 h-2 rounded-full bg-gray-500 dark:bg-[#8696a0]"
+                      />
+                      <motion.span
+                        animate={{ y: [0, -4.5, 0], opacity: [0.45, 1, 0.45] }}
+                        transition={{ repeat: Infinity, duration: 0.9, delay: 0.32, ease: 'easeInOut' }}
+                        className="w-2 h-2 rounded-full bg-gray-500 dark:bg-[#8696a0]"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {errorMsg && (
                   <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-xl px-3 py-2 space-y-2">
                     <p>{errorMsg}</p>
@@ -1184,9 +1222,9 @@ export default function AssistantOverlay({
                       type="button"
                       onClick={() => void transcribeRecordingToInput()}
                       className="px-2.5 py-1 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] text-white text-[11px] font-bold cursor-pointer"
-                      title="Hindura amajwi mu nyandiko (STT)"
+                      title="Andika amajwi"
                     >
-                      STT → Text
+                      Text
                     </button>
                     <span className="text-gray-500 dark:text-[#8696a0] font-mono text-xs">
                       {Math.floor(recordingSec / 60).toString().padStart(2, '0')}:
@@ -1207,11 +1245,9 @@ export default function AssistantOverlay({
                     }
                   }}
                   placeholder={
-                    isTranscribing
-                      ? 'Guhindura amajwi mu nyandiko (STT)...'
-                      : submittedPrompt || replyText
-                        ? 'Baza ikindi cyangwa utegeke...'
-                        : 'Andika, vuga, cyangwa usangize ifoto...'
+                    submittedPrompt || replyText
+                      ? 'Baza ikindi cyangwa utegeke...'
+                      : 'Andika, vuga, cyangwa usangize ifoto...'
                   }
                   className={`w-full bg-transparent resize-none focus:outline-none text-gray-900 dark:text-[#e9edef] placeholder:text-gray-400 dark:placeholder:text-[#8696a0] ${
                     submittedPrompt || replyText
@@ -1280,7 +1316,7 @@ export default function AssistantOverlay({
                 <button
                   type="button"
                   onClick={() => void toggleVoice()}
-                  title={isRecording ? 'Ohereza amajwi' : 'Fata amajwi (Voice + STT)'}
+                  title={isRecording ? 'Ohereza amajwi' : 'Fata amajwi'}
                   className={`w-12 h-12 rounded-full flex items-center justify-center text-white shadow-lg transition-all cursor-pointer relative ${
                     isRecording
                       ? 'bg-red-500 animate-pulse ring-4 ring-red-500/30 scale-105'
