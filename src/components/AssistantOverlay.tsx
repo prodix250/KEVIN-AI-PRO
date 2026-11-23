@@ -870,23 +870,7 @@ export default function AssistantOverlay({
                     {isRecording ? (
                       <span>Ndumva... Vuga icyo ushaka</span>
                     ) : (isTranscribing || isLoading) ? (
-                      <span className="inline-flex items-center gap-1 py-0.5" aria-label="Kevin AI is active">
-                        <motion.span
-                          animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
-                          transition={{ repeat: Infinity, duration: 0.9, delay: 0, ease: 'easeInOut' }}
-                          className="w-1.5 h-1.5 rounded-full bg-[#00a884]"
-                        />
-                        <motion.span
-                          animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
-                          transition={{ repeat: Infinity, duration: 0.9, delay: 0.16, ease: 'easeInOut' }}
-                          className="w-1.5 h-1.5 rounded-full bg-[#00a884]"
-                        />
-                        <motion.span
-                          animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
-                          transition={{ repeat: Infinity, duration: 0.9, delay: 0.32, ease: 'easeInOut' }}
-                          className="w-1.5 h-1.5 rounded-full bg-[#00a884]"
-                        />
-                      </span>
+                      <span className="text-[#00a884] font-medium">typing...</span>
                     ) : (
                       <span>Nakufasha iki uyu munsi?</span>
                     )}

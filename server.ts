@@ -107,7 +107,7 @@ You are a full autonomous agent with direct permission-backed control over apps 
 - YouTube Playback: When the user asks to play a song or video on YouTube (e.g., 'fungura youtube uncurangire...', 'play ... on youtube'), ALWAYS call open_youtube(query) so the exact video starts playing immediately instead of just searching.
 - Direct Calling & Contact Resolution: When the user asks to call someone or a phone number (e.g., 'hamagara 0788...', 'hamagara Aline', 'call Mom', 'terefone Jean'), ALWAYS call make_call(phone_number, contact_name) immediately. If the user gives a phone number, pass phone_number. If the user gives a contact name without a number, check [SAVED CONTACTS] in your context first—if found there, pass both phone_number and contact_name; if NOT in [SAVED CONTACTS], pass contact_name only and leave phone_number empty so the device resolves it from Contacts. NEVER invent or guess a phone number!
 - Direct SMS Sending: When the user asks to send an SMS/text message (e.g., 'ohereza ubutumwa kuri 078...', 'send sms to Aline'), ALWAYS call send_sms(phone_number, message, contact_name) immediately (never tell the user to open their SMS app manually, and never invent a missing number).
-- Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately. For phone numbers in Rwanda, ensure the country code +250 is used (e.g. +250788123456 or 250788123456 instead of 0788123456) so WhatsApp can deliver the message immediately without missing country code errors.
+- Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately. For phone numbers in Rwanda, ensure the country code +250 is used (e.g. +250788123456 or 250788123456 instead of 0788123456) so WhatsApp can deliver the message immediately without missing country code errors. In the 'message' parameter, write ONLY ONE single natural human message matching the user's/recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions.
 - WhatsApp Auto-Reply Mode: When the user asks you to automatically reply to incoming WhatsApp messages on their behalf (e.g., 'ujye unsubiriza kuri whatsapp', 'enable whatsapp auto reply'), ALWAYS call configure_whatsapp_autoreply(enabled, reply_style).
 - Check All WhatsApp Chats & Reply to Unreplied Messages: When the user asks you to check their WhatsApp chats and reply to unread/unreplied messages (e.g., 'reba muri whatsapp zanjye usubize ubutumwa budasubije', 'check all whatsapp chats and reply'), ALWAYS call scan_whatsapp_chats().
 - Calls & Other Apps: Use make_call, open_audiomack, open_lark_player, open_camera, or open_app immediately whenever requested.`;
@@ -704,6 +704,72 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
     }
   });
 
+  function sanitizeWhatsAppReply(raw: string, ownerName: string, senderName?: string): string {
+    if (!raw) return '';
+    let cleaned = raw
+      .replace(/^```(?:\w+)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    const stripPrefix = (line: string): string => {
+      let s = line.trim();
+      // Strip WhatsApp transcript headers like "[23/11, 11:23] Kevin:" or "[11:23, 23/11/2026] Name:"
+      s = s.replace(/^\[[^\]]{3,32}\]\s*[^:\n]{1,40}:\s*/g, '');
+      // Strip standalone leading timestamps like "23/11, 11:23 -" or "11:23 AM -"
+      s = s.replace(/^\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?,?\s*\d{1,2}:\d{2}(?:\s*[APMapm]{2})?\s*[-–:]\s*/g, '');
+      s = s.replace(/^\d{1,2}:\d{2}(?:\s*[APMapm]{2})?\s*[-–:]\s*/g, '');
+      // Strip AI / role / owner / sender prefixes like "Kevin:", "Reply:", "AI:", "Option 1:"
+      s = s.replace(/^(?:reply|response|igisubizo|assistant|kevin\s*ai|ai|me|you|option\s*\d+)\s*:\s*/i, '');
+      const escapedOwner = ownerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (escapedOwner) {
+        s = s.replace(new RegExp(`^${escapedOwner}\\s*:\\s*`, 'i'), '');
+      }
+      if (senderName?.trim()) {
+        const escapedSender = senderName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        s = s.replace(new RegExp(`^${escapedSender}\\s*:\\s*`, 'i'), '');
+      }
+      s = s.replace(/^["'“”]+|["'“”]+$/g, '').trim();
+      return s;
+    };
+
+    const rawLines = cleaned
+      .split(/\r?\n+/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    if (rawLines.length === 0) return '';
+
+    // If the model accidentally output multiple transcript lines (e.g. "[23/11, 11:23] Kevin: ..."), keep ONLY the first genuine reply
+    const hasTranscriptHeaders = rawLines.filter((l) =>
+      /^\[[^\]]{3,32}\]\s*[^:\n]{1,40}:/i.test(l) || /^(?:option\s*\d+|reply|\d+[.)])/i.test(l)
+    ).length >= 2;
+
+    if (hasTranscriptHeaders) {
+      for (const l of rawLines) {
+        const single = stripPrefix(l);
+        if (single) return single;
+      }
+    }
+
+    const cleanedLines = rawLines.map(stripPrefix).filter(Boolean);
+    if (cleanedLines.length === 0) return '';
+
+    // Keep only one concise natural message (max 2 lines if part of the same thought, never repeated variations)
+    if (cleanedLines.length > 1) {
+      const first = cleanedLines[0];
+      const second = cleanedLines[1];
+      const firstWords = new Set(first.toLowerCase().split(/\s+/).filter((w) => w.length > 3));
+      const secondWords = second.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+      const overlap = secondWords.filter((w) => firstWords.has(w)).length;
+      if (cleanedLines.length >= 3 || overlap >= 2) {
+        return first;
+      }
+      return `${first} ${second}`.trim();
+    }
+
+    return cleanedLines[0];
+  }
+
   app.post('/api/whatsapp-reply', async (req: Request, res: Response) => {
     try {
       const { sender, incomingMessage, replyStyle, userName, customApiKey, customApiKeys } = req.body as {
@@ -728,18 +794,24 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
 
       const ownerName = userName?.trim() || 'Kevin';
       const systemInstruction = [
-        `You are Kevin AI acting as ${ownerName}'s WhatsApp Auto-Reply Assistant.`,
-        `Reply directly and naturally to the incoming WhatsApp message from "${sender || 'Contact'}".`,
-        `Match the sender's language (Kinyarwanda, English, French, or Swahili).`,
-        `Keep the reply concise, polite, helpful, and natural for WhatsApp (1-3 sentences max).`,
-        `Do not say "As an AI..." — reply seamlessly on behalf of ${ownerName}.`,
-        replyStyle?.trim() ? `Owner's Auto-Reply Instructions: ${replyStyle.trim()}` : '',
+        `You are ${ownerName} replying directly on WhatsApp to "${sender || 'your contact'}".`,
+        `Write ONE single, natural human WhatsApp reply message directly addressing what they just wrote.`,
+        `STRICT LANGUAGE RULE:`,
+        `- If the message is in English, reply ONLY in natural, conversational English.`,
+        `- If the message is in Kinyarwanda, reply ONLY in authentic, fluent, grammatically correct native Kinyarwanda (Ikinyarwanda cy'umwimerere — warm, polite, natural Rwandan phrasing, NEVER awkward literal translations).`,
+        `- If the message is in French or Swahili, reply fluently in that exact language.`,
+        `STRICT FORMAT RULES:`,
+        `- Output ONLY the exact message text to send (1 to 2 short sentences max).`,
+        `- NEVER include dates, timestamps (like [23/11, 11:23]), sender names (like "${ownerName}:"), labels, quotes, or markdown.`,
+        `- NEVER generate multiple replies, multiple options, or a back-and-forth conversation.`,
+        `- NEVER sound like or mention being an AI — write naturally as ${ownerName} themselves.`,
+        replyStyle?.trim() ? `Owner's Personal Style Preference: ${replyStyle.trim()}` : '',
       ].filter(Boolean).join('\n');
 
       let lastErr: unknown = null;
       const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       const invalidKeys = new Set<string>();
-      const waModels = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+      const waModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
 
       for (const model of waModels) {
         const waHasFallback = model !== waModels[waModels.length - 1];
@@ -775,7 +847,7 @@ If there is only silence, breathing, or noise, return {"wake":false,"command":""
                   setTimeout(() => reject(new Error('503 WhatsApp reply timed out during high demand')), 6000)
                 ),
               ]);
-              const reply = (response.text || '').trim();
+              const reply = sanitizeWhatsAppReply(response.text || '', ownerName, sender);
               if (reply) {
                 res.json({ reply, model });
                 return;

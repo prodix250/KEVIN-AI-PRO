@@ -2,6 +2,7 @@ package com.kevinai.pro;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -19,6 +20,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class KevinAgentAccessibilityService extends AccessibilityService {
+
+    private static final long CHAT_REPLY_COOLDOWN_MS = 300_000L;
 
     private final ExecutorService scanExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -73,7 +76,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             return;
         }
         long now = System.currentTimeMillis();
-        if (now - lastNavigationAt < 850L) {
+        if (now - lastNavigationAt < 900L) {
             return;
         }
         if (KevinAgentPrefs.getWhatsAppScanCount(this) >= 5) {
@@ -108,6 +111,16 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         }
     }
 
+    private boolean isSkippedSystemChat(String contactName) {
+        if (TextUtils.isEmpty(contactName)) return false;
+        String lower = contactName.trim().toLowerCase(Locale.ROOT);
+        return lower.equals("whatsapp")
+                || lower.equals("whatsapp business")
+                || lower.equals("meta ai")
+                || lower.equals("archived")
+                || lower.equals("locked chats");
+    }
+
     private AccessibilityNodeInfo findFirstUnreadRow(AccessibilityNodeInfo root, String pkg) {
         long now = System.currentTimeMillis();
         List<AccessibilityNodeInfo> badges = root.findAccessibilityNodeInfosByViewId(
@@ -122,18 +135,20 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                 if (row == null) continue;
 
                 String contactName = extractFirstTextByViewId(row, pkg + ":id/conversations_row_contact_name");
+                if (isSkippedSystemChat(contactName)) continue;
+
                 String key = !TextUtils.isEmpty(contactName)
                         ? contactName.toLowerCase(Locale.ROOT)
                         : ("row_" + badge.hashCode());
                 Long prev = scannedChatsCooldown.get(key);
-                if (prev != null && (now - prev) < 120_000L) {
+                if ((prev != null && (now - prev) < CHAT_REPLY_COOLDOWN_MS)
+                        || KevinAgentPrefs.wasWhatsAppChatRecentlyReplied(this, contactName, CHAT_REPLY_COOLDOWN_MS)) {
                     continue;
                 }
                 return row;
             }
         }
 
-        // Fallback: search rows whose accessibility contentDescription contains "unread"
         List<AccessibilityNodeInfo> names = root.findAccessibilityNodeInfosByViewId(
                 pkg + ":id/conversations_row_contact_name");
         if (names != null) {
@@ -146,10 +161,11 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
 
                 CharSequence contactSeq = nameNode.getText();
                 String contactName = contactSeq != null ? contactSeq.toString().trim() : "";
-                if (TextUtils.isEmpty(contactName)) continue;
+                if (TextUtils.isEmpty(contactName) || isSkippedSystemChat(contactName)) continue;
                 String key = contactName.toLowerCase(Locale.ROOT);
                 Long prev = scannedChatsCooldown.get(key);
-                if (prev != null && (now - prev) < 120_000L) {
+                if ((prev != null && (now - prev) < CHAT_REPLY_COOLDOWN_MS)
+                        || KevinAgentPrefs.wasWhatsAppChatRecentlyReplied(this, contactName, CHAT_REPLY_COOLDOWN_MS)) {
                     continue;
                 }
                 return row;
@@ -163,16 +179,22 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         if (TextUtils.isEmpty(senderName)) {
             senderName = "WhatsApp Contact";
         }
+        if (isSkippedSystemChat(senderName)) {
+            lastNavigationAt = System.currentTimeMillis();
+            performGlobalAction(GLOBAL_ACTION_BACK);
+            return;
+        }
+
         String senderKey = senderName.toLowerCase(Locale.ROOT);
         long now = System.currentTimeMillis();
         Long prev = scannedChatsCooldown.get(senderKey);
-        if (prev != null && (now - prev) < 120_000L) {
+        if ((prev != null && (now - prev) < CHAT_REPLY_COOLDOWN_MS)
+                || KevinAgentPrefs.wasWhatsAppChatRecentlyReplied(this, senderName, CHAT_REPLY_COOLDOWN_MS)) {
             lastNavigationAt = now;
             performGlobalAction(GLOBAL_ACTION_BACK);
             return;
         }
 
-        // Collect all visible message text nodes and verify whether the last message bubble is incoming or outgoing
         List<AccessibilityNodeInfo> msgTextNodes = root.findAccessibilityNodeInfosByViewId(pkg + ":id/message_text");
         if (msgTextNodes == null || msgTextNodes.isEmpty()) {
             scannedChatsCooldown.put(senderKey, now);
@@ -181,31 +203,37 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             return;
         }
 
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
         AccessibilityNodeInfo lastMsgNode = msgTextNodes.get(msgTextNodes.size() - 1);
-        if (isOutgoingMessageBubble(lastMsgNode, pkg)) {
-            // Already replied by user/agent
+        CharSequence lastSeq = lastMsgNode.getText();
+        String lastTxt = lastSeq != null ? lastSeq.toString().trim() : "";
+
+        if (isOutgoingMessageBubble(lastMsgNode, pkg, screenWidth)
+                || KevinAgentPrefs.isOwnSentWhatsAppText(this, senderName, lastTxt)) {
             scannedChatsCooldown.put(senderKey, now);
             lastNavigationAt = now;
             performGlobalAction(GLOBAL_ACTION_BACK);
             return;
         }
 
-        // Gather up to last 3 consecutive incoming messages
+        // Gather up to last 2 consecutive incoming messages on a single clean line
         List<String> incomingParts = new ArrayList<>();
-        int start = Math.max(0, msgTextNodes.size() - 3);
+        int start = Math.max(0, msgTextNodes.size() - 2);
         for (int i = start; i < msgTextNodes.size(); i++) {
             AccessibilityNodeInfo node = msgTextNodes.get(i);
-            if (isOutgoingMessageBubble(node, pkg)) {
+            CharSequence txt = node.getText();
+            String msgStr = txt != null ? txt.toString().trim() : "";
+            if (isOutgoingMessageBubble(node, pkg, screenWidth)
+                    || KevinAgentPrefs.isOwnSentWhatsAppText(this, senderName, msgStr)) {
                 incomingParts.clear();
                 continue;
             }
-            CharSequence txt = node.getText();
-            if (txt != null && !TextUtils.isEmpty(txt.toString().trim())) {
-                incomingParts.add(txt.toString().trim());
+            if (!TextUtils.isEmpty(msgStr)) {
+                incomingParts.add(msgStr);
             }
         }
 
-        String incomingText = TextUtils.join("\n", incomingParts).trim();
+        String incomingText = TextUtils.join(" ", incomingParts).trim();
         if (TextUtils.isEmpty(incomingText)) {
             scannedChatsCooldown.put(senderKey, now);
             lastNavigationAt = now;
@@ -215,14 +243,21 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
 
         scanStepBusy = true;
         scannedChatsCooldown.put(senderKey, now);
+        KevinAgentPrefs.recordWhatsAppChatReplied(this, senderName, "");
         final String finalSender = senderName;
 
         scanExecutor.execute(() -> {
-            String replyText = KevinNotificationListenerService.generateReplyStatic(
+            String rawReply = KevinNotificationListenerService.generateReplyStatic(
                     KevinAgentAccessibilityService.this,
                     finalSender,
                     incomingText
             );
+            String replyText = KevinNotificationListenerService.sanitizeWhatsAppReply(
+                    rawReply,
+                    KevinAgentPrefs.getUserName(KevinAgentAccessibilityService.this),
+                    finalSender
+            );
+
             mainHandler.post(() -> {
                 if (TextUtils.isEmpty(replyText)) {
                     scanStepBusy = false;
@@ -266,6 +301,11 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                         }
                     }
                     if (sent) {
+                        KevinAgentPrefs.recordWhatsAppChatReplied(
+                                KevinAgentAccessibilityService.this,
+                                finalSender,
+                                replyText
+                        );
                         KevinAgentPrefs.incrementWhatsAppScanCount(KevinAgentAccessibilityService.this);
                         Intent broadcast = new Intent(KevinNotificationListenerService.ACTION_WHATSAPP_REPLIED)
                                 .setPackage(getPackageName())
@@ -282,20 +322,33 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                         } else {
                             performGlobalAction(GLOBAL_ACTION_BACK);
                         }
-                    }, 550L);
-                }, 300L);
+                    }, 600L);
+                }, 320L);
             });
         });
     }
 
-    private boolean isOutgoingMessageBubble(AccessibilityNodeInfo msgTextNode, String pkg) {
+    private boolean isOutgoingMessageBubble(AccessibilityNodeInfo msgTextNode, String pkg, int screenWidth) {
+        if (msgTextNode == null) return false;
         AccessibilityNodeInfo parent = msgTextNode;
-        for (int depth = 0; depth < 5 && parent != null; depth++) {
+        for (int depth = 0; depth < 6 && parent != null; depth++) {
             List<AccessibilityNodeInfo> statusNodes = parent.findAccessibilityNodeInfosByViewId(pkg + ":id/status");
             if (statusNodes != null && !statusNodes.isEmpty()) {
                 return true;
             }
+            List<AccessibilityNodeInfo> msgStatusNodes = parent.findAccessibilityNodeInfosByViewId(pkg + ":id/message_status");
+            if (msgStatusNodes != null && !msgStatusNodes.isEmpty()) {
+                return true;
+            }
             parent = parent.getParent();
+        }
+        if (screenWidth > 0) {
+            Rect bounds = new Rect();
+            msgTextNode.getBoundsInScreen(bounds);
+            int rightMargin = screenWidth - bounds.right;
+            if (bounds.left > screenWidth * 0.16 && rightMargin < screenWidth * 0.16 && bounds.left > rightMargin * 1.4) {
+                return true;
+            }
         }
         return false;
     }

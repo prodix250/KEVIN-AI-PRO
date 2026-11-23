@@ -1610,7 +1610,7 @@ function buildApkSystemInstruction(
       ? `The user sent a voice note/audio message. Listen attentively in Kinyarwanda, English, French, or Swahili and respond directly or execute requested tool actions immediately.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Always execute requested device actions immediately using tool calls.]`,
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Always execute requested device actions immediately using tool calls.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }
@@ -1694,6 +1694,62 @@ export async function transcribeAudioWithSTT(
   }
 }
 
+function sanitizeWhatsAppReplyText(raw: string, ownerName: string, senderName?: string): string {
+  if (!raw) return '';
+  const cleaned = raw
+    .replace(/^```(?:\w+)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  const stripPrefix = (line: string): string => {
+    let s = line.trim();
+    s = s.replace(/^\[[^\]]{3,32}\]\s*[^:\n]{1,40}:\s*/g, '');
+    s = s.replace(/^\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?,?\s*\d{1,2}:\d{2}(?:\s*[APMapm]{2})?\s*[-–:]\s*/g, '');
+    s = s.replace(/^\d{1,2}:\d{2}(?:\s*[APMapm]{2})?\s*[-–:]\s*/g, '');
+    s = s.replace(/^(?:reply|response|igisubizo|assistant|kevin\s*ai|ai|me|you|option\s*\d+)\s*:\s*/i, '');
+    const escapedOwner = ownerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (escapedOwner) {
+      s = s.replace(new RegExp(`^${escapedOwner}\\s*:\\s*`, 'i'), '');
+    }
+    if (senderName?.trim()) {
+      const escapedSender = senderName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      s = s.replace(new RegExp(`^${escapedSender}\\s*:\\s*`, 'i'), '');
+    }
+    return s.replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  };
+
+  const rawLines = cleaned.split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
+  if (rawLines.length === 0) return '';
+
+  const hasTranscriptHeaders = rawLines.filter((l) =>
+    /^\[[^\]]{3,32}\]\s*[^:\n]{1,40}:/i.test(l) || /^(?:option\s*\d+|reply|\d+[.)])/i.test(l)
+  ).length >= 2;
+
+  if (hasTranscriptHeaders) {
+    for (const l of rawLines) {
+      const single = stripPrefix(l);
+      if (single) return single;
+    }
+  }
+
+  const cleanedLines = rawLines.map(stripPrefix).filter(Boolean);
+  if (cleanedLines.length === 0) return '';
+
+  if (cleanedLines.length > 1) {
+    const first = cleanedLines[0];
+    const second = cleanedLines[1];
+    const firstWords = new Set(first.toLowerCase().split(/\s+/).filter((w) => w.length > 3));
+    const secondWords = second.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    const overlap = secondWords.filter((w) => firstWords.has(w)).length;
+    if (cleanedLines.length >= 3 || overlap >= 2) {
+      return first;
+    }
+    return `${first} ${second}`.trim();
+  }
+
+  return cleanedLines[0];
+}
+
 export async function generateWhatsAppAutoReply(
   sender: string,
   incomingMessage: string,
@@ -1719,9 +1775,18 @@ export async function generateWhatsAppAutoReply(
                   parts: [
                     {
                       text: [
-                        `You are Kevin AI acting as ${userName}'s WhatsApp Auto-Reply Assistant.`,
-                        `Reply directly and naturally to "${sender || 'Contact'}" in their language (Kinyarwanda, English, French, or Swahili), 1-3 concise sentences.`,
-                        replyStyle?.trim() ? `Owner's Auto-Reply Instructions: ${replyStyle.trim()}` : '',
+                        `You are ${userName} replying directly on WhatsApp to "${sender || 'your contact'}".`,
+                        `Write ONE single, natural human WhatsApp reply message directly addressing what they just wrote.`,
+                        `STRICT LANGUAGE RULE:`,
+                        `- If the message is in English, reply ONLY in natural, conversational English.`,
+                        `- If the message is in Kinyarwanda, reply ONLY in authentic, fluent, grammatically correct native Kinyarwanda (Ikinyarwanda cy'umwimerere — warm, polite, natural Rwandan phrasing, NEVER awkward literal translations).`,
+                        `- If the message is in French or Swahili, reply fluently in that exact language.`,
+                        `STRICT FORMAT RULES:`,
+                        `- Output ONLY the exact message text to send (1 to 2 short sentences max).`,
+                        `- NEVER include dates, timestamps (like [23/11, 11:23]), sender names (like "${userName}:"), labels, quotes, or markdown.`,
+                        `- NEVER generate multiple replies, multiple options, or a back-and-forth conversation.`,
+                        `- NEVER sound like or mention being an AI — write naturally as ${userName} themselves.`,
+                        replyStyle?.trim() ? `Owner's Personal Style Preference: ${replyStyle.trim()}` : '',
                       ].filter(Boolean).join('\n'),
                     },
                   ],
@@ -1732,10 +1797,11 @@ export async function generateWhatsAppAutoReply(
           );
           if (!directRes.ok) continue;
           const directJson = await directRes.json();
-          const reply = directJson?.candidates?.[0]?.content?.parts
+          const rawReply = directJson?.candidates?.[0]?.content?.parts
             ?.map((p: any) => p?.text || '')
             .join('')
             .trim();
+          const reply = sanitizeWhatsAppReplyText(rawReply || '', userName, sender);
           if (reply) return reply;
         } catch {}
       }
@@ -1757,9 +1823,8 @@ export async function generateWhatsAppAutoReply(
     });
     if (!res.ok) return 'Muraho! Ndabona ubutumwa bwawe ubu gato.';
     const data = await res.json();
-    return typeof data.reply === 'string' && data.reply.trim()
-      ? data.reply.trim()
-      : 'Muraho! Ndabona ubutumwa bwawe ubu gato.';
+    const cleaned = sanitizeWhatsAppReplyText(typeof data.reply === 'string' ? data.reply : '', userName, sender);
+    return cleaned || 'Muraho! Ndabona ubutumwa bwawe ubu gato.';
   } catch {
     return 'Muraho! Ndabona ubutumwa bwawe ubu gato.';
   }

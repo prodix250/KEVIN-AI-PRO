@@ -1760,23 +1760,7 @@ export default function App() {
               </h1>
               <p className="text-[11px] text-green-100 dark:text-[#8696a0] flex items-center gap-1.5 mt-0.5 min-h-[16px]">
                 {(isTyping || isTranscribingSTT) ? (
-                  <span className="inline-flex items-center gap-1 py-0.5" aria-label="Kevin AI is active">
-                    <motion.span
-                      animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
-                      transition={{ repeat: Infinity, duration: 0.9, delay: 0, ease: 'easeInOut' }}
-                      className="w-1.5 h-1.5 rounded-full bg-[#00FF88]"
-                    />
-                    <motion.span
-                      animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
-                      transition={{ repeat: Infinity, duration: 0.9, delay: 0.16, ease: 'easeInOut' }}
-                      className="w-1.5 h-1.5 rounded-full bg-[#00FF88]"
-                    />
-                    <motion.span
-                      animate={{ y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] }}
-                      transition={{ repeat: Infinity, duration: 0.9, delay: 0.32, ease: 'easeInOut' }}
-                      className="w-1.5 h-1.5 rounded-full bg-[#00FF88]"
-                    />
-                  </span>
+                  <span className="text-[#00FF88] font-medium">typing...</span>
                 ) : (
                   <>
                     <span className="w-1.5 h-1.5 rounded-full bg-[#25D366] inline-block"></span>

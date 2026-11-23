@@ -23745,7 +23745,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-CLk_cwF-.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-BEogquJ_.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -25656,7 +25656,7 @@ function buildApkSystemInstruction(userName, hasAudioAttachment, savedContacts, 
 ${customInstructions}` : "",
     hasAudioAttachment ? `The user sent a voice note/audio message. Listen attentively in Kinyarwanda, English, French, or Swahili and respond directly or execute requested tool actions immediately.` : "",
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(" | ")}]` : "",
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Always execute requested device actions immediately using tool calls.]`,
+    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to turn on/off WhatsApp auto-reply, ALWAYS call configure_whatsapp_autoreply(). Always execute requested device actions immediately using tool calls.]`,
     realTimeContext
   ].filter(Boolean).join("\n\n");
 }
@@ -25731,6 +25731,51 @@ async function transcribeAudioWithSTT(audioBase64, audioMimeType = "audio/webm")
     return "";
   }
 }
+function sanitizeWhatsAppReplyText(raw, ownerName, senderName) {
+  if (!raw) return "";
+  const cleaned = raw.replace(/^```(?:\w+)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const stripPrefix = (line) => {
+    let s2 = line.trim();
+    s2 = s2.replace(/^\[[^\]]{3,32}\]\s*[^:\n]{1,40}:\s*/g, "");
+    s2 = s2.replace(/^\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?,?\s*\d{1,2}:\d{2}(?:\s*[APMapm]{2})?\s*[-–:]\s*/g, "");
+    s2 = s2.replace(/^\d{1,2}:\d{2}(?:\s*[APMapm]{2})?\s*[-–:]\s*/g, "");
+    s2 = s2.replace(/^(?:reply|response|igisubizo|assistant|kevin\s*ai|ai|me|you|option\s*\d+)\s*:\s*/i, "");
+    const escapedOwner = ownerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (escapedOwner) {
+      s2 = s2.replace(new RegExp(`^${escapedOwner}\\s*:\\s*`, "i"), "");
+    }
+    if (senderName == null ? void 0 : senderName.trim()) {
+      const escapedSender = senderName.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      s2 = s2.replace(new RegExp(`^${escapedSender}\\s*:\\s*`, "i"), "");
+    }
+    return s2.replace(/^["'“”]+|["'“”]+$/g, "").trim();
+  };
+  const rawLines = cleaned.split(/\r?\n+/).map((l2) => l2.trim()).filter(Boolean);
+  if (rawLines.length === 0) return "";
+  const hasTranscriptHeaders = rawLines.filter(
+    (l2) => /^\[[^\]]{3,32}\]\s*[^:\n]{1,40}:/i.test(l2) || /^(?:option\s*\d+|reply|\d+[.)])/i.test(l2)
+  ).length >= 2;
+  if (hasTranscriptHeaders) {
+    for (const l2 of rawLines) {
+      const single = stripPrefix(l2);
+      if (single) return single;
+    }
+  }
+  const cleanedLines = rawLines.map(stripPrefix).filter(Boolean);
+  if (cleanedLines.length === 0) return "";
+  if (cleanedLines.length > 1) {
+    const first2 = cleanedLines[0];
+    const second = cleanedLines[1];
+    const firstWords = new Set(first2.toLowerCase().split(/\s+/).filter((w2) => w2.length > 3));
+    const secondWords = second.toLowerCase().split(/\s+/).filter((w2) => w2.length > 3);
+    const overlap = secondWords.filter((w2) => firstWords.has(w2)).length;
+    if (cleanedLines.length >= 3 || overlap >= 2) {
+      return first2;
+    }
+    return `${first2} ${second}`.trim();
+  }
+  return cleanedLines[0];
+}
 async function generateWhatsAppAutoReply(sender, incomingMessage, replyStyle) {
   var _a2, _b2, _c, _d;
   const userName = typeof window !== "undefined" ? safeStorageGet("kevin_user_name") || safeStorageGet("kevin_ai_user_name") || "Kevin" : "Kevin";
@@ -25750,9 +25795,18 @@ async function generateWhatsAppAutoReply(sender, incomingMessage, replyStyle) {
                   parts: [
                     {
                       text: [
-                        `You are Kevin AI acting as ${userName}'s WhatsApp Auto-Reply Assistant.`,
-                        `Reply directly and naturally to "${sender || "Contact"}" in their language (Kinyarwanda, English, French, or Swahili), 1-3 concise sentences.`,
-                        (replyStyle == null ? void 0 : replyStyle.trim()) ? `Owner's Auto-Reply Instructions: ${replyStyle.trim()}` : ""
+                        `You are ${userName} replying directly on WhatsApp to "${sender || "your contact"}".`,
+                        `Write ONE single, natural human WhatsApp reply message directly addressing what they just wrote.`,
+                        `STRICT LANGUAGE RULE:`,
+                        `- If the message is in English, reply ONLY in natural, conversational English.`,
+                        `- If the message is in Kinyarwanda, reply ONLY in authentic, fluent, grammatically correct native Kinyarwanda (Ikinyarwanda cy'umwimerere — warm, polite, natural Rwandan phrasing, NEVER awkward literal translations).`,
+                        `- If the message is in French or Swahili, reply fluently in that exact language.`,
+                        `STRICT FORMAT RULES:`,
+                        `- Output ONLY the exact message text to send (1 to 2 short sentences max).`,
+                        `- NEVER include dates, timestamps (like [23/11, 11:23]), sender names (like "${userName}:"), labels, quotes, or markdown.`,
+                        `- NEVER generate multiple replies, multiple options, or a back-and-forth conversation.`,
+                        `- NEVER sound like or mention being an AI — write naturally as ${userName} themselves.`,
+                        (replyStyle == null ? void 0 : replyStyle.trim()) ? `Owner's Personal Style Preference: ${replyStyle.trim()}` : ""
                       ].filter(Boolean).join("\n")
                     }
                   ]
@@ -25763,7 +25817,8 @@ async function generateWhatsAppAutoReply(sender, incomingMessage, replyStyle) {
           );
           if (!directRes.ok) continue;
           const directJson = await directRes.json();
-          const reply = (_d = (_c = (_b2 = (_a2 = directJson == null ? void 0 : directJson.candidates) == null ? void 0 : _a2[0]) == null ? void 0 : _b2.content) == null ? void 0 : _c.parts) == null ? void 0 : _d.map((p2) => (p2 == null ? void 0 : p2.text) || "").join("").trim();
+          const rawReply = (_d = (_c = (_b2 = (_a2 = directJson == null ? void 0 : directJson.candidates) == null ? void 0 : _a2[0]) == null ? void 0 : _b2.content) == null ? void 0 : _c.parts) == null ? void 0 : _d.map((p2) => (p2 == null ? void 0 : p2.text) || "").join("").trim();
+          const reply = sanitizeWhatsAppReplyText(rawReply || "", userName, sender);
           if (reply) return reply;
         } catch {
         }
@@ -25785,7 +25840,8 @@ async function generateWhatsAppAutoReply(sender, incomingMessage, replyStyle) {
     });
     if (!res.ok) return "Muraho! Ndabona ubutumwa bwawe ubu gato.";
     const data = await res.json();
-    return typeof data.reply === "string" && data.reply.trim() ? data.reply.trim() : "Muraho! Ndabona ubutumwa bwawe ubu gato.";
+    const cleaned = sanitizeWhatsAppReplyText(typeof data.reply === "string" ? data.reply : "", userName, sender);
+    return cleaned || "Muraho! Ndabona ubutumwa bwawe ubu gato.";
   } catch {
     return "Muraho! Ndabona ubutumwa bwawe ubu gato.";
   }
@@ -36981,7 +37037,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-BKSjXsUe.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-C_KDg7pQ.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -102287,32 +102343,7 @@ function AssistantOverlay({
                     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-extrabold tracking-tight text-[#075E54] dark:text-[#00FF88]", children: "Kevin AI" }),
                     /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { size: 13, className: "text-[#00a884]" })
                   ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] text-gray-500 dark:text-[#8696a0] truncate min-h-[16px] flex items-center", children: isRecording ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Ndumva... Vuga icyo ushaka" }) : isTranscribing || isLoading ? /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "inline-flex items-center gap-1 py-0.5", "aria-label": "Kevin AI is active", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      motion.span,
-                      {
-                        animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
-                        transition: { repeat: Infinity, duration: 0.9, delay: 0, ease: "easeInOut" },
-                        className: "w-1.5 h-1.5 rounded-full bg-[#00a884]"
-                      }
-                    ),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      motion.span,
-                      {
-                        animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
-                        transition: { repeat: Infinity, duration: 0.9, delay: 0.16, ease: "easeInOut" },
-                        className: "w-1.5 h-1.5 rounded-full bg-[#00a884]"
-                      }
-                    ),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      motion.span,
-                      {
-                        animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
-                        transition: { repeat: Infinity, duration: 0.9, delay: 0.32, ease: "easeInOut" },
-                        className: "w-1.5 h-1.5 rounded-full bg-[#00a884]"
-                      }
-                    )
-                  ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Nakufasha iki uyu munsi?" }) })
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] text-gray-500 dark:text-[#8696a0] truncate min-h-[16px] flex items-center", children: isRecording ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Ndumva... Vuga icyo ushaka" }) : isTranscribing || isLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[#00a884] font-medium", children: "typing..." }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Nakufasha iki uyu munsi?" }) })
                 ] })
               ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1 shrink-0", children: [
@@ -102840,7 +102871,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-lEn5iqa7.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-CXin7f8c.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -104548,32 +104579,7 @@ Click the **${docName}** file below to download and view the complete document.`
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-white font-bold", children: "Kevin" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[#00FF88] font-extrabold ml-1", children: "AI" })
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-green-100 dark:text-[#8696a0] flex items-center gap-1.5 mt-0.5 min-h-[16px]", children: isTyping || isTranscribingSTT ? /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "inline-flex items-center gap-1 py-0.5", "aria-label": "Kevin AI is active", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              motion.span,
-              {
-                animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
-                transition: { repeat: Infinity, duration: 0.9, delay: 0, ease: "easeInOut" },
-                className: "w-1.5 h-1.5 rounded-full bg-[#00FF88]"
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              motion.span,
-              {
-                animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
-                transition: { repeat: Infinity, duration: 0.9, delay: 0.16, ease: "easeInOut" },
-                className: "w-1.5 h-1.5 rounded-full bg-[#00FF88]"
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              motion.span,
-              {
-                animate: { y: [0, -3.5, 0], opacity: [0.5, 1, 0.5] },
-                transition: { repeat: Infinity, duration: 0.9, delay: 0.32, ease: "easeInOut" },
-                className: "w-1.5 h-1.5 rounded-full bg-[#00FF88]"
-              }
-            )
-          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-green-100 dark:text-[#8696a0] flex items-center gap-1.5 mt-0.5 min-h-[16px]", children: isTyping || isTranscribingSTT ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[#00FF88] font-medium", children: "typing..." }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-1.5 h-1.5 rounded-full bg-[#25D366] inline-block" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "online" })
           ] }) })

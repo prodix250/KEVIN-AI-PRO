@@ -23,12 +23,15 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
 
 public class KevinNotificationListenerService extends NotificationListenerService {
 
@@ -37,6 +40,16 @@ public class KevinNotificationListenerService extends NotificationListenerServic
     public static final String EXTRA_INCOMING = "incoming";
     public static final String EXTRA_REPLY = "reply";
 
+    private static final Pattern TRANSCRIPT_HEADER_PATTERN =
+            Pattern.compile("^\\[[^\\]]{3,32}\\]\\s*[^:\\n]{1,40}:\\s*");
+    private static final Pattern LEADING_TIMESTAMP_PATTERN =
+            Pattern.compile("^\\d{1,2}[/.-]\\d{1,2}(?:[/.-]\\d{2,4})?,?\\s*\\d{1,2}:\\d{2}(?:\\s*[APMapm]{2})?\\s*[-–:]\\s*");
+    private static final Pattern LEADING_TIME_ONLY_PATTERN =
+            Pattern.compile("^\\d{1,2}:\\d{2}(?:\\s*[APMapm]{2})?\\s*[-–:]\\s*");
+    private static final Pattern ROLE_PREFIX_PATTERN =
+            Pattern.compile("^(?:reply|response|igisubizo|assistant|kevin\\s*ai|ai|me|you|option\\s*\\d+)\\s*:\\s*",
+                    Pattern.CASE_INSENSITIVE);
+
     private static volatile KevinNotificationListenerService instance;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -44,7 +57,7 @@ public class KevinNotificationListenerService extends NotificationListenerServic
             new LinkedHashMap<String, Long>(64, 0.75f, true) {
                 @Override
                 protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
-                    return size() > 80;
+                    return size() > 100;
                 }
             }
     );
@@ -127,12 +140,23 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         }
         CharSequence titleSeq = extras.getCharSequence(Notification.EXTRA_TITLE);
         String sender = titleSeq != null ? titleSeq.toString().trim() : "";
-        if (TextUtils.isEmpty(sender) || "WhatsApp".equalsIgnoreCase(sender) || "WhatsApp Business".equalsIgnoreCase(sender)) {
+        if (TextUtils.isEmpty(sender)
+                || "WhatsApp".equalsIgnoreCase(sender)
+                || "WhatsApp Business".equalsIgnoreCase(sender)) {
             return false;
         }
 
-        String incoming = extractIncomingMessage(extras, sender);
+        // Prevent rapid multi-replies when WhatsApp updates the same notification multiple times
+        if (KevinAgentPrefs.wasWhatsAppChatRecentlyReplied(this, sender, 25_000L)) {
+            return false;
+        }
+
+        String ownerName = KevinAgentPrefs.getUserName(this);
+        String incoming = extractIncomingMessage(extras, sender, ownerName);
         if (TextUtils.isEmpty(incoming) || isIgnorableSystemText(incoming)) {
+            return false;
+        }
+        if (KevinAgentPrefs.isOwnSentWhatsAppText(this, sender, incoming)) {
             return false;
         }
 
@@ -143,10 +167,11 @@ public class KevinNotificationListenerService extends NotificationListenerServic
 
         String dedupKey = sender.toLowerCase(Locale.ROOT) + "|" + incoming;
         Long prevTime = recentRepliedKeys.get(dedupKey);
-        if (prevTime != null && (System.currentTimeMillis() - prevTime) < 120_000L) {
+        if (prevTime != null && (System.currentTimeMillis() - prevTime) < 300_000L) {
             return false;
         }
         recentRepliedKeys.put(dedupKey, System.currentTimeMillis());
+        KevinAgentPrefs.recordWhatsAppChatReplied(this, sender, "");
 
         executor.execute(() -> {
             String replyText = generateReplyStatic(this, sender, incoming);
@@ -154,6 +179,7 @@ public class KevinNotificationListenerService extends NotificationListenerServic
                 return;
             }
             if (sendNotificationReply(replyAction, replyText)) {
+                KevinAgentPrefs.recordWhatsAppChatReplied(this, sender, replyText);
                 Intent broadcast = new Intent(ACTION_WHATSAPP_REPLIED)
                         .setPackage(getPackageName())
                         .putExtra(EXTRA_SENDER, sender)
@@ -165,49 +191,58 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         return true;
     }
 
-    private String extractIncomingMessage(Bundle extras, String sender) {
+    private String extractIncomingMessage(Bundle extras, String sender, String ownerName) {
+        String selfName = "";
+        CharSequence selfSeq = extras.getCharSequence(Notification.EXTRA_SELF_DISPLAY_NAME);
+        if (selfSeq != null) {
+            selfName = selfSeq.toString().trim();
+        }
         List<String> collected = new ArrayList<>();
 
         Parcelable[] msgParcelables = extras.getParcelableArray(Notification.EXTRA_MESSAGES);
         if (msgParcelables != null && msgParcelables.length > 0) {
-            int start = Math.max(0, msgParcelables.length - 4);
+            int start = Math.max(0, msgParcelables.length - 3);
             for (int i = start; i < msgParcelables.length; i++) {
                 if (!(msgParcelables[i] instanceof Bundle)) continue;
                 Bundle msgBundle = (Bundle) msgParcelables[i];
                 CharSequence msgTextSeq = msgBundle.getCharSequence("text");
                 String msgText = msgTextSeq != null ? msgTextSeq.toString().trim() : "";
-                if (TextUtils.isEmpty(msgText)) continue;
+                if (TextUtils.isEmpty(msgText) || isIgnorableSystemText(msgText)) continue;
 
                 CharSequence senderSeq = msgBundle.getCharSequence("sender");
                 String msgSender = senderSeq != null ? senderSeq.toString().trim() : "";
-                if ("You".equalsIgnoreCase(msgSender) || "Me".equalsIgnoreCase(msgSender)) {
+                if ("You".equalsIgnoreCase(msgSender)
+                        || "Me".equalsIgnoreCase(msgSender)
+                        || (!TextUtils.isEmpty(selfName) && selfName.equalsIgnoreCase(msgSender))
+                        || (!TextUtils.isEmpty(ownerName) && ownerName.equalsIgnoreCase(msgSender))
+                        || KevinAgentPrefs.isOwnSentWhatsAppText(this, sender, msgText)) {
                     collected.clear();
                     continue;
                 }
-                collected.add(TextUtils.isEmpty(msgSender) || msgSender.equalsIgnoreCase(sender)
-                        ? msgText
-                        : (msgSender + ": " + msgText));
+                collected.add(stripIncomingTranscriptPrefix(msgText));
             }
             if (!collected.isEmpty()) {
-                return TextUtils.join("\n", collected);
+                return TextUtils.join(" ", collected).trim();
             }
         }
 
         CharSequence[] textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
         if (textLines != null && textLines.length > 0) {
-            int start = Math.max(0, textLines.length - 4);
+            int start = Math.max(0, textLines.length - 3);
             for (int i = start; i < textLines.length; i++) {
                 String line = textLines[i] != null ? textLines[i].toString().trim() : "";
                 if (TextUtils.isEmpty(line) || isIgnorableSystemText(line)) continue;
                 String lower = line.toLowerCase(Locale.ROOT);
-                if (lower.startsWith("you:") || lower.startsWith("me:")) {
+                if (lower.startsWith("you:") || lower.startsWith("me:")
+                        || (!TextUtils.isEmpty(ownerName) && lower.startsWith(ownerName.toLowerCase(Locale.ROOT) + ":"))
+                        || KevinAgentPrefs.isOwnSentWhatsAppText(this, sender, line)) {
                     collected.clear();
                     continue;
                 }
-                collected.add(line);
+                collected.add(stripIncomingTranscriptPrefix(line));
             }
             if (!collected.isEmpty()) {
-                return TextUtils.join("\n", collected);
+                return TextUtils.join(" ", collected).trim();
             }
         }
 
@@ -217,10 +252,20 @@ public class KevinNotificationListenerService extends NotificationListenerServic
                 ? bigTextSeq.toString().trim()
                 : (textSeq != null ? textSeq.toString().trim() : "");
         String lowerFallback = fallback.toLowerCase(Locale.ROOT);
-        if (lowerFallback.startsWith("you:") || lowerFallback.startsWith("me:")) {
+        if (lowerFallback.startsWith("you:")
+                || lowerFallback.startsWith("me:")
+                || (!TextUtils.isEmpty(ownerName) && lowerFallback.startsWith(ownerName.toLowerCase(Locale.ROOT) + ":"))) {
             return "";
         }
-        return fallback;
+        return stripIncomingTranscriptPrefix(fallback);
+    }
+
+    private String stripIncomingTranscriptPrefix(String text) {
+        if (TextUtils.isEmpty(text)) return "";
+        String s = text.trim();
+        s = TRANSCRIPT_HEADER_PATTERN.matcher(s).replaceFirst("");
+        s = LEADING_TIMESTAMP_PATTERN.matcher(s).replaceFirst("");
+        return s.trim();
     }
 
     private boolean isIgnorableSystemText(String text) {
@@ -229,6 +274,10 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         return lower.equals("checking for new messages")
                 || lower.equals("you deleted this message")
                 || lower.equals("this message was deleted")
+                || lower.startsWith("missed voice call")
+                || lower.startsWith("missed video call")
+                || lower.startsWith("incoming voice call")
+                || lower.startsWith("incoming video call")
                 || lower.matches("\\d+\\s+new messages?");
     }
 
@@ -242,6 +291,92 @@ public class KevinNotificationListenerService extends NotificationListenerServic
             }
         }
         return null;
+    }
+
+    public static String sanitizeWhatsAppReply(String raw, String ownerName, String sender) {
+        if (TextUtils.isEmpty(raw)) {
+            return "";
+        }
+        String cleaned = raw.trim()
+                .replaceAll("^```(?:\\w+)?\\s*", "")
+                .replaceAll("\\s*```$", "")
+                .trim();
+
+        String[] rawLines = cleaned.split("\\r?\\n+");
+        List<String> validLines = new ArrayList<>();
+        int transcriptLineCount = 0;
+
+        for (String rawLine : rawLines) {
+            String trimmed = rawLine != null ? rawLine.trim() : "";
+            if (TextUtils.isEmpty(trimmed)) continue;
+            if (TRANSCRIPT_HEADER_PATTERN.matcher(trimmed).find()
+                    || trimmed.matches("(?i)^(?:option\\s*\\d+|reply|\\d+[.)]).*")) {
+                transcriptLineCount++;
+            }
+            validLines.add(trimmed);
+        }
+
+        if (validLines.isEmpty()) {
+            return "";
+        }
+
+        List<String> cleanedLines = new ArrayList<>();
+        for (String line : validLines) {
+            String stripped = stripReplyPrefixes(line, ownerName, sender);
+            if (!TextUtils.isEmpty(stripped)) {
+                cleanedLines.add(stripped);
+            }
+        }
+
+        if (cleanedLines.isEmpty()) {
+            return "";
+        }
+
+        // If Gemini output a multi-line WhatsApp chat transcript (e.g. "[23/11, 11:23] Kevin: ..."), keep ONLY ONE single reply
+        if (transcriptLineCount >= 2 || cleanedLines.size() >= 3) {
+            return cleanedLines.get(0);
+        }
+
+        if (cleanedLines.size() == 2) {
+            String first = cleanedLines.get(0);
+            String second = cleanedLines.get(1);
+            if (hasHighWordOverlap(first, second)) {
+                return first;
+            }
+            return (first + " " + second).trim();
+        }
+
+        return cleanedLines.get(0);
+    }
+
+    private static String stripReplyPrefixes(String line, String ownerName, String sender) {
+        String s = line.trim();
+        s = TRANSCRIPT_HEADER_PATTERN.matcher(s).replaceFirst("");
+        s = LEADING_TIMESTAMP_PATTERN.matcher(s).replaceFirst("");
+        s = LEADING_TIME_ONLY_PATTERN.matcher(s).replaceFirst("");
+        s = ROLE_PREFIX_PATTERN.matcher(s).replaceFirst("");
+        if (!TextUtils.isEmpty(ownerName)) {
+            s = s.replaceFirst("(?i)^" + Pattern.quote(ownerName.trim()) + "\\s*:\\s*", "");
+        }
+        if (!TextUtils.isEmpty(sender)) {
+            s = s.replaceFirst("(?i)^" + Pattern.quote(sender.trim()) + "\\s*:\\s*", "");
+        }
+        s = s.replaceAll("^[\"'“”]+|[\"'“”]+$", "").trim();
+        return s;
+    }
+
+    private static boolean hasHighWordOverlap(String first, String second) {
+        Set<String> firstWords = new HashSet<>();
+        for (String w : first.toLowerCase(Locale.ROOT).split("\\s+")) {
+            if (w.length() > 3) firstWords.add(w);
+        }
+        int overlap = 0;
+        for (String w : second.toLowerCase(Locale.ROOT).split("\\s+")) {
+            if (w.length() > 3 && firstWords.contains(w)) {
+                overlap++;
+            }
+        }
+        return overlap >= 2;
     }
 
     public static String generateReplyStatic(Context context, String sender, String incoming) {
@@ -303,7 +438,7 @@ public class KevinNotificationListenerService extends NotificationListenerServic
                     }
                 }
                 JSONObject json = new JSONObject(sb.toString());
-                String reply = json.optString("reply", "").trim();
+                String reply = sanitizeWhatsAppReply(json.optString("reply", ""), ownerName, sender);
                 if (!TextUtils.isEmpty(reply)) {
                     return reply;
                 }
@@ -326,14 +461,20 @@ public class KevinNotificationListenerService extends NotificationListenerServic
             String incoming
     ) {
         String safeOwner = !TextUtils.isEmpty(ownerName) ? ownerName.trim() : "Kevin";
-        String safeSender = !TextUtils.isEmpty(sender) ? sender.trim() : "Contact";
-        String sysPrompt = "You are Kevin AI acting as " + safeOwner + "'s WhatsApp Auto-Reply Assistant.\n"
-                + "Reply directly and naturally to the incoming WhatsApp message from \"" + safeSender + "\".\n"
-                + "Match the sender's language (Kinyarwanda, English, French, or Swahili).\n"
-                + "Keep the reply concise, polite, helpful, and natural for WhatsApp (1-3 sentences max).\n"
-                + "Do not say \"As an AI...\" — reply seamlessly on behalf of " + safeOwner + ".";
+        String safeSender = !TextUtils.isEmpty(sender) ? sender.trim() : "your contact";
+        String sysPrompt = "You are " + safeOwner + " replying directly on WhatsApp to \"" + safeSender + "\".\n"
+                + "Write ONE single, natural human WhatsApp reply message directly addressing what they just wrote.\n"
+                + "STRICT LANGUAGE RULE:\n"
+                + "- If the message is in English, reply ONLY in natural, conversational English.\n"
+                + "- If the message is in Kinyarwanda, reply ONLY in authentic, fluent, grammatically correct native Kinyarwanda (Ikinyarwanda cy'umwimerere — warm, polite, natural Rwandan phrasing, NEVER awkward literal translations).\n"
+                + "- If the message is in French or Swahili, reply fluently in that exact language.\n"
+                + "STRICT FORMAT RULES:\n"
+                + "- Output ONLY the exact message text to send (1 to 2 short sentences max).\n"
+                + "- NEVER include dates, timestamps (like [23/11, 11:23]), sender names (like \"" + safeOwner + ":\"), labels, quotes, or markdown.\n"
+                + "- NEVER generate multiple replies, multiple options, or a back-and-forth conversation.\n"
+                + "- NEVER sound like or mention being an AI — write naturally as " + safeOwner + " themselves.";
         if (!TextUtils.isEmpty(replyStyle)) {
-            sysPrompt += "\nOwner's Auto-Reply Instructions: " + replyStyle.trim();
+            sysPrompt += "\nOwner's Personal Style Preference: " + replyStyle.trim();
         }
 
         String[] models = new String[] { "gemini-2.5-flash", "gemini-3.1-flash-lite" };
@@ -386,7 +527,7 @@ public class KevinNotificationListenerService extends NotificationListenerServic
                                         String t = parts.getJSONObject(i).optString("text", "");
                                         replySb.append(t);
                                     }
-                                    String reply = replySb.toString().trim();
+                                    String reply = sanitizeWhatsAppReply(replySb.toString(), safeOwner, safeSender);
                                     if (!TextUtils.isEmpty(reply)) {
                                         return reply;
                                     }

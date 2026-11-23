@@ -20,6 +20,7 @@ public final class KevinAgentPrefs {
     private static final String KEY_PENDING_WA_UNTIL = "pending_wa_until";
     private static final String KEY_PENDING_WA_SCAN_UNTIL = "pending_wa_scan_until";
     private static final String KEY_WA_SCAN_REPLIED_COUNT = "wa_scan_replied_count";
+    private static final String KEY_WA_RECENT_REPLIED_JSON = "wa_recent_replied_json";
     private static final String KEY_PENDING_YT_UNTIL = "pending_yt_until";
 
     private KevinAgentPrefs() {}
@@ -171,5 +172,80 @@ public final class KevinAgentPrefs {
 
     public static int getWhatsAppScanCount(Context context) {
         return prefs(context).getInt(KEY_WA_SCAN_REPLIED_COUNT, 0);
+    }
+
+    public static synchronized void recordWhatsAppChatReplied(Context context, String sender, String replyText) {
+        if (context == null || TextUtils.isEmpty(sender)) return;
+        String senderKey = sender.trim().toLowerCase(java.util.Locale.ROOT);
+        try {
+            org.json.JSONObject map = new org.json.JSONObject(
+                    prefs(context).getString(KEY_WA_RECENT_REPLIED_JSON, "{}")
+            );
+            long now = System.currentTimeMillis();
+            java.util.Iterator<String> it = map.keys();
+            java.util.List<String> expired = new java.util.ArrayList<>();
+            while (it.hasNext()) {
+                String k = it.next();
+                org.json.JSONObject item = map.optJSONObject(k);
+                if (item == null || (now - item.optLong("ts", 0L)) > 600_000L) {
+                    expired.add(k);
+                }
+            }
+            for (String k : expired) {
+                map.remove(k);
+            }
+            org.json.JSONObject entry = new org.json.JSONObject();
+            entry.put("ts", now);
+            entry.put("reply", replyText != null ? replyText.trim() : "");
+            map.put(senderKey, entry);
+            prefs(context).edit().putString(KEY_WA_RECENT_REPLIED_JSON, map.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    public static synchronized boolean wasWhatsAppChatRecentlyReplied(Context context, String sender, long windowMs) {
+        if (context == null || TextUtils.isEmpty(sender)) return false;
+        String senderKey = sender.trim().toLowerCase(java.util.Locale.ROOT);
+        try {
+            org.json.JSONObject map = new org.json.JSONObject(
+                    prefs(context).getString(KEY_WA_RECENT_REPLIED_JSON, "{}")
+            );
+            org.json.JSONObject item = map.optJSONObject(senderKey);
+            if (item == null) return false;
+            long ts = item.optLong("ts", 0L);
+            return (System.currentTimeMillis() - ts) < windowMs;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    public static synchronized boolean isOwnSentWhatsAppText(Context context, String sender, String text) {
+        if (context == null || TextUtils.isEmpty(text)) return false;
+        String trimmed = text.trim();
+        try {
+            org.json.JSONObject map = new org.json.JSONObject(
+                    prefs(context).getString(KEY_WA_RECENT_REPLIED_JSON, "{}")
+            );
+            long now = System.currentTimeMillis();
+            if (!TextUtils.isEmpty(sender)) {
+                org.json.JSONObject item = map.optJSONObject(sender.trim().toLowerCase(java.util.Locale.ROOT));
+                if (item != null && (now - item.optLong("ts", 0L)) < 600_000L) {
+                    String sentReply = item.optString("reply", "").trim();
+                    if (!TextUtils.isEmpty(sentReply) && trimmed.contains(sentReply)) {
+                        return true;
+                    }
+                }
+            }
+            java.util.Iterator<String> it = map.keys();
+            while (it.hasNext()) {
+                org.json.JSONObject item = map.optJSONObject(it.next());
+                if (item != null && (now - item.optLong("ts", 0L)) < 600_000L) {
+                    String sentReply = item.optString("reply", "").trim();
+                    if (!TextUtils.isEmpty(sentReply) && sentReply.equals(trimmed)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
 }
