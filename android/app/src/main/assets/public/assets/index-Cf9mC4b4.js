@@ -23767,7 +23767,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-DGPhJr1O.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-CxRj-2Zg.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -25100,7 +25100,7 @@ function executeDeviceAction(name2, args) {
     videoId = resolvedVideoId || (q2.length === 11 && /^[a-zA-Z0-9_-]+$/.test(q2) ? q2 : void 0);
     const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q2)}`;
     const watchUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}&autoplay=1` : void 0;
-    embedUrl = videoId && perms.autoPlayYouTube !== false ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1` : void 0;
+    embedUrl = videoId && perms.autoPlayYouTube !== false ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&playsinline=1` : void 0;
     url = watchUrl || searchUrl;
     fallbackUrl = searchUrl;
     channel = resolvedChannel;
@@ -37635,7 +37635,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-ClUtHmmn.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-Bo4edc0d.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -103362,11 +103362,11 @@ function AssistantOverlay({
                     "button",
                     {
                       type: "button",
-                      onClick: () => void handleSend("Fungura YouTube uncurangire Meddy Slowly"),
+                      onClick: () => void handleSend("Fungura YouTube uncurangire Naanzaje by Diamond Platnumz"),
                       className: "inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#075E54]/10 dark:bg-[#00a884]/15 text-[#075E54] dark:text-[#00FF88] text-[11px] font-semibold hover:bg-[#075E54]/20 cursor-pointer",
                       children: [
                         /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { size: 11 }),
-                        " Curanga indirimbo"
+                        " Curanga Naanzaje"
                       ]
                     }
                   ),
@@ -103530,7 +103530,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-CBLvwWlb.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-6Gjsx5Yr.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -105172,9 +105172,15 @@ function App() {
         });
       }, attachmentsForSend || void 0, selectedModel, (action) => {
         setMessages((prevMessages) => {
-          const updatedMessages = prevMessages.map(
-            (message) => message.id === aiMessageId ? { ...message, action } : message
-          );
+          const existingAiMessage = prevMessages.find((m2) => m2.id === aiMessageId);
+          const updatedMessages = existingAiMessage ? prevMessages.map((message) => message.id === aiMessageId ? { ...message, action } : message) : [...prevMessages, {
+            id: aiMessageId,
+            text: aiReplyText || action.label,
+            sender: "kevin",
+            timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            status: "read",
+            action
+          }];
           setSessions((prev) => prev.map(
             (session) => session.id === currentSessionId ? { ...session, messages: updatedMessages } : session
           ));

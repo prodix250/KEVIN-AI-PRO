@@ -1020,7 +1020,7 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
     const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
     const watchUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}&autoplay=1` : undefined;
     embedUrl = videoId && perms.autoPlayYouTube !== false
-      ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1`
+      ? `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&playsinline=1`
       : undefined;
     url = watchUrl || searchUrl;
     fallbackUrl = searchUrl;

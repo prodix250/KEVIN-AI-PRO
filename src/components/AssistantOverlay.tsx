@@ -1330,10 +1330,10 @@ export default function AssistantOverlay({
                   <>
                     <button
                       type="button"
-                      onClick={() => void handleSend('Fungura YouTube uncurangire Meddy Slowly')}
+                      onClick={() => void handleSend('Fungura YouTube uncurangire Naanzaje by Diamond Platnumz')}
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#075E54]/10 dark:bg-[#00a884]/15 text-[#075E54] dark:text-[#00FF88] text-[11px] font-semibold hover:bg-[#075E54]/20 cursor-pointer"
                     >
-                      <Play size={11} /> Curanga indirimbo
+                      <Play size={11} /> Curanga Naanzaje
                     </button>
                     <button
                       type="button"

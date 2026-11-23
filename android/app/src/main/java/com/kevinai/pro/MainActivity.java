@@ -76,6 +76,7 @@ public class MainActivity extends BridgeActivity {
                 request.grant(request.getResources());
             }
         });
+        getBridge().getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false);
 
         getBridge().addWebViewListener(new WebViewListener() {
             @Override

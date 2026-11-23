@@ -158,6 +158,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
 
         WebView bridgeWebView = bridge.getWebView();
         bridgeWebView.setBackgroundColor(Color.TRANSPARENT);
+        bridgeWebView.getSettings().setMediaPlaybackRequiresUserGesture(false);
         bridgeWebView.setWebChromeClient(new BridgeWebChromeClient(bridge) {
             @Override
             public void onPermissionRequest(PermissionRequest request) {

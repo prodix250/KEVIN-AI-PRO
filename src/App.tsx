@@ -1645,9 +1645,17 @@ export default function App() {
         });
       }, attachmentsForSend || undefined, selectedModel, (action) => {
         setMessages(prevMessages => {
-          const updatedMessages = prevMessages.map(message =>
-            message.id === aiMessageId ? { ...message, action } : message
-          );
+          const existingAiMessage = prevMessages.find(m => m.id === aiMessageId);
+          const updatedMessages = existingAiMessage
+            ? prevMessages.map(message => message.id === aiMessageId ? { ...message, action } : message)
+            : [...prevMessages, {
+                id: aiMessageId,
+                text: aiReplyText || action.label,
+                sender: 'kevin' as const,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                status: 'read' as MessageStatus,
+                action
+              }];
           setSessions(prev => prev.map(session =>
             session.id === currentSessionId ? { ...session, messages: updatedMessages } : session
           ));
