@@ -623,6 +623,15 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!showAgentModal || !nativeAgentStatus.isAndroid) return;
+    setNativeAgentStatus(getNativeAgentStatus());
+    const id = setInterval(() => {
+      setNativeAgentStatus(getNativeAgentStatus());
+    }, 1200);
+    return () => clearInterval(id);
+  }, [showAgentModal, nativeAgentStatus.isAndroid]);
+
   const updateAgentPerms = (patch: Partial<AgentPermissions>) => {
     const next = { ...agentPermissions, ...patch };
     setAgentPermissions(next);
@@ -3259,7 +3268,7 @@ export default function App() {
                     <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">🎙️ &ldquo;Hi Kevin&rdquo; Voice Wake Word</p>
                             {nativeAgentStatus.wakeWordEnabled && (
                               <span
@@ -3269,13 +3278,20 @@ export default function App() {
                                     : 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
                                 }`}
                               >
-                                {nativeAgentStatus.wakeWordActive ? 'Irumva (Active)' : 'Ikeneye Mic'}
+                                {nativeAgentStatus.wakeWordActive
+                                  ? `Irumva (${nativeAgentStatus.wakeWordEngine || 'Active'})`
+                                  : 'Ikeneye Mic'}
                               </span>
                             )}
                           </div>
                           <p className="text-xs text-gray-500 dark:text-[#8696a0]">
                             Iyo uvuze &ldquo;Hi Kevin&rdquo;, Assistant AI ihita ifunguka igahita yumva icyo uyisaba.
                           </p>
+                          {nativeAgentStatus.wakeWordEnabled && nativeAgentStatus.wakeWordDiag && (
+                            <p className="text-[11px] font-medium text-[#075E54] dark:text-[#00a884] mt-1 truncate">
+                              • {nativeAgentStatus.wakeWordDiag}
+                            </p>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -3284,11 +3300,13 @@ export default function App() {
                           onClick={() => {
                             const next = !nativeAgentStatus.wakeWordEnabled;
                             (window as any).KevinAgentBridge?.setWakeWordEnabled?.(next);
-                            const updatedStatus = getNativeAgentStatus();
-                            setNativeAgentStatus(updatedStatus);
-                            if (next && updatedStatus.hasOverlayPermission === false) {
-                              showToastMessage('Emerera "Display over other apps" hasi kugira ngo Hi Kevin ifunguke muri apps zose.');
-                            }
+                            setTimeout(() => {
+                              const updatedStatus = getNativeAgentStatus();
+                              setNativeAgentStatus(updatedStatus);
+                              if (next && updatedStatus.hasOverlayPermission === false) {
+                                showToastMessage('Emerera "Display over other apps" hasi kugira ngo Hi Kevin ifunguke muri apps zose.');
+                              }
+                            }, 250);
                           }}
                           className={`w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${
                             nativeAgentStatus.wakeWordEnabled ? 'bg-[#00a884]' : 'bg-gray-300 dark:bg-gray-700'
@@ -3304,6 +3322,15 @@ export default function App() {
                           className="w-full py-1.5 px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-[11px] font-bold text-left cursor-pointer"
                         >
                           🪟 Kanda hano wemerere &ldquo;Display over other apps&rdquo; kugira ngo Hi Kevin ihite ifunguka hejuru ya apps zose
+                        </button>
+                      )}
+                      {nativeAgentStatus.wakeWordEnabled && nativeAgentStatus.hasNotificationPermission === false && (
+                        <button
+                          type="button"
+                          onClick={() => (window as any).KevinAgentBridge?.requestAgentPermissions?.()}
+                          className="w-full py-1.5 px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-[11px] font-bold text-left cursor-pointer"
+                        >
+                          🔔 Kanda hano wemerere Notifications kugira ngo &ldquo;Hi Kevin&rdquo; igaragare mu kirahure cyo hejuru
                         </button>
                       )}
                     </div>

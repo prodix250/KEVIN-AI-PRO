@@ -573,6 +573,126 @@ Listen very carefully to this audio recording:
     }
   });
 
+  app.post('/api/wake-check', async (req: Request, res: Response) => {
+    try {
+      const { audioBase64, audioMimeType, mimeType: altMimeType, customApiKey, customApiKeys } = req.body as {
+        audioBase64?: string;
+        audioMimeType?: string;
+        mimeType?: string;
+        customApiKey?: string;
+        customApiKeys?: string[];
+      };
+
+      if (!audioBase64 || typeof audioBase64 !== 'string') {
+        res.status(400).json({ wake: false, command: '', transcript: '' });
+        return;
+      }
+
+      const cleanData = audioBase64.replace(/^data:[^;,]+;base64,/is, '').replace(/\s/g, '');
+      if (cleanData.length < 100) {
+        res.json({ wake: false, command: '', transcript: '' });
+        return;
+      }
+
+      const mimeType = (audioMimeType || altMimeType || 'audio/wav').split(';')[0].trim().toLowerCase();
+      const availableKeys = getServerApiKeys(customApiKeys || customApiKey);
+      if (availableKeys.length === 0) {
+        res.status(500).json({ wake: false, error: 'Nta Gemini API key yabonetse.' });
+        return;
+      }
+
+      const wakeModels = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-transcribe'];
+      let lastErr: unknown = null;
+      const invalidKeys = new Set<string>();
+
+      for (const model of wakeModels) {
+        for (let keyIdx = 0; keyIdx < availableKeys.length; keyIdx++) {
+          const key = availableKeys[keyIdx];
+          if (invalidKeys.has(key)) continue;
+
+          const ai = new GoogleGenAI({
+            apiKey: key,
+            httpOptions: {
+              apiVersion: 'v1beta',
+              headers: { 'User-Agent': 'aistudio-build' },
+            },
+          });
+
+          try {
+            const wakePromise = ai.models.generateContent({
+              model,
+              contents: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType,
+                      data: cleanData,
+                    },
+                  },
+                  {
+                    text: `Listen carefully to this short audio clip (often Rwandan/African English or Kinyarwanda accent).
+Detect whether the speaker is calling the assistant "Hi Kevin" (including "Hey Kevin", "Hello Kevin", "OK Kevin", "Ai Kevin", "I Kevin", "High Kevin", or starting a command with "Kevin ...").
+Respond with ONLY a single raw JSON object (no markdown fences) in this exact format:
+{"wake":true|false,"command":"any command spoken after Kevin, otherwise empty string","transcript":"short verbatim words heard"}
+If there is only silence, breathing, or noise, return {"wake":false,"command":"","transcript":""}.`,
+                  },
+                ],
+              },
+            });
+            wakePromise.catch(() => {});
+
+            const response = await Promise.race([
+              wakePromise,
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('503 Wake check timed out')), 5500)
+              ),
+            ]);
+
+            const raw = (response.text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+            let parsed: { wake?: boolean; command?: string; transcript?: string } = {};
+            try {
+              parsed = JSON.parse(raw);
+            } catch {
+              parsed = { transcript: raw };
+            }
+
+            const transcript = String(parsed.transcript || raw || '').trim();
+            const norm = transcript
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .toLowerCase()
+              .replace(/[^a-z0-9\s]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+            const wakeMatch = norm.match(
+              /(?:^|\s)(?:hi|hey|hello|ok|okay|i|ai|aye|hay|high|eye|he|eh|yo)?\s*(?:kevin|keven|kevine|kebin|kelvin|calvin|gavin|kavin|kev)(?:\s+(.*))?$/i
+            );
+            const isWake = Boolean(parsed.wake) || Boolean(wakeMatch);
+            const command = String(parsed.command || wakeMatch?.[1] || '').trim();
+
+            res.json({ wake: isWake, command, transcript, model });
+            return;
+          } catch (err: any) {
+            lastErr = err;
+            const msg = err instanceof Error ? err.message : String(err);
+            const readable = extractReadableError(err);
+            const combined = `${msg} ${readable}`;
+            if (isInvalidApiKeyError(err, combined)) {
+              invalidKeys.add(key);
+            }
+            if (err?.status === 404 || combined.includes('NOT_FOUND')) {
+              break;
+            }
+          }
+        }
+      }
+
+      res.status(500).json({ wake: false, error: extractReadableError(lastErr) });
+    } catch (error: any) {
+      res.status(500).json({ wake: false, error: extractReadableError(error) });
+    }
+  });
+
   app.post('/api/whatsapp-reply', async (req: Request, res: Response) => {
     try {
       const { sender, incomingMessage, replyStyle, userName, customApiKey, customApiKeys } = req.body as {

@@ -31,7 +31,10 @@ export interface NativeAgentStatus {
   whatsappAutoReplyEnabled?: boolean;
   wakeWordEnabled?: boolean;
   wakeWordActive?: boolean;
+  wakeWordEngine?: string;
+  wakeWordDiag?: string;
   hasOverlayPermission?: boolean;
+  hasNotificationPermission?: boolean;
   speechRecognizerAvailable?: boolean;
 }
 
@@ -92,6 +95,9 @@ export function saveAgentPermissions(perms: AgentPermissions): void {
         userName,
         backendBaseUrl
       );
+    }
+    if (bridge?.setAgentApiKeys) {
+      bridge.setAgentApiKeys(JSON.stringify(getGeminiApiKeysArray()));
     }
     window.dispatchEvent(new CustomEvent('kevinAgentPermissionsUpdated', { detail: perms }));
   } catch (error) {
@@ -1122,6 +1128,12 @@ export function setUserCustomApiKey(key: string): void {
       safeStorageRemove('kevin_ai_key');
       safeStorageRemove('gemini_api_key');
       safeStorageRemove('apiKey');
+    }
+    try {
+      const bridge = (window as any).KevinAgentBridge;
+      bridge?.setAgentApiKeys?.(JSON.stringify(getGeminiApiKeysArray()));
+    } catch {
+      // Ignore bridge unavailability on web
     }
   }
 }

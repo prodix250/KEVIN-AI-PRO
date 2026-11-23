@@ -6,7 +6,7 @@ import android.text.TextUtils;
 
 public final class KevinAgentPrefs {
     public static final String DEFAULT_BACKEND_BASE_URL =
-            "https://ais-pre-bup3wt53tqo6n2xr3ho7st-791673897189.europe-west2.run.app";
+            "https://kevin-ai-pro.onrender.com";
 
     private static final String PREFS_NAME = "kevin_agent_prefs";
     private static final String KEY_AUTO_SEND_ENABLED = "auto_send_enabled";
@@ -14,6 +14,7 @@ public final class KevinAgentPrefs {
     private static final String KEY_WA_REPLY_STYLE = "wa_reply_style";
     private static final String KEY_USER_NAME = "user_name";
     private static final String KEY_BACKEND_BASE_URL = "backend_base_url";
+    private static final String KEY_API_KEYS_JSON = "api_keys_json";
     private static final String KEY_AUTO_LIVE_SCREEN_ON_HOME = "auto_live_screen_on_home";
     private static final String KEY_WAKE_WORD_ENABLED = "wake_word_enabled";
     private static final String KEY_PENDING_WA_UNTIL = "pending_wa_until";
@@ -42,6 +43,28 @@ public final class KevinAgentPrefs {
                 .apply();
     }
 
+    public static void setApiKeysJson(Context context, String keysJson) {
+        prefs(context).edit()
+                .putString(KEY_API_KEYS_JSON, keysJson != null ? keysJson : "[]")
+                .apply();
+    }
+
+    public static java.util.List<String> getApiKeysList(Context context) {
+        java.util.List<String> list = new java.util.ArrayList<>();
+        String raw = prefs(context).getString(KEY_API_KEYS_JSON, "[]");
+        if (TextUtils.isEmpty(raw)) return list;
+        try {
+            org.json.JSONArray arr = new org.json.JSONArray(raw);
+            for (int i = 0; i < arr.length(); i++) {
+                String k = arr.optString(i, "").trim();
+                if (!TextUtils.isEmpty(k) && !list.contains(k)) {
+                    list.add(k);
+                }
+            }
+        } catch (Exception ignored) {}
+        return list;
+    }
+
     public static boolean isAutoSendEnabled(Context context) {
         return prefs(context).getBoolean(KEY_AUTO_SEND_ENABLED, false);
     }
@@ -68,7 +91,8 @@ public final class KevinAgentPrefs {
             String trimmed = saved.trim();
             if ((trimmed.startsWith("http://") || trimmed.startsWith("https://"))
                     && !trimmed.contains("://localhost")
-                    && !trimmed.contains("://127.0.0.1")) {
+                    && !trimmed.contains("://127.0.0.1")
+                    && !trimmed.contains("ais-pre-bup3wt53tqo6n2xr3ho7st")) {
                 return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
             }
         }

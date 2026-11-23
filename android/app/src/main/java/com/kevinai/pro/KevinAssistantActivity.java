@@ -526,9 +526,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
     protected void onStop() {
         super.onStop();
         KevinWakeWordService.setOverlayVisible(false);
-        if (isFinishing()) {
-            KevinWakeWordService.resumeListening(this);
-        }
+        KevinWakeWordService.resumeListening(this);
         if (bridge != null) {
             activityDepth = Math.max(0, activityDepth - 1);
             if (activityDepth == 0) {

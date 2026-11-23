@@ -106,7 +106,11 @@ public class KevinAgentBridge {
             obj.put("whatsappAutoReplyEnabled", KevinAgentPrefs.isWhatsAppAutoReplyEnabled(activity));
             obj.put("wakeWordEnabled", KevinAgentPrefs.isWakeWordEnabled(activity));
             obj.put("wakeWordActive", KevinWakeWordService.isRunning);
+            obj.put("wakeWordEngine", KevinWakeWordService.activeEngine);
+            obj.put("wakeWordDiag", KevinWakeWordService.lastDiagnostic);
             obj.put("hasOverlayPermission", Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(activity));
+            obj.put("hasNotificationPermission", Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+                    || ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED);
             obj.put("speechRecognizerAvailable", SpeechRecognizer.isRecognitionAvailable(activity));
             return obj.toString();
         } catch (Exception e) {
@@ -132,16 +136,26 @@ public class KevinAgentBridge {
 
     @JavascriptInterface
     public void requestAgentPermissions() {
-        activity.runOnUiThread(() -> ActivityCompat.requestPermissions(
-                activity,
-                new String[] {
-                    Manifest.permission.SEND_SMS,
-                    Manifest.permission.CALL_PHONE,
-                    Manifest.permission.READ_CONTACTS,
-                    Manifest.permission.RECORD_AUDIO
-                },
-                AGENT_PERMISSIONS_REQUEST_CODE
-        ));
+        activity.runOnUiThread(() -> {
+            java.util.List<String> perms = new java.util.ArrayList<>();
+            perms.add(Manifest.permission.SEND_SMS);
+            perms.add(Manifest.permission.CALL_PHONE);
+            perms.add(Manifest.permission.READ_CONTACTS);
+            perms.add(Manifest.permission.RECORD_AUDIO);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                perms.add(Manifest.permission.POST_NOTIFICATIONS);
+            }
+            ActivityCompat.requestPermissions(
+                    activity,
+                    perms.toArray(new String[0]),
+                    AGENT_PERMISSIONS_REQUEST_CODE
+            );
+        });
+    }
+
+    @JavascriptInterface
+    public void setAgentApiKeys(String keysJson) {
+        KevinAgentPrefs.setApiKeysJson(activity, keysJson);
     }
 
     @JavascriptInterface

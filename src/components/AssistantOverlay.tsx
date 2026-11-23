@@ -48,7 +48,7 @@ const createVoiceRecordingSession = async (options?: {
   if (agentBridge?.pauseWakeWord) {
     try {
       agentBridge.pauseWakeWord();
-      await new Promise((resolve) => setTimeout(resolve, 140));
+      await new Promise((resolve) => setTimeout(resolve, 220));
     } catch {
       // ignore
     }

@@ -23745,7 +23745,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-BHvRvPwy.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-bKwK6e7-.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -24314,6 +24314,9 @@ function saveAgentPermissions(perms) {
         userName,
         backendBaseUrl
       );
+    }
+    if (bridge == null ? void 0 : bridge.setAgentApiKeys) {
+      bridge.setAgentApiKeys(JSON.stringify(getGeminiApiKeysArray()));
     }
     window.dispatchEvent(new CustomEvent("kevinAgentPermissionsUpdated", { detail: perms }));
   } catch (error) {
@@ -25182,6 +25185,7 @@ function getUserCustomApiKey() {
   return ((_a2 = safeStorageGet("kevin_ai_key")) == null ? void 0 : _a2.trim()) || ((_b2 = safeStorageGet("gemini_api_key")) == null ? void 0 : _b2.trim()) || ((_c = safeStorageGet("apiKey")) == null ? void 0 : _c.trim()) || "";
 }
 function setUserCustomApiKey(key) {
+  var _a2;
   if (typeof window !== "undefined") {
     const trimmed = key.trim();
     if (trimmed.length > 0) {
@@ -25192,6 +25196,11 @@ function setUserCustomApiKey(key) {
       safeStorageRemove("kevin_ai_key");
       safeStorageRemove("gemini_api_key");
       safeStorageRemove("apiKey");
+    }
+    try {
+      const bridge = window.KevinAgentBridge;
+      (_a2 = bridge == null ? void 0 : bridge.setAgentApiKeys) == null ? void 0 : _a2.call(bridge, JSON.stringify(getGeminiApiKeysArray()));
+    } catch {
     }
   }
 }
@@ -36837,7 +36846,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-CCvqGPJG.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-zPyXWTgT.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -101404,7 +101413,7 @@ const createVoiceRecordingSession$1 = async (options) => {
   if (agentBridge == null ? void 0 : agentBridge.pauseWakeWord) {
     try {
       agentBridge.pauseWakeWord();
-      await new Promise((resolve) => setTimeout(resolve, 140));
+      await new Promise((resolve) => setTimeout(resolve, 220));
     } catch {
     }
   }
@@ -102645,7 +102654,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-Dq859Vb3.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-Bc0Q6m4z.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -103362,6 +103371,14 @@ function App() {
       window.removeEventListener("kevinWhatsAppAutoReplied", handleWaReplied);
     };
   }, []);
+  reactExports.useEffect(() => {
+    if (!showAgentModal || !nativeAgentStatus.isAndroid) return;
+    setNativeAgentStatus(getNativeAgentStatus());
+    const id2 = setInterval(() => {
+      setNativeAgentStatus(getNativeAgentStatus());
+    }, 1200);
+    return () => clearInterval(id2);
+  }, [showAgentModal, nativeAgentStatus.isAndroid]);
   const updateAgentPerms = (patch2) => {
     const next = { ...agentPermissions, ...patch2 };
     setAgentPermissions(next);
@@ -105766,17 +105783,21 @@ Click the **${docName}** file below to download and view the complete document.`
               nativeAgentStatus.isAndroid && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-3", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
                       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-900 dark:text-[#e9edef]", children: "🎙️ “Hi Kevin” Voice Wake Word" }),
                       nativeAgentStatus.wakeWordEnabled && /* @__PURE__ */ jsxRuntimeExports.jsx(
                         "span",
                         {
                           className: `text-[10px] font-bold px-2 py-0.5 rounded-full ${nativeAgentStatus.wakeWordActive ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/20 text-amber-700 dark:text-amber-300"}`,
-                          children: nativeAgentStatus.wakeWordActive ? "Irumva (Active)" : "Ikeneye Mic"
+                          children: nativeAgentStatus.wakeWordActive ? `Irumva (${nativeAgentStatus.wakeWordEngine || "Active"})` : "Ikeneye Mic"
                         }
                       )
                     ] }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0]", children: "Iyo uvuze “Hi Kevin”, Assistant AI ihita ifunguka igahita yumva icyo uyisaba." })
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0]", children: "Iyo uvuze “Hi Kevin”, Assistant AI ihita ifunguka igahita yumva icyo uyisaba." }),
+                    nativeAgentStatus.wakeWordEnabled && nativeAgentStatus.wakeWordDiag && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-[11px] font-medium text-[#075E54] dark:text-[#00a884] mt-1 truncate", children: [
+                      "• ",
+                      nativeAgentStatus.wakeWordDiag
+                    ] })
                   ] }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx(
                     "button",
@@ -105788,11 +105809,13 @@ Click the **${docName}** file below to download and view the complete document.`
                         var _a3, _b3;
                         const next = !nativeAgentStatus.wakeWordEnabled;
                         (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.setWakeWordEnabled) == null ? void 0 : _b3.call(_a3, next);
-                        const updatedStatus = getNativeAgentStatus();
-                        setNativeAgentStatus(updatedStatus);
-                        if (next && updatedStatus.hasOverlayPermission === false) {
-                          showToastMessage('Emerera "Display over other apps" hasi kugira ngo Hi Kevin ifunguke muri apps zose.');
-                        }
+                        setTimeout(() => {
+                          const updatedStatus = getNativeAgentStatus();
+                          setNativeAgentStatus(updatedStatus);
+                          if (next && updatedStatus.hasOverlayPermission === false) {
+                            showToastMessage('Emerera "Display over other apps" hasi kugira ngo Hi Kevin ifunguke muri apps zose.');
+                          }
+                        }, 250);
                       },
                       className: `w-11 h-6 rounded-full transition-colors p-0.5 shrink-0 cursor-pointer ${nativeAgentStatus.wakeWordEnabled ? "bg-[#00a884]" : "bg-gray-300 dark:bg-gray-700"}`,
                       children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `w-5 h-5 rounded-full bg-white shadow transition-transform ${nativeAgentStatus.wakeWordEnabled ? "translate-x-5" : "translate-x-0"}` })
@@ -105809,6 +105832,18 @@ Click the **${docName}** file below to download and view the complete document.`
                     },
                     className: "w-full py-1.5 px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-[11px] font-bold text-left cursor-pointer",
                     children: "🪟 Kanda hano wemerere “Display over other apps” kugira ngo Hi Kevin ihite ifunguka hejuru ya apps zose"
+                  }
+                ),
+                nativeAgentStatus.wakeWordEnabled && nativeAgentStatus.hasNotificationPermission === false && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => {
+                      var _a3, _b3;
+                      return (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.requestAgentPermissions) == null ? void 0 : _b3.call(_a3);
+                    },
+                    className: "w-full py-1.5 px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-[11px] font-bold text-left cursor-pointer",
+                    children: "🔔 Kanda hano wemerere Notifications kugira ngo “Hi Kevin” igaragare mu kirahure cyo hejuru"
                   }
                 )
               ] }),
