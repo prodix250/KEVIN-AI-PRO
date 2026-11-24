@@ -726,37 +726,46 @@ export function playWhatsAppSound(type: 'pop' | 'send' | 'receive' = 'pop') {
   if (typeof window === 'undefined') return;
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    if (ctx.state === 'suspended') {
-      void ctx.resume();
+    if (AudioCtx) {
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        void ctx.resume();
+      }
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      if (type === 'receive') {
+        osc.frequency.setValueAtTime(750, now);
+        osc.frequency.exponentialRampToValueAtTime(320, now + 0.08);
+      } else {
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.exponentialRampToValueAtTime(680, now + 0.06);
+      }
+
+      gain.gain.setValueAtTime(0.28, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + (type === 'receive' ? 0.09 : 0.07));
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + (type === 'receive' ? 0.09 : 0.07));
+      setTimeout(() => {
+        try { void ctx.close(); } catch {}
+      }, 150);
     }
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'sine';
-    if (type === 'receive') {
-      osc.frequency.setValueAtTime(750, now);
-      osc.frequency.exponentialRampToValueAtTime(320, now + 0.08);
-    } else {
-      osc.frequency.setValueAtTime(520, now);
-      osc.frequency.exponentialRampToValueAtTime(680, now + 0.06);
-    }
-
-    gain.gain.setValueAtTime(0.25, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + (type === 'receive' ? 0.09 : 0.07));
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + (type === 'receive' ? 0.09 : 0.07));
-    setTimeout(() => {
-      try { void ctx.close(); } catch {}
-    }, 150);
   } catch {
-    // ignore
+    // ignore synth errors
+  }
+
+  try {
+    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcHCmS2+Czj00UHDuP4+DTDEWShO3Lq3MYHCGK0u3Vu3McHCRi5Ofv3rpxHCph9u7fvHEcLW3r+/v9+/s=');
+    audio.volume = 0.6;
+    void audio.play().catch(() => {});
+  } catch {
+    // fail silently if blocked by autoplay policy
   }
 }
 
