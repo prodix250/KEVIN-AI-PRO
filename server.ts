@@ -4,6 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, type FunctionDeclaration } from '@google/genai';
+import { startDailyNewsScheduler, syncDueNewsBriefings } from './serverNewsScheduler';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -819,6 +820,47 @@ async function startServer() {
     }
     const result = await fetchLiveWebSearchContext(q);
     res.json(result);
+  });
+
+  app.post('/api/news-briefings/sync', async (req: Request, res: Response) => {
+    try {
+      const { deliveredIds, customApiKey, customApiKeys } = (req.body || {}) as {
+        deliveredIds?: string[];
+        customApiKey?: string;
+        customApiKeys?: string[];
+      };
+      const result = await syncDueNewsBriefings({
+        deliveredIds: Array.isArray(deliveredIds) ? deliveredIds : [],
+        customApiKeys: customApiKeys || customApiKey,
+        getServerApiKeys,
+      });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({
+        error: extractReadableError(error),
+        briefings: [],
+      });
+    }
+  });
+
+  app.get('/api/news-briefings/pending', async (req: Request, res: Response) => {
+    try {
+      const rawDelivered = typeof req.query.deliveredIds === 'string' ? req.query.deliveredIds : '';
+      const deliveredIds = rawDelivered
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const result = await syncDueNewsBriefings({
+        deliveredIds,
+        getServerApiKeys,
+      });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({
+        error: extractReadableError(error),
+        briefings: [],
+      });
+    }
   });
 
   app.post('/api/stt', async (req: Request, res: Response) => {
@@ -1914,6 +1956,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Kevin AI server listening on http://0.0.0.0:${PORT}`);
+    startDailyNewsScheduler(() => getServerApiKeys());
 
     // Self-ping interval (every 9 minutes / 540,000 ms) to prevent Render free instance from sleeping
     const PING_INTERVAL_MS = 9 * 60 * 1000;

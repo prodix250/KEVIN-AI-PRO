@@ -13,6 +13,8 @@ import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateD
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
 import { downloadAIImage, downloadDocumentFile } from './utils/download';
+import { initDailyNewsDelivery, NEWS_PENDING_TOAST_EVENT } from './services/dailyNewsService';
+import type { DailyNewsBriefing } from './services/dailyNewsConfig';
 
 const THEME_LIGHT_DEFAULT_MIGRATION_KEY = 'kevin_ai_theme_light_default_migrated';
 
@@ -377,6 +379,7 @@ export default function App() {
   const [splashFadeOut, setSplashFadeOut] = useState(false);
   const [progress, setProgress] = useState(0);
   const [showAssistantOverlay, setShowAssistantOverlay] = useState(false);
+  const [activeNewsPopup, setActiveNewsPopup] = useState<DailyNewsBriefing | null>(null);
 
   useEffect(() => {
     if (!isDedicatedAssistantOverlay) return;
@@ -717,6 +720,77 @@ export default function App() {
       window.removeEventListener('kevinWhatsAppAutoReplied', handleWaReplied);
     };
   }, []);
+
+  useEffect(() => {
+    if (isDedicatedAssistantOverlay) return;
+
+    const deliverBriefing = (briefing: DailyNewsBriefing) => {
+      const newsId = `news_${briefing.slotId}_${Date.now()}`;
+      const newsMsg: Message = {
+        id: newsId,
+        sender: 'kevin',
+        text: `### ${briefing.title}\n\n${briefing.body}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'delivered',
+        sources: briefing.sources && briefing.sources.length > 0 ? briefing.sources : undefined,
+      };
+
+      setSessions((prevSessions) => {
+        const targetSessionId = currentSessionId;
+        const exists = prevSessions.some((s) => s.id === targetSessionId);
+        if (exists) {
+          return prevSessions.map((s) => {
+            if (s.id === targetSessionId) {
+              const alreadyHas = s.messages.some((m) => m.id.startsWith(`news_${briefing.slotId}`));
+              if (alreadyHas) return s;
+              return {
+                ...s,
+                messages: [...s.messages, newsMsg],
+                timestamp: Date.now(),
+              };
+            }
+            return s;
+          });
+        }
+        return [
+          {
+            id: Date.now(),
+            title: briefing.title,
+            messages: [newsMsg],
+            timestamp: Date.now(),
+          },
+          ...prevSessions,
+        ];
+      });
+
+      setMessages((prev) => {
+        if (prev.some((m) => m.id.startsWith(`news_${briefing.slotId}`))) return prev;
+        return [...prev, newsMsg];
+      });
+
+      setActiveNewsPopup(briefing);
+      setTimeout(() => {
+        if (chatContainerRef.current) {
+          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
+      }, 140);
+    };
+
+    const cleanupNews = initDailyNewsDelivery(deliverBriefing);
+
+    const onNewsEvent = (e: Event) => {
+      const b = (e as CustomEvent<DailyNewsBriefing>).detail;
+      if (b) {
+        setActiveNewsPopup(b);
+      }
+    };
+    window.addEventListener(NEWS_PENDING_TOAST_EVENT, onNewsEvent);
+
+    return () => {
+      cleanupNews();
+      window.removeEventListener(NEWS_PENDING_TOAST_EVENT, onNewsEvent);
+    };
+  }, [isDedicatedAssistantOverlay, currentSessionId]);
 
   useEffect(() => {
     if (!showAgentModal || !nativeAgentStatus.isAndroid) return;
@@ -2086,6 +2160,66 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Heads-up Pop-up Notification for Scheduled Daily News */}
+      <AnimatePresence>
+        {activeNewsPopup && (
+          <motion.div
+            initial={{ opacity: 0, y: -40, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -30, scale: 0.96 }}
+            transition={{ type: 'spring', damping: 20, stiffness: 260 }}
+            className="fixed top-16 left-3 right-3 sm:left-auto sm:right-4 sm:w-96 z-50 p-3.5 rounded-2xl bg-white/95 dark:bg-[#1f2c34]/95 backdrop-blur-md border border-[#25D366]/40 dark:border-[#00a884]/40 shadow-2xl flex items-start gap-3"
+          >
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#075E54] to-[#25D366] text-white flex items-center justify-center text-lg shrink-0 shadow-md">
+              📢
+            </div>
+            <div className="flex-1 min-w-0 pr-1">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#075E54] dark:text-[#00FF88]">
+                  {activeNewsPopup.scheduledLabel} Rwanda • Amakuru Mashya
+                </span>
+                <span className="text-[10px] text-gray-400">ubu</span>
+              </div>
+              <h4 className="font-bold text-xs text-gray-900 dark:text-white truncate mt-0.5">
+                {activeNewsPopup.title}
+              </h4>
+              <p className="text-[11px] text-gray-600 dark:text-[#8696a0] line-clamp-2 mt-0.5 leading-snug">
+                {activeNewsPopup.preview}
+              </p>
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveNewsPopup(null);
+                    if (chatContainerRef.current) {
+                      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-[#00a884] hover:bg-[#008f6f] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                >
+                  <span>Soma amakuru yose</span>
+                  <ChevronRight size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveNewsPopup(null)}
+                  className="px-2 py-1 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-[11px] cursor-pointer transition-colors"
+                >
+                  Funga
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveNewsPopup(null)}
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1 rounded-lg shrink-0 cursor-pointer"
+            >
+              <X size={15} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Drawer */}
       <AnimatePresence>

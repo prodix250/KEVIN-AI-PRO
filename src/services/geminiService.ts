@@ -2114,7 +2114,7 @@ export function isCapacitorApkRuntime(): boolean {
   return false;
 }
 
-const getEndpoint = (path: string): string => {
+export const resolveApiEndpoint = (path: string): string => {
   if (isCapacitorApkRuntime()) {
     return `${PRODUCTION_BACKEND_URL}${path}`;
   }
@@ -2129,6 +2129,8 @@ const getEndpoint = (path: string): string => {
   }
   return `${PRODUCTION_BACKEND_URL}${path}`;
 };
+
+const getEndpoint = resolveApiEndpoint;
 
 const APK_DEVICE_ACTION_DECLARATIONS = [
   {
