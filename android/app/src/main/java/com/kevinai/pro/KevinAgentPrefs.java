@@ -31,6 +31,7 @@ public final class KevinAgentPrefs {
     private static final String KEY_PENDING_AUDIOMACK_ACTION_JSON = "pending_audiomack_action_json";
     private static final String KEY_PENDING_AUDIOMACK_STEP = "pending_audiomack_step";
     private static final String KEY_AUDIOMACK_PLAYLISTS_JSON = "audiomack_playlists_json";
+    private static final String KEY_EQUALIZER_STATE_JSON = "equalizer_state_json";
 
     private KevinAgentPrefs() {}
 
@@ -565,5 +566,17 @@ public final class KevinAgentPrefs {
         } catch (Exception ignored) {
             return "[]";
         }
+    }
+
+    public static synchronized void saveEqualizerStateJson(Context context, String stateJson) {
+        if (context == null) return;
+        prefs(context).edit()
+                .putString(KEY_EQUALIZER_STATE_JSON, !TextUtils.isEmpty(stateJson) ? stateJson : "{}")
+                .apply();
+    }
+
+    public static synchronized String getEqualizerStateJson(Context context) {
+        if (context == null) return "{}";
+        return prefs(context).getString(KEY_EQUALIZER_STATE_JSON, "{}");
     }
 }

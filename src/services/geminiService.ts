@@ -921,7 +921,19 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
   }
 
   if (action.name === 'open_lark_player') {
-    const larkAction = String(action.args?.action || (action.playlistName ? 'create_playlist' : 'play')).trim().toLowerCase();
+    const hasEqArgs = Boolean(
+      action.args?.eq_enabled !== undefined || action.args?.eqEnabled !== undefined
+      || action.args?.eq_preset || action.args?.eqPreset
+      || action.args?.bass_boost !== undefined || action.args?.bassBoost !== undefined
+      || action.args?.virtualizer !== undefined
+      || action.args?.reverb
+      || action.args?.loudness !== undefined || action.args?.preamp !== undefined
+      || action.args?.eq_bands || action.args?.eqBands
+    );
+    const larkAction = String(
+      action.args?.action
+      || (hasEqArgs ? 'equalizer' : (action.playlistName ? 'create_playlist' : 'play'))
+    ).trim().toLowerCase();
     const songTarget = String(action.args?.song_uri || action.args?.song_id || action.args?.query || action.songTitle || '').trim();
     const title = String(action.songTitle || action.args?.song_title || action.args?.query || '').trim();
     const artist = String(action.artist || action.args?.artist || '').trim();
@@ -938,6 +950,13 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
         tab: action.args?.tab,
         volumePercent: action.args?.volume_percent,
         seekSeconds: action.args?.seek_seconds,
+        eqEnabled: action.args?.eq_enabled ?? action.args?.eqEnabled,
+        eqPreset: action.args?.eq_preset ?? action.args?.eqPreset,
+        bassBoost: action.args?.bass_boost ?? action.args?.bassBoost,
+        virtualizer: action.args?.virtualizer ?? action.args?.surround,
+        reverb: action.args?.reverb,
+        loudness: action.args?.loudness ?? action.args?.preamp,
+        eqBands: action.args?.eq_bands ?? action.args?.eqBands,
       });
       action.larkResult = larkRes;
       if (Array.isArray(larkRes.songs) && larkRes.songs.length > 0) {
@@ -973,7 +992,19 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
   }
 
   if (action.name === 'open_audiomack') {
-    const amAction = String(action.args?.action || (action.playlistName ? 'create_playlist' : (action.args?.query || action.songTitle || action.artist ? 'play' : 'open'))).trim().toLowerCase();
+    const hasEqArgs = Boolean(
+      action.args?.eq_enabled !== undefined || action.args?.eqEnabled !== undefined
+      || action.args?.eq_preset || action.args?.eqPreset
+      || action.args?.bass_boost !== undefined || action.args?.bassBoost !== undefined
+      || action.args?.virtualizer !== undefined
+      || action.args?.reverb
+      || action.args?.loudness !== undefined || action.args?.preamp !== undefined
+      || action.args?.eq_bands || action.args?.eqBands
+    );
+    const amAction = String(
+      action.args?.action
+      || (hasEqArgs ? 'equalizer' : (action.playlistName ? 'create_playlist' : (action.args?.query || action.songTitle || action.artist ? 'play' : 'open')))
+    ).trim().toLowerCase();
     const title = String(action.songTitle || action.args?.song_title || '').trim();
     const artist = String(action.artist || action.args?.artist || '').trim();
     const q = String(action.args?.query || [title, artist].filter(Boolean).join(' ') || '').trim();
@@ -989,6 +1020,13 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
         tab: action.args?.tab,
         volumePercent: action.args?.volume_percent,
         seekSeconds: action.args?.seek_seconds,
+        eqEnabled: action.args?.eq_enabled ?? action.args?.eqEnabled,
+        eqPreset: action.args?.eq_preset ?? action.args?.eqPreset,
+        bassBoost: action.args?.bass_boost ?? action.args?.bassBoost,
+        virtualizer: action.args?.virtualizer ?? action.args?.surround,
+        reverb: action.args?.reverb,
+        loudness: action.args?.loudness ?? action.args?.preamp,
+        eqBands: action.args?.eq_bands ?? action.args?.eqBands,
       });
       action.audiomackResult = amRes;
       if (amRes.playlistName && !action.playlistName) {
@@ -1339,7 +1377,16 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
     const songTitle = String(args.song_title || q).trim();
     const artist = String(args.artist || "").trim();
     const playlistName = String(args.playlist_name || "").trim();
-    const actionType = String(args.action || (playlistName ? "create_playlist" : "play")).toLowerCase();
+    const hasEqArgs = Boolean(
+      args.eq_enabled !== undefined || args.eqEnabled !== undefined
+      || args.eq_preset || args.eqPreset
+      || args.bass_boost !== undefined || args.bassBoost !== undefined
+      || args.virtualizer !== undefined || args.surround !== undefined
+      || args.reverb
+      || args.loudness !== undefined || args.preamp !== undefined
+      || args.eq_bands || args.eqBands
+    );
+    const actionType = String(args.action || (hasEqArgs ? "equalizer" : (playlistName ? "create_playlist" : "play"))).toLowerCase();
 
     let matchedSongs: DeviceSong[] = [];
     if (typeof window !== 'undefined') {
@@ -1352,6 +1399,20 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
         } catch {}
       }
     }
+
+    const eqDetails: string[] = [];
+    const presetStr = String(args.eq_preset || args.eqPreset || '').trim();
+    const bassNum = args.bass_boost ?? args.bassBoost;
+    const virtNum = args.virtualizer ?? args.surround;
+    const loudNum = args.loudness ?? args.preamp;
+    const reverbStr = String(args.reverb || '').trim();
+    if (args.eq_enabled === false || args.eqEnabled === false) eqDetails.push('OFF');
+    if (presetStr) eqDetails.push(presetStr);
+    if (typeof bassNum === 'number') eqDetails.push(`Bass ${bassNum}%`);
+    if (typeof virtNum === 'number') eqDetails.push(`3D ${virtNum}%`);
+    if (reverbStr && reverbStr.toLowerCase() !== 'none') eqDetails.push(reverbStr);
+    if (typeof loudNum === 'number') eqDetails.push(`Loudness ${loudNum}%`);
+    const eqLabelSuffix = eqDetails.length > 0 ? ` (${eqDetails.join(' • ')})` : ' (EQ)';
 
     const labelMap: Record<string, string> = {
       open: 'Fungura Lark Player',
@@ -1377,7 +1438,11 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
       repeat: 'Lark Player: Subiramo (Repeat)',
       loop: 'Lark Player: Subiramo (Loop)',
       favorite: 'Lark Player: Kunda indirimbo (Favorite)',
-      equalizer: 'Lark Player: Equalizer (EQ)',
+      equalizer: `Lark Player: Equalizer${eqLabelSuffix}`,
+      eq: `Lark Player: Equalizer${eqLabelSuffix}`,
+      set_equalizer: `Lark Player: Equalizer${eqLabelSuffix}`,
+      toggle_equalizer: `Lark Player: Equalizer${eqLabelSuffix}`,
+      bass_boost: `Lark Player: Bass Boost${typeof bassNum === 'number' ? ` (${bassNum}%)` : ''}`,
       sleep_timer: 'Lark Player: Sleep Timer',
       lyrics: 'Lark Player: Reba Lyrics',
       queue: 'Lark Player: Reba Queue (Playing Next)',
@@ -1453,11 +1518,30 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
     const songTitle = String(args.song_title || q).trim();
     const artist = String(args.artist || "").trim();
     const playlistName = String(args.playlist_name || "").trim();
-    const actionType = String(args.action || (playlistName ? "create_playlist" : (q || songTitle || artist ? "play" : "open"))).toLowerCase();
+    const hasEqArgs = Boolean(
+      args.eq_enabled !== undefined || args.eqEnabled !== undefined
+      || args.eq_preset || args.eqPreset
+      || args.bass_boost !== undefined || args.bassBoost !== undefined
+      || args.virtualizer !== undefined || args.surround !== undefined
+      || args.reverb
+      || args.loudness !== undefined || args.preamp !== undefined
+      || args.eq_bands || args.eqBands
+    );
+    const actionType = String(args.action || (hasEqArgs ? "equalizer" : (playlistName ? "create_playlist" : (q || songTitle || artist ? "play" : "open")))).toLowerCase();
     const effectiveQuery = q || [songTitle, artist].filter(Boolean).join(" ").trim();
     const searchUrl = effectiveQuery
       ? `https://audiomack.com/search?q=${encodeURIComponent(effectiveQuery)}`
       : "https://audiomack.com";
+
+    const eqDetails: string[] = [];
+    const presetStr = String(args.eq_preset || args.eqPreset || '').trim();
+    const bassNum = args.bass_boost ?? args.bassBoost;
+    const virtNum = args.virtualizer ?? args.surround;
+    if (args.eq_enabled === false || args.eqEnabled === false) eqDetails.push('OFF');
+    if (presetStr) eqDetails.push(presetStr);
+    if (typeof bassNum === 'number') eqDetails.push(`Bass ${bassNum}%`);
+    if (typeof virtNum === 'number') eqDetails.push(`3D ${virtNum}%`);
+    const eqLabelSuffix = eqDetails.length > 0 ? ` (${eqDetails.join(' • ')})` : ' (EQ)';
 
     const labelMap: Record<string, string> = {
       open: 'Fungura Audiomack',
@@ -1489,7 +1573,11 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
       queue: 'Audiomack: Reba Queue',
       add_to_queue: `Audiomack: Shyira "${songTitle || effectiveQuery}" muri Queue`,
       play_next: `Audiomack: Curanga ikurikira "${songTitle || effectiveQuery}"`,
-      equalizer: 'Audiomack: Equalizer (EQ)',
+      equalizer: `Audiomack: Equalizer${eqLabelSuffix}`,
+      eq: `Audiomack: Equalizer${eqLabelSuffix}`,
+      set_equalizer: `Audiomack: Equalizer${eqLabelSuffix}`,
+      toggle_equalizer: `Audiomack: Equalizer${eqLabelSuffix}`,
+      bass_boost: `Audiomack: Bass Boost${typeof bassNum === 'number' ? ` (${bassNum}%)` : ''}`,
       sleep_timer: 'Audiomack: Sleep Timer',
       lyrics: 'Audiomack: Reba Lyrics',
       share: 'Audiomack: Sangiza (Share)',
@@ -1649,7 +1737,26 @@ function actionConfirmation(action: DeviceAction): string {
     if (act === 'previous' || act === 'prev') return `⏮️ Nasubiye ku ndirimbo ibanza muri **Lark Player**! 🎵`;
     if (act === 'shuffle' || act === 'shuffle_all') return `🔀 Indirimbo zirimo kuvangwa (Shuffle) muri **Lark Player**! 🎶`;
     if (act === 'repeat' || act === 'loop') return `🔁 Uburyo bwo gusubiramo (Repeat) bwashyizweho muri **Lark Player**!`;
-    if (act === 'equalizer') return `🎚️ Equalizer ya **Lark Player** yafunguwe!`;
+    if (act === 'equalizer' || act === 'eq' || act === 'set_equalizer' || act === 'toggle_equalizer' || act === 'bass_boost') {
+      const eq = lr.equalizerState || action.args || {};
+      const enabled = eq.eqEnabled ?? eq.eq_enabled ?? true;
+      if (enabled === false) {
+        return `🎚️ Equalizer ya **Lark Player** na system AudioFX yafunzwe (OFF)!`;
+      }
+      const preset = String(eq.eqPreset || eq.eq_preset || '').trim();
+      const bass = Number(eq.bassBoost ?? eq.bass_boost ?? (act === 'bass_boost' ? 85 : 0));
+      const virt = Number(eq.virtualizer ?? eq.surround ?? 0);
+      const loud = Number(eq.loudness ?? eq.preamp ?? 0);
+      const reverb = String(eq.reverb || '').trim();
+      const extras = [
+        preset ? `Preset: **${preset}**` : '',
+        bass > 0 ? `Bass Boost: **${bass}%**` : '',
+        virt > 0 ? `Virtualizer (3D): **${virt}%**` : '',
+        reverb && reverb.toLowerCase() !== 'none' ? `Reverb: **${reverb}**` : '',
+        loud > 0 ? `Loudness: **${loud}%**` : '',
+      ].filter(Boolean);
+      return `🎚️ **Lark Player Equalizer** yafunguwe kandi yashyizweho (ON${extras.length > 0 ? ` • ${extras.join(' • ')}` : ''})! 🎧✨`;
+    }
     if (act === 'sleep_timer') return `⏲️ Sleep Timer muri **Lark Player** yafunguwe!`;
     if (act === 'lyrics') return `📝 Lyrics z'indirimbo zafunguwe muri **Lark Player**!`;
     if (act === 'favorite') return `❤️ Indirimbo yashyizwe muri Favorites muri **Lark Player**!`;
@@ -1660,7 +1767,7 @@ function actionConfirmation(action: DeviceAction): string {
     if (act === 'open' || act === 'open_app') {
       return `🎵 **Lark Player** yafunguwe! 🎧✨`;
     }
-    return `🎵 Indirimbo **${action.songTitle || action.args?.query || 'yo muri telefone'}** irimo gucurangwa muri **Lark Player**! 🎧✨`;
+    return `🎵 Indirimbo **${action.songTitle || action.args?.query || 'yo muri telefone'}** irimo gucurangwa muri **Lark Player** ako kanya! 🎧✨`;
   }
   if (action.name === 'open_audiomack') {
     const act = String(action.args?.action || 'play').toLowerCase();
@@ -1677,6 +1784,24 @@ function actionConfirmation(action: DeviceAction): string {
     }
     if (act === 'list_playlists') {
       return `📋 Nafunguye igice cya **Playlists** muri **Audiomack**! 🎶`;
+    }
+    if (act === 'equalizer' || act === 'eq' || act === 'set_equalizer' || act === 'toggle_equalizer' || act === 'bass_boost') {
+      const eq = ar.equalizerState || action.args || {};
+      const enabled = eq.eqEnabled ?? eq.eq_enabled ?? true;
+      if (enabled === false) {
+        return `🎚️ Equalizer ya **Audiomack** / AudioFX yafunzwe (OFF)!`;
+      }
+      const preset = String(eq.eqPreset || eq.eq_preset || '').trim();
+      const bass = Number(eq.bassBoost ?? eq.bass_boost ?? (act === 'bass_boost' ? 85 : 0));
+      const virt = Number(eq.virtualizer ?? eq.surround ?? 0);
+      const reverb = String(eq.reverb || '').trim();
+      const extras = [
+        preset ? `Preset: **${preset}**` : '',
+        bass > 0 ? `Bass Boost: **${bass}%**` : '',
+        virt > 0 ? `Virtualizer (3D): **${virt}%**` : '',
+        reverb && reverb.toLowerCase() !== 'none' ? `Reverb: **${reverb}**` : '',
+      ].filter(Boolean);
+      return `🎚️ **Audiomack Equalizer** yashyizweho (ON${extras.length > 0 ? ` • ${extras.join(' • ')}` : ''})! 🎧✨`;
     }
     if (act === 'download') {
       return `⬇️ **Audiomack** yafunguwe ngo i-downloade **${target}** offline!`;
@@ -1705,7 +1830,7 @@ function actionConfirmation(action: DeviceAction): string {
     if (act === 'repeat' || act === 'loop') return `🔁 Repeat yashyizweho muri **Audiomack**!`;
     if (act === 'search') return `🔍 Ndashakisha **${target}** muri **Audiomack**! 🎧`;
     if (act === 'open' || act === 'open_app') return `🟠 **Audiomack** yafunguwe! 🎧✨`;
-    return `🟠 **Audiomack** irimo gushakisha no gucuranga **${target}**! 🎧✨`;
+    return `🟠 **Audiomack** irimo gushakisha no gucuranga **${target}** ako kanya! 🎧✨`;
   }
   if (action.name === 'query_device_music') {
     const count = action.songs?.length || 0;
@@ -2008,7 +2133,7 @@ const getEndpoint = (path: string): string => {
 const APK_DEVICE_ACTION_DECLARATIONS = [
   {
     name: 'open_audiomack',
-    description: "Full control over Audiomack: open app, search/play songs, artists, albums or playlists, create/add/play playlists, download for offline, favorite/like, repost, follow artists, queue/play next, playback controls (pause, resume, next, previous, stop, seek, shuffle, repeat), equalizer, sleep timer, lyrics, share, tabs, volume, and now playing.",
+    description: "Full control over Audiomack: open app, search/play songs directly (immediate autoplay), artists, albums or playlists, create/add/play playlists, download for offline, favorite/like, repost, follow artists, queue/play next, playback controls (pause, resume, next, previous, stop, seek, shuffle, repeat), full Equalizer control (eq_enabled, eq_preset, bass_boost, virtualizer, reverb, loudness, eq_bands), sleep timer, lyrics, share, tabs, volume, and now playing.",
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -2019,16 +2144,27 @@ const APK_DEVICE_ACTION_DECLARATIONS = [
         tab: { type: 'STRING', description: 'Optional Audiomack tab to open (home, feed, trending, search, library, playlists, downloads, favorites, offline).' },
         volume_percent: { type: 'NUMBER', description: 'Volume percentage (0-100) when action is set_volume.' },
         seek_seconds: { type: 'NUMBER', description: 'Position in seconds when action is seek.' },
+        eq_enabled: { type: 'BOOLEAN', description: 'Turn Equalizer ON (true) or OFF (false).' },
+        eq_preset: { type: 'STRING', description: 'Equalizer preset: Normal, Classical, Dance, Flat, Folk, Heavy Metal, Hip Hop, Jazz, Pop, Rock, Custom, Bass Boost, Vocal, Acoustic, Electronic, R&B.' },
+        bass_boost: { type: 'NUMBER', description: 'Bass Boost intensity percentage (0-100).' },
+        virtualizer: { type: 'NUMBER', description: 'Virtualizer / 3D surround sound percentage (0-100).' },
+        reverb: { type: 'STRING', description: 'Reverb room preset: None, Small Room, Medium Room, Large Room, Medium Hall, Large Hall, Plate.' },
+        loudness: { type: 'NUMBER', description: 'Loudness / Preamp boost percentage (0-100).' },
+        eq_bands: {
+          type: 'ARRAY',
+          items: { type: 'NUMBER' },
+          description: 'Optional 5-band EQ levels (60Hz, 230Hz, 910Hz, 3.6kHz, 14kHz) as 0-100 percentages (50 is flat 0dB) or -15 to +15 dB.',
+        },
         action: {
           type: 'STRING',
-          description: 'Action to perform in Audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite, like, repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab, volume_up, volume_down, set_volume, mute, unmute, now_playing.',
+          description: 'Action to perform in Audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite, like, repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, set_equalizer, toggle_equalizer, bass_boost, sleep_timer, lyrics, share, open_tab, volume_up, volume_down, set_volume, mute, unmute, now_playing.',
         },
       },
     },
   },
   {
     name: 'open_lark_player',
-    description: "Full control over Lark Player: open app, play/search songs, create/edit/play/delete playlists, control playback (pause, resume, next, previous, stop, seek, shuffle, repeat), volume, equalizer, sleep timer, lyrics, queue, favorites, tabs, and now playing.",
+    description: "Full autonomous control over Lark Player: open app, play/search songs directly (immediate autoplay), create/edit/play/delete playlists, control playback (pause, resume, next, previous, stop, seek, shuffle, repeat), volume, full autonomous Equalizer UI + AudioFX control (entering Lark Player Equalizer automatically to toggle eq_enabled, choose eq_preset, adjust 5-band eq_bands, bass_boost, virtualizer, reverb, loudness), sleep timer, lyrics, queue, favorites, tabs, and now playing.",
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -2044,9 +2180,20 @@ const APK_DEVICE_ACTION_DECLARATIONS = [
         tab: { type: 'STRING', description: 'Optional Lark Player tab to open (songs, playlists, artists, albums, folders, videos, downloads, settings).' },
         volume_percent: { type: 'NUMBER', description: 'Volume percentage (0-100) when action is set_volume.' },
         seek_seconds: { type: 'NUMBER', description: 'Position in seconds when action is seek.' },
+        eq_enabled: { type: 'BOOLEAN', description: 'Turn Equalizer ON (true) or OFF (false) inside Lark Player.' },
+        eq_preset: { type: 'STRING', description: 'Equalizer preset: Normal, Classical, Dance, Flat, Folk, Heavy Metal, Hip Hop, Jazz, Pop, Rock, Custom, Bass Boost, Vocal, Acoustic, Electronic, R&B.' },
+        bass_boost: { type: 'NUMBER', description: 'Bass Boost slider intensity percentage (0-100).' },
+        virtualizer: { type: 'NUMBER', description: 'Virtualizer / 3D surround sound slider percentage (0-100).' },
+        reverb: { type: 'STRING', description: 'Reverb preset: None, Small Room, Medium Room, Large Room, Medium Hall, Large Hall, Plate.' },
+        loudness: { type: 'NUMBER', description: 'Loudness / Preamp gain percentage (0-100).' },
+        eq_bands: {
+          type: 'ARRAY',
+          items: { type: 'NUMBER' },
+          description: 'Optional 5-band EQ levels (60Hz, 230Hz, 910Hz, 3.6kHz, 14kHz) as 0-100 percentages (50 is flat 0dB) or -15 to +15 dB.',
+        },
         action: {
           type: 'STRING',
-          description: 'Action to perform in Lark Player: open, play, play_all, shuffle_all, search, create_playlist, add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing.',
+          description: 'Action to perform in Lark Player: open, play, play_all, shuffle_all, search, create_playlist, add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, set_equalizer, toggle_equalizer, bass_boost, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing.',
         },
       },
     },
@@ -2478,7 +2625,7 @@ The user sent a recorded voice message in audio format (most commonly spoken in 
 - CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_audiomack, open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER + AUDIOMACK + APP LAUNCH ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to BOTH Lark Player (local phone audio) AND Audiomack (online/offline streaming), plus opening any installed app via open_app. CRITICAL TOOL CALL RULE: Whenever the user tells you to open Lark Player or Audiomack (even written as "audio mack"), play/search a song, create/play/manage a playlist, or open any app, you MUST ALWAYS emit the matching functionCall tool immediately (open_audiomack, open_lark_player, query_device_music, open_app, open_youtube, open_camera, make_call, send_sms, open_whatsapp) — NEVER just reply in text claiming you opened the app without calling the tool! You can perform ALL Audiomack actions via open_audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite, like, repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab, volume_up, volume_down, set_volume, mute, unmute, now_playing. You can perform ALL Lark Player actions via open_lark_player: open, play, play_all, shuffle_all, search, create_playlist (with optional songs array), add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing. When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
+    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER + AUDIOMACK + EQUALIZER + DIRECT AUTOPLAY ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to BOTH Lark Player (local phone audio) AND Audiomack (online/offline streaming), plus YouTube and opening any installed app via open_app. DIRECT AUTOPLAY RULE: Whenever the user asks to play a song on Lark Player, Audiomack, or YouTube, ALWAYS pass action='play' (never 'search' unless they explicitly asked only to search without playing) so every audio player immediately autoplays directly! AUTONOMOUS EQUALIZER CONTROL: You can open and automatically configure the Equalizer INSIDE Lark Player (or Audiomack + system AudioFX) without manual user clicks — use action='equalizer' (or 'set_equalizer' / 'toggle_equalizer' / 'bass_boost') with eq_enabled (true/false), eq_preset (Normal, Classical, Dance, Flat, Folk, Heavy Metal, Hip Hop, Jazz, Pop, Rock, Custom, Bass Boost, Vocal, Acoustic, Electronic, R&B), bass_boost (0-100), virtualizer (0-100), reverb (None, Small Room, Medium Room, Large Room, Medium Hall, Large Hall, Plate), loudness (0-100), and eq_bands ([60Hz, 230Hz, 910Hz, 3.6kHz, 14kHz] in 0-100% or -15..+15 dB). If the user asks to adjust equalizer, bass boost, 3D surround, reverb, or EQ presets without naming an app, default to open_lark_player(..., action='equalizer'). CRITICAL TOOL CALL RULE: Whenever the user tells you to open Lark Player or Audiomack (even written as "audio mack"), play/search a song, adjust the equalizer, create/play/manage a playlist, or open any app, you MUST ALWAYS emit the matching functionCall tool immediately (open_audiomack, open_lark_player, query_device_music, open_app, open_youtube, open_camera, make_call, send_sms, open_whatsapp) — NEVER just reply in text claiming you opened or configured it without calling the tool! When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }
@@ -2780,7 +2927,102 @@ function inferFallbackDeviceAction(rawInput: string): { name: string; args: Reco
   if (!text) return null;
 
   const lower = text.toLowerCase();
-  const hasAppVerb = /(?:fungur|fungir|curang|shakish|nshakir|kora|ongera|shyira|hagarik|komeza|subiramo|vanga|umvir|erekan|reb|siba)|\b(open|launch|start|play|search|find|create|make|add|download|like|favorite|repost|follow|pause|resume|stop|next|prev|previous|shuffle|repeat|loop|equalizer|eq|sleep|lyrics|queue|list|show|delete|now\s*playing)\b/i.test(lower);
+
+  const extractEqualizerArgs = (src: string, srcLower: string): Record<string, any> | null => {
+    const hasExplicitEqTerm = /\b(?:equalizer|eq|bass\s*boost|virtualizer|surround|reverb|loudness|preamp|treble)\b/i.test(srcLower)
+      || /(?:60\s*hz|230\s*hz|910\s*hz|3\.6\s*khz|14\s*khz)/i.test(srcLower)
+      || (/\bbass\b/i.test(srcLower) && /(?:ongera|gabanya|shyira|hindur|fungur|funga|zimya|\bboost\b|\bset\b|\bmax\b|\bfull\b|\blow\b|\bhigh\b|\d+\s*%)/i.test(srcLower))
+      || (/\b3d\b/i.test(srcLower) && /(?:sound|audio|ijwi|surround|ongera|shyira|fungur|funga|\d+\s*%)/i.test(srcLower));
+
+    const presetRules: Array<[RegExp, string]> = [
+      [/\b(?:hip[\s-]*hop|rap)\b/i, 'Hip Hop'],
+      [/\b(?:heavy\s*metal|metal)\b/i, 'Heavy Metal'],
+      [/\bbass\s*boost\b/i, 'Bass Boost'],
+      [/\bclassical\b/i, 'Classical'],
+      [/\belectronic\b|\bedm\b/i, 'Electronic'],
+      [/\bacoustic\b/i, 'Acoustic'],
+      [/\bvocal\b/i, 'Vocal'],
+      [/\br\s*&\s*b\b|\brnb\b/i, 'R&B'],
+      [/\bdance\b/i, 'Dance'],
+      [/\brock\b/i, 'Rock'],
+      [/\bpop\b/i, 'Pop'],
+      [/\bjazz\b/i, 'Jazz'],
+      [/\bfolk\b/i, 'Folk'],
+      [/\bflat\b/i, 'Flat'],
+      [/\bnormal\b/i, 'Normal'],
+      [/\bcustom\b/i, 'Custom'],
+    ];
+    let matchedPreset = '';
+    for (const [rx, label] of presetRules) {
+      if (rx.test(srcLower)) {
+        matchedPreset = label;
+        break;
+      }
+    }
+
+    const hasPresetCommand = Boolean(matchedPreset) && (
+      hasExplicitEqTerm
+      || /(?:preset|sound|audio|lark|audiomack|shyira|koresha|hindur|set|mode)/i.test(srcLower)
+    );
+    if (!hasExplicitEqTerm && !hasPresetCommand) return null;
+
+    const eqArgs: Record<string, any> = {};
+    const wantsOff = /(?:funga|zimya|hagarika|\bturn\s*off\b|\bdisable\b|\boff\b)/i.test(srcLower)
+      && !/(?:fungur|\bon\b|\benable\b|ongera|shyira)/i.test(srcLower);
+    eqArgs.eq_enabled = !wantsOff;
+
+    if (matchedPreset) {
+      eqArgs.eq_preset = matchedPreset;
+    }
+
+    const bassNumMatch = src.match(/\bbass(?:\s*boost)?\s*(?:kuri|at|to|=|:)?\s*(\d{1,3})\s*%?/i);
+    if (bassNumMatch?.[1]) {
+      eqArgs.bass_boost = Math.max(0, Math.min(100, Number(bassNumMatch[1])));
+    } else if (/\bbass\b/i.test(srcLower)) {
+      if (/(?:max|full|cyane|hejuru)/i.test(srcLower)) eqArgs.bass_boost = 95;
+      else if (/(?:gabanya|gake|low)/i.test(srcLower)) eqArgs.bass_boost = 25;
+      else if (/(?:zero|none|funga|zimya|0%)/i.test(srcLower)) eqArgs.bass_boost = 0;
+      else if (!wantsOff) eqArgs.bass_boost = 85;
+    }
+
+    const virtMatch = src.match(/(?:virtualizer|surround|3d(?:\s*(?:sound|audio|ijwi))?)\s*(?:kuri|at|to|=|:)?\s*(\d{1,3})\s*%?/i);
+    if (virtMatch?.[1]) {
+      eqArgs.virtualizer = Math.max(0, Math.min(100, Number(virtMatch[1])));
+    } else if (/\b(?:virtualizer|surround)\b/i.test(srcLower) || (/\b3d\b/i.test(srcLower) && /(?:sound|audio|ijwi|surround)/i.test(srcLower))) {
+      eqArgs.virtualizer = wantsOff ? 0 : 75;
+    }
+
+    const loudMatch = src.match(/(?:loudness|preamp)\s*(?:kuri|at|to|=|:)?\s*(\d{1,3})\s*%?/i);
+    if (loudMatch?.[1]) {
+      eqArgs.loudness = Math.max(0, Math.min(100, Number(loudMatch[1])));
+    } else if (/\b(?:loudness|preamp)\b/i.test(srcLower)) {
+      eqArgs.loudness = wantsOff ? 0 : 65;
+    }
+
+    if (/\breverb\b/i.test(srcLower)) {
+      if (/plate/i.test(srcLower)) eqArgs.reverb = 'Plate';
+      else if (/large\s*hall/i.test(srcLower)) eqArgs.reverb = 'Large Hall';
+      else if (/medium\s*hall|\bhall\b/i.test(srcLower)) eqArgs.reverb = 'Medium Hall';
+      else if (/large\s*room/i.test(srcLower)) eqArgs.reverb = 'Large Room';
+      else if (/medium\s*room/i.test(srcLower)) eqArgs.reverb = 'Medium Room';
+      else if (/small\s*room|\broom\b/i.test(srcLower)) eqArgs.reverb = 'Small Room';
+      else if (/none|off|funga/i.test(srcLower)) eqArgs.reverb = 'None';
+      else eqArgs.reverb = 'Medium Hall';
+    }
+
+    const bandsMatch = src.match(/(?:[+-]?\d{1,3})\s*(?:,\s*[+-]?\d{1,3}\s*){4}/);
+    if (bandsMatch?.[0]) {
+      const nums = bandsMatch[0].split(',').map((n) => Number(n.trim())).filter((n) => Number.isFinite(n));
+      if (nums.length === 5) eqArgs.eq_bands = nums;
+    } else if (/\btreble\b|amajwi\s+yo\s+hejuru/i.test(srcLower)) {
+      eqArgs.eq_bands = [55, 52, 54, 72, 82];
+    }
+
+    return eqArgs;
+  };
+
+  const eqParsed = extractEqualizerArgs(text, lower);
+  const hasAppVerb = Boolean(eqParsed) || /(?:fungur|fungir|curang|shakish|nshakir|kora|ongera|shyira|hindur|zimya|hagarik|komeza|subiramo|vanga|umvir|erekan|reb|siba)|\b(open|launch|start|play|search|find|create|make|add|download|like|favorite|repost|follow|pause|resume|stop|next|prev|previous|shuffle|repeat|loop|equalizer|eq|bass\s*boost|virtualizer|surround|reverb|loudness|preamp|sleep|lyrics|queue|list|show|delete|now\s*playing|set|adjust|tune)\b/i.test(lower);
   if (!hasAppVerb) return null;
 
   const cleanMusicQuery = (src: string, extraStripPattern?: RegExp): string => {
@@ -2808,6 +3050,7 @@ function inferFallbackDeviceAction(rawInput: string): { name: string; args: Reco
   };
 
   const detectMusicSubAction = (srcLower: string, hasQuery: boolean): string => {
+    if (eqParsed) return 'equalizer';
     if (/\b(?:delete|siba|remove)\b.*playlist/i.test(srcLower)) return 'delete_playlist';
     if (/(?:kora|tangira|\bcreate\b|\bmake\b|\bnew\b).*playlist/i.test(srcLower)) return 'create_playlist';
     if (/(?:ongera|shyira|\badd\b).*playlist/i.test(srcLower)) return 'add_to_playlist';
@@ -2836,10 +3079,10 @@ function inferFallbackDeviceAction(rawInput: string): { name: string; args: Reco
   };
 
   if (/audiomack|audio\s+mack/i.test(lower)) {
-    const q = cleanMusicQuery(text);
+    const q = eqParsed ? '' : cleanMusicQuery(text);
     let act = detectMusicSubAction(lower, q.length > 0);
     if (act === 'play_all') act = 'play';
-    const args: Record<string, any> = { action: act };
+    const args: Record<string, any> = { action: act, ...(eqParsed || {}) };
     if (q) args.query = q;
     if (act === 'create_playlist' || act === 'add_to_playlist' || act === 'play_playlist') {
       args.playlist_name = extractPlaylistName(text);
@@ -2850,9 +3093,9 @@ function inferFallbackDeviceAction(rawInput: string): { name: string; args: Reco
   }
 
   if (/lark\s*player|larkplayer|\blark\b/i.test(lower)) {
-    const q = cleanMusicQuery(text);
+    const q = eqParsed ? '' : cleanMusicQuery(text);
     const act = detectMusicSubAction(lower, q.length > 0);
-    const args: Record<string, any> = { action: act };
+    const args: Record<string, any> = { action: act, ...(eqParsed || {}) };
     if (q) args.query = q;
     if (act === 'create_playlist' || act === 'add_to_playlist' || act === 'play_playlist' || act === 'delete_playlist') {
       args.playlist_name = extractPlaylistName(text);
@@ -2860,6 +3103,16 @@ function inferFallbackDeviceAction(rawInput: string): { name: string; args: Reco
       args.song_title = q;
     }
     return { name: 'open_lark_player', args };
+  }
+
+  if (eqParsed) {
+    return {
+      name: 'open_lark_player',
+      args: {
+        action: 'equalizer',
+        ...eqParsed,
+      },
+    };
   }
 
   if (/(?:kora|tangira|\bcreate\b|\bmake\b)\s+(?:a\s+|new\s+)?playlist\b/i.test(lower) && !/\b(?:youtube|spotify)\b/i.test(lower)) {
@@ -3060,7 +3313,7 @@ export async function sendMessageToGemini(
           .trim()
       : '';
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
-    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|umuzik|miziki|ijwi|komeza|subiramo|ongeraho|fungur|fungir|shakish|nshakir|mpamagar|umvir|urutonde|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audio\s*mack|audiomack|lark\s*player|larkplayer|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|repost|follow|download|offline|trending|library|ringtone|artists|albums|folders|now\s*playing|kamera|camera|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|facebook|chrome|settings|subiza|unread)\b/i.test(latestUserText);
+    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|umuzik|miziki|ijwi|komeza|subiramo|ongeraho|fungur|fungir|shakish|nshakir|mpamagar|umvir|urutonde|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audio\s*mack|audiomack|lark\s*player|larkplayer|lark|playlist|shuffle|repeat|loop|equalizer|eq|bass\s*boost|virtualizer|surround|reverb|loudness|preamp|treble|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|repost|follow|download|offline|trending|library|ringtone|artists|albums|folders|now\s*playing|kamera|camera|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|facebook|chrome|settings|subiza|unread)\b/i.test(latestUserText) || /(?:60\s*hz|230\s*hz|910\s*hz|3\.6\s*khz|14\s*khz)/i.test(latestUserText) || (/\bbass\b/i.test(latestUserText) && /(?:ongera|gabanya|shyira|hindur|fungur|funga|zimya|\bboost\b|\bset\b|\d+\s*%)/i.test(latestUserText));
     const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText

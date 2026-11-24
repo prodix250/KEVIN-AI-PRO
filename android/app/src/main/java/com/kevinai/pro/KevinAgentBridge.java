@@ -14,9 +14,16 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.media.AudioManager;
 import android.media.ExifInterface;
+import android.media.audiofx.BassBoost;
+import android.media.audiofx.Equalizer;
+import android.media.audiofx.LoudnessEnhancer;
+import android.media.audiofx.PresetReverb;
+import android.media.audiofx.Virtualizer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.ContactsContract;
 import android.provider.Settings;
@@ -60,6 +67,12 @@ public class KevinAgentBridge {
 
     private final Activity activity;
     private final WebView webView;
+    private final Handler bridgeHandler = new Handler(Looper.getMainLooper());
+    private Equalizer systemEqualizer;
+    private BassBoost systemBassBoost;
+    private Virtualizer systemVirtualizer;
+    private PresetReverb systemPresetReverb;
+    private LoudnessEnhancer systemLoudness;
 
     public KevinAgentBridge(Activity activity, WebView webView) {
         this.activity = activity;
@@ -530,11 +543,13 @@ public class KevinAgentBridge {
         activity.runOnUiThread(() -> {
             try {
                 if (!TextUtils.isEmpty(videoId)) {
+                    KevinAgentPrefs.armPendingYouTubePlay(activity, 8_000L);
                     Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube://" + videoId));
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     activity.startActivity(intent);
+                    scheduleDirectAutoplayKick("youtube");
                 } else {
-                    KevinAgentPrefs.armPendingYouTubePlay(activity, 12_000L);
+                    KevinAgentPrefs.armPendingYouTubePlay(activity, 20_000L);
                     Intent intent = new Intent(Intent.ACTION_VIEW,
                             Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(query != null ? query : "")));
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -542,12 +557,18 @@ public class KevinAgentBridge {
                 }
             } catch (Exception e) {
                 try {
+                    if (TextUtils.isEmpty(videoId)) {
+                        KevinAgentPrefs.armPendingYouTubePlay(activity, 20_000L);
+                    }
                     String webUrl = !TextUtils.isEmpty(videoId)
                             ? "https://www.youtube.com/watch?v=" + Uri.encode(videoId) + "&autoplay=1"
                             : "https://www.youtube.com/results?search_query=" + Uri.encode(query != null ? query : "");
                     Intent fallback = new Intent(Intent.ACTION_VIEW, Uri.parse(webUrl));
                     fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     activity.startActivity(fallback);
+                    if (!TextUtils.isEmpty(videoId)) {
+                        scheduleDirectAutoplayKick("youtube");
+                    }
                 } catch (Exception ignored) {}
             }
         });
@@ -979,6 +1000,30 @@ public class KevinAgentBridge {
         }
     }
 
+    private void scheduleDirectAutoplayKick(String targetPlayer) {
+        final String target = targetPlayer != null ? targetPlayer.toLowerCase(Locale.ROOT) : "";
+        long[] delays = new long[] { 950L, 1950L };
+        for (long delay : delays) {
+            bridgeHandler.postDelayed(() -> {
+                try {
+                    AudioManager am = (AudioManager) activity.getSystemService(Activity.AUDIO_SERVICE);
+                    if (am != null && am.isMusicActive()) {
+                        return;
+                    }
+                    boolean controlled = false;
+                    if (target.contains("lark")) {
+                        controlled = KevinNotificationListenerService.controlLarkMediaSession(activity, "play", 0L);
+                    } else if (target.contains("audiomack")) {
+                        controlled = KevinNotificationListenerService.controlAudiomackMediaSession(activity, "play", 0L);
+                    }
+                    if (!controlled) {
+                        dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY);
+                    }
+                } catch (Exception ignored) {}
+            }, delay);
+        }
+    }
+
     private String writeM3uPlaylistFile(String playlistName, JSONArray songs) {
         if (TextUtils.isEmpty(playlistName) || songs == null || songs.length() == 0) return "";
         try {
@@ -1071,6 +1116,7 @@ public class KevinAgentBridge {
                 }
 
                 PackageManager pm = activity.getPackageManager();
+                reapplySavedEqualizerIfEnabled();
                 if (songContentUri != null) {
                     String[] mimesToTry = new String[] { resolvedMime, "audio/*", "audio/mpeg" };
                     for (String mime : mimesToTry) {
@@ -1082,8 +1128,12 @@ public class KevinAgentBridge {
                         }
                         try {
                             if (pm.resolveActivity(playIntent, 0) != null) {
-                                KevinAgentPrefs.clearPendingLarkAction(activity);
+                                JSONObject ensureTask = new JSONObject();
+                                ensureTask.put("action", "ensure_play");
+                                ensureTask.put("songTitle", resolvedTitle);
+                                KevinAgentPrefs.armPendingLarkAction(activity, ensureTask.toString(), 7_500L);
                                 if (startActivitySafely(playIntent)) {
+                                    scheduleDirectAutoplayKick("lark");
                                     return;
                                 }
                             }
@@ -1372,13 +1422,21 @@ public class KevinAgentBridge {
                 return result.toString();
             }
 
-            if ("equalizer".equals(action) || "eq".equals(action)) {
+            if ("equalizer".equals(action) || "eq".equals(action)
+                    || "set_equalizer".equals(action) || "toggle_equalizer".equals(action)
+                    || "bass_boost".equals(action)) {
+                JSONObject eqConfig = buildNormalizedEqualizerConfig(req, action);
+                JSONObject eqResult = applySystemEqualizerSettings(eqConfig);
+                result.put("equalizerState", eqConfig);
+                result.put("audioFx", eqResult);
+
+                JSONObject pending = new JSONObject(eqConfig.toString());
+                pending.put("action", "equalizer");
+                final String finalPending = pending.toString();
                 activity.runOnUiThread(() -> {
                     try {
-                        JSONObject pending = new JSONObject();
-                        pending.put("action", "equalizer");
                         if (larkPkg != null) {
-                            launchLarkPlayerHome(larkPkg, pending.toString());
+                            launchLarkPlayerHome(larkPkg, finalPending);
                         } else {
                             Intent eqIntent = new Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL);
                             eqIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -1667,13 +1725,21 @@ public class KevinAgentBridge {
                 return result.toString();
             }
 
-            if ("equalizer".equals(action) || "eq".equals(action)) {
+            if ("equalizer".equals(action) || "eq".equals(action)
+                    || "set_equalizer".equals(action) || "toggle_equalizer".equals(action)
+                    || "bass_boost".equals(action)) {
+                JSONObject eqConfig = buildNormalizedEqualizerConfig(req, action);
+                JSONObject eqResult = applySystemEqualizerSettings(eqConfig);
+                result.put("equalizerState", eqConfig);
+                result.put("audioFx", eqResult);
+
+                JSONObject pending = new JSONObject(eqConfig.toString());
+                pending.put("action", "equalizer");
+                final String finalPending = pending.toString();
                 activity.runOnUiThread(() -> {
                     try {
                         if (amPkg != null) {
-                            JSONObject pending = new JSONObject();
-                            pending.put("action", "equalizer");
-                            launchAudiomackHome(amPkg, pending.toString(), webFallbackUrl);
+                            launchAudiomackHome(amPkg, finalPending, webFallbackUrl);
                         } else {
                             Intent eqIntent = new Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL);
                             eqIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -1699,6 +1765,7 @@ public class KevinAgentBridge {
             pending.put("tab", tab);
             final String finalPending = pending.toString();
 
+            reapplySavedEqualizerIfEnabled();
             KevinAgentPrefs.armPendingAudiomackAction(activity, finalPending, 28_000L);
             activity.runOnUiThread(() -> launchAudiomackHome(amPkg, finalPending, webFallbackUrl));
             return result.toString();
@@ -2042,5 +2109,327 @@ public class KevinAgentBridge {
     @JavascriptInterface
     public void playBeep() {
         playPopSound();
+    }
+
+    private String normalizeEqPresetName(String rawPreset) {
+        if (TextUtils.isEmpty(rawPreset)) return "";
+        String p = rawPreset.trim().toLowerCase(Locale.ROOT);
+        if (p.contains("hip") || p.contains("rap")) return "Hip Hop";
+        if (p.contains("heavy") || p.contains("metal")) return "Heavy Metal";
+        if (p.contains("classic")) return "Classical";
+        if (p.contains("dance") || p.contains("edm") || p.contains("club")) return "Dance";
+        if (p.contains("electr")) return "Electronic";
+        if (p.contains("acoust")) return "Acoustic";
+        if (p.contains("vocal") || p.contains("voice") || p.contains("podcast")) return "Vocal";
+        if (p.contains("bass")) return "Bass Boost";
+        if (p.contains("r&b") || p.contains("rnb")) return "R&B";
+        if (p.contains("rock")) return "Rock";
+        if (p.contains("pop")) return "Pop";
+        if (p.contains("jazz")) return "Jazz";
+        if (p.contains("folk")) return "Folk";
+        if (p.contains("flat")) return "Flat";
+        if (p.contains("normal") || p.contains("default")) return "Normal";
+        if (p.contains("custom")) return "Custom";
+        return rawPreset.trim();
+    }
+
+    private int clampPercent(int val) {
+        return Math.max(0, Math.min(100, val));
+    }
+
+    private int normalizeBandValueToPercent(double rawVal, boolean forceDbScale) {
+        if (forceDbScale || rawVal < 0.0 || (rawVal <= 15.0 && rawVal != 0.0 && Math.abs(rawVal) <= 15.0 && rawVal != 10.0 && rawVal != 15.0)) {
+            double clampedDb = Math.max(-15.0, Math.min(15.0, rawVal));
+            return clampPercent((int) Math.round(((clampedDb + 15.0) / 30.0) * 100.0));
+        }
+        return clampPercent((int) Math.round(rawVal));
+    }
+
+    private int[] getDefaultBandsForPreset(String preset) {
+        String p = preset != null ? preset.trim().toLowerCase(Locale.ROOT) : "";
+        switch (p) {
+            case "rock": return new int[] { 72, 60, 42, 63, 74 };
+            case "pop": return new int[] { 45, 62, 70, 62, 46 };
+            case "hip hop": return new int[] { 78, 66, 50, 56, 68 };
+            case "jazz": return new int[] { 65, 56, 44, 60, 68 };
+            case "classical": return new int[] { 68, 60, 46, 62, 65 };
+            case "dance":
+            case "electronic": return new int[] { 76, 68, 52, 66, 72 };
+            case "heavy metal": return new int[] { 70, 54, 72, 68, 52 };
+            case "folk": return new int[] { 62, 52, 50, 58, 48 };
+            case "bass boost": return new int[] { 88, 74, 52, 50, 52 };
+            case "vocal": return new int[] { 40, 54, 72, 68, 52 };
+            case "acoustic": return new int[] { 62, 56, 54, 62, 60 };
+            case "r&b": return new int[] { 70, 74, 52, 46, 58 };
+            case "flat":
+            case "normal":
+            default:
+                return new int[] { 50, 50, 50, 50, 50 };
+        }
+    }
+
+    private JSONObject buildNormalizedEqualizerConfig(JSONObject req, String actionName) {
+        JSONObject out = new JSONObject();
+        try {
+            JSONObject saved = new JSONObject(KevinAgentPrefs.getEqualizerStateJson(activity));
+            String rawPreset = req.optString("eqPreset", req.optString("eq_preset", req.optString("preset", ""))).trim();
+            String normPreset = normalizeEqPresetName(rawPreset);
+
+            boolean hasExplicitEnabled = req.has("eqEnabled") || req.has("eq_enabled") || req.has("enabled");
+            boolean eqEnabled = hasExplicitEnabled
+                    ? req.optBoolean("eqEnabled", req.optBoolean("eq_enabled", req.optBoolean("enabled", true)))
+                    : true;
+            if ("off".equalsIgnoreCase(rawPreset) || "disable".equalsIgnoreCase(rawPreset)) {
+                eqEnabled = false;
+                normPreset = "";
+            }
+
+            boolean hasBass = req.has("bassBoost") || req.has("bass_boost") || "bass_boost".equals(actionName);
+            int bassBoost = req.optInt("bassBoost", req.optInt("bass_boost",
+                    "bass_boost".equals(actionName) ? 85 : saved.optInt("bassBoost", 0)));
+            bassBoost = clampPercent(bassBoost);
+            if ("Bass Boost".equals(normPreset) && !req.has("bassBoost") && !req.has("bass_boost")) {
+                hasBass = true;
+                bassBoost = 85;
+            }
+
+            boolean hasVirtualizer = req.has("virtualizer") || req.has("surround");
+            int virtualizer = clampPercent(req.optInt("virtualizer", req.optInt("surround", saved.optInt("virtualizer", 0))));
+
+            boolean hasLoudness = req.has("loudness") || req.has("preamp");
+            int loudness = clampPercent(req.optInt("loudness", req.optInt("preamp", saved.optInt("loudness", 0))));
+
+            String reverb = req.optString("reverb", "").trim();
+
+            JSONArray rawBandsArr = req.optJSONArray("eqBands");
+            if (rawBandsArr == null) rawBandsArr = req.optJSONArray("eq_bands");
+            if (rawBandsArr == null) rawBandsArr = req.optJSONArray("bands");
+
+            boolean bandsExplicit = false;
+            JSONArray eqBands = new JSONArray();
+            if (rawBandsArr != null && rawBandsArr.length() > 0) {
+                bandsExplicit = true;
+                boolean looksDb = false;
+                for (int i = 0; i < rawBandsArr.length(); i++) {
+                    double v = rawBandsArr.optDouble(i, 50.0);
+                    if (v < 0.0) {
+                        looksDb = true;
+                        break;
+                    }
+                }
+                if (!looksDb && rawBandsArr.length() >= 3) {
+                    boolean allSmall = true;
+                    for (int i = 0; i < rawBandsArr.length(); i++) {
+                        if (rawBandsArr.optDouble(i, 50.0) > 15.0) {
+                            allSmall = false;
+                            break;
+                        }
+                    }
+                    if (allSmall) looksDb = true;
+                }
+                for (int i = 0; i < 5; i++) {
+                    double v = i < rawBandsArr.length() ? rawBandsArr.optDouble(i, looksDb ? 0.0 : 50.0) : (looksDb ? 0.0 : 50.0);
+                    eqBands.put(normalizeBandValueToPercent(v, looksDb));
+                }
+            } else if (req.optJSONObject("eq_bands") != null || req.optJSONObject("eqBands") != null) {
+                bandsExplicit = true;
+                JSONObject bandObj = req.optJSONObject("eq_bands") != null ? req.optJSONObject("eq_bands") : req.optJSONObject("eqBands");
+                String[][] keys = new String[][] {
+                        { "60Hz", "60", "band1", "low" },
+                        { "230Hz", "230", "250Hz", "band2" },
+                        { "910Hz", "910", "1kHz", "band3", "mid" },
+                        { "3.6kHz", "3600", "4kHz", "band4" },
+                        { "14kHz", "14000", "16kHz", "band5", "high", "treble" }
+                };
+                for (String[] keyGroup : keys) {
+                    double v = 50.0;
+                    for (String k : keyGroup) {
+                        if (bandObj.has(k)) {
+                            v = bandObj.optDouble(k, 50.0);
+                            break;
+                        }
+                    }
+                    eqBands.put(normalizeBandValueToPercent(v, v < 0.0));
+                }
+            } else if (!TextUtils.isEmpty(normPreset)) {
+                int[] defaults = getDefaultBandsForPreset(normPreset);
+                for (int b : defaults) eqBands.put(b);
+            } else {
+                JSONArray savedBands = saved.optJSONArray("eqBands");
+                if (savedBands != null && savedBands.length() == 5) {
+                    eqBands = savedBands;
+                } else {
+                    for (int b : getDefaultBandsForPreset("Normal")) eqBands.put(b);
+                }
+            }
+
+            if (TextUtils.isEmpty(normPreset) && bandsExplicit) {
+                normPreset = "Custom";
+            }
+
+            out.put("eqEnabled", eqEnabled);
+            out.put("eqPreset", normPreset);
+            out.put("hasBassBoost", hasBass);
+            out.put("bassBoost", bassBoost);
+            out.put("hasVirtualizer", hasVirtualizer);
+            out.put("virtualizer", virtualizer);
+            out.put("hasLoudness", hasLoudness);
+            out.put("loudness", loudness);
+            out.put("reverb", reverb);
+            out.put("eqBands", eqBands);
+            out.put("eqBandsExplicit", bandsExplicit);
+            out.put("updatedAt", System.currentTimeMillis());
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    private short mapReverbPreset(String reverbName) {
+        if (TextUtils.isEmpty(reverbName)) return PresetReverb.PRESET_NONE;
+        String r = reverbName.trim().toLowerCase(Locale.ROOT);
+        if (r.contains("plate")) return PresetReverb.PRESET_PLATE;
+        if (r.contains("large") && r.contains("hall")) return PresetReverb.PRESET_LARGEHALL;
+        if ((r.contains("medium") || r.contains("hall")) && r.contains("hall")) return PresetReverb.PRESET_MEDIUMHALL;
+        if (r.contains("large") && r.contains("room")) return PresetReverb.PRESET_LARGEROOM;
+        if (r.contains("medium") && r.contains("room")) return PresetReverb.PRESET_MEDIUMROOM;
+        if (r.contains("small") || r.contains("room")) return PresetReverb.PRESET_SMALLROOM;
+        return PresetReverb.PRESET_NONE;
+    }
+
+    private JSONObject applySystemEqualizerSettings(JSONObject eqConfig) {
+        JSONObject status = new JSONObject();
+        if (eqConfig == null) return status;
+        try {
+            KevinAgentPrefs.saveEqualizerStateJson(activity, eqConfig.toString());
+            boolean enabled = eqConfig.optBoolean("eqEnabled", true);
+            String presetName = eqConfig.optString("eqPreset", "");
+            int bassBoost = eqConfig.optInt("bassBoost", 0);
+            int virtualizer = eqConfig.optInt("virtualizer", 0);
+            int loudness = eqConfig.optInt("loudness", 0);
+            String reverb = eqConfig.optString("reverb", "");
+            JSONArray bands = eqConfig.optJSONArray("eqBands");
+            boolean bandsExplicit = eqConfig.optBoolean("eqBandsExplicit", false);
+
+            try {
+                if (systemEqualizer == null) {
+                    systemEqualizer = new Equalizer(0, 0);
+                }
+                systemEqualizer.setEnabled(enabled);
+                short numBands = systemEqualizer.getNumberOfBands();
+                short[] range = systemEqualizer.getBandLevelRange();
+                short minLvl = range != null && range.length >= 2 ? range[0] : (short) -1500;
+                short maxLvl = range != null && range.length >= 2 ? range[1] : (short) 1500;
+
+                boolean presetMatched = false;
+                if (enabled && !TextUtils.isEmpty(presetName) && !bandsExplicit && !"Custom".equalsIgnoreCase(presetName)) {
+                    short presetCount = systemEqualizer.getNumberOfPresets();
+                    for (short i = 0; i < presetCount; i++) {
+                        String sysName = systemEqualizer.getPresetName(i);
+                        if (sysName != null && (sysName.equalsIgnoreCase(presetName)
+                                || sysName.toLowerCase(Locale.ROOT).contains(presetName.toLowerCase(Locale.ROOT)))) {
+                            systemEqualizer.usePreset(i);
+                            presetMatched = true;
+                            break;
+                        }
+                    }
+                }
+                if (enabled && !presetMatched && bands != null && bands.length() > 0) {
+                    for (short b = 0; b < numBands; b++) {
+                        int srcIdx = bands.length() >= numBands ? b : (b * bands.length() / Math.max(1, (int) numBands));
+                        int pct = clampPercent(bands.optInt(Math.min(srcIdx, bands.length() - 1), 50));
+                        short lvl = (short) Math.round(minLvl + (pct / 100.0) * (maxLvl - minLvl));
+                        systemEqualizer.setBandLevel(b, lvl);
+                    }
+                }
+                status.put("equalizerActive", true);
+                status.put("bandCount", numBands);
+            } catch (Throwable t) {
+                status.put("equalizerActive", false);
+            }
+
+            try {
+                if (eqConfig.optBoolean("hasBassBoost", false) || !enabled) {
+                    if (systemBassBoost == null) {
+                        systemBassBoost = new BassBoost(0, 0);
+                    }
+                    systemBassBoost.setEnabled(enabled && bassBoost > 0);
+                    if (systemBassBoost.getStrengthSupported()) {
+                        short strength = (short) Math.max(0, Math.min(1000, bassBoost * 10));
+                        systemBassBoost.setStrength(strength);
+                    }
+                    status.put("bassBoostActive", true);
+                }
+            } catch (Throwable ignored) {}
+
+            try {
+                if (eqConfig.optBoolean("hasVirtualizer", false) || !enabled) {
+                    if (systemVirtualizer == null) {
+                        systemVirtualizer = new Virtualizer(0, 0);
+                    }
+                    systemVirtualizer.setEnabled(enabled && virtualizer > 0);
+                    if (systemVirtualizer.getStrengthSupported()) {
+                        short strength = (short) Math.max(0, Math.min(1000, virtualizer * 10));
+                        systemVirtualizer.setStrength(strength);
+                    }
+                    status.put("virtualizerActive", true);
+                }
+            } catch (Throwable ignored) {}
+
+            try {
+                if (!TextUtils.isEmpty(reverb) || !enabled) {
+                    if (systemPresetReverb == null) {
+                        systemPresetReverb = new PresetReverb(0, 0);
+                    }
+                    short rPreset = mapReverbPreset(reverb);
+                    systemPresetReverb.setEnabled(enabled && rPreset != PresetReverb.PRESET_NONE);
+                    systemPresetReverb.setPreset(rPreset);
+                    status.put("reverbActive", true);
+                }
+            } catch (Throwable ignored) {}
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT
+                        && (eqConfig.optBoolean("hasLoudness", false) || !enabled)) {
+                    if (systemLoudness == null) {
+                        systemLoudness = new LoudnessEnhancer(0);
+                    }
+                    systemLoudness.setEnabled(enabled && loudness > 0);
+                    systemLoudness.setTargetGain(Math.max(0, Math.min(1500, loudness * 15)));
+                    status.put("loudnessActive", true);
+                }
+            } catch (Throwable ignored) {}
+        } catch (Exception ignored) {}
+        return status;
+    }
+
+    private void reapplySavedEqualizerIfEnabled() {
+        try {
+            String raw = KevinAgentPrefs.getEqualizerStateJson(activity);
+            if (TextUtils.isEmpty(raw) || "{}".equals(raw)) return;
+            JSONObject saved = new JSONObject(raw);
+            if (saved.optBoolean("eqEnabled", false)) {
+                applySystemEqualizerSettings(saved);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    @JavascriptInterface
+    public String configureEqualizer(String eqJson) {
+        try {
+            JSONObject req = !TextUtils.isEmpty(eqJson) ? new JSONObject(eqJson) : new JSONObject();
+            JSONObject cfg = buildNormalizedEqualizerConfig(req, "equalizer");
+            JSONObject fx = applySystemEqualizerSettings(cfg);
+            JSONObject out = new JSONObject();
+            out.put("ok", true);
+            out.put("equalizerState", cfg);
+            out.put("audioFx", fx);
+            return out.toString();
+        } catch (Exception e) {
+            return "{\"ok\":false}";
+        }
+    }
+
+    @JavascriptInterface
+    public String getEqualizerStateJson() {
+        return KevinAgentPrefs.getEqualizerStateJson(activity);
     }
 }

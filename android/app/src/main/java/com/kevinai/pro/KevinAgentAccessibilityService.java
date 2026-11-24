@@ -1,13 +1,19 @@
 package com.kevinai.pro;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.GestureDescription;
+import android.content.Context;
 import android.content.Intent;
+import android.graphics.Path;
 import android.graphics.Rect;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.TextUtils;
+import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
@@ -29,6 +35,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
     private volatile boolean scanStepBusy = false;
     private long lastNavigationAt = 0L;
     private int consecutiveEmptyListScans = 0;
+    private Runnable pendingWindowPollRunnable = null;
 
     private final Map<String, Long> scannedChatsCooldown = Collections.synchronizedMap(
             new LinkedHashMap<String, Long>(48, 0.75f, true) {
@@ -64,7 +71,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                 }
             } else if ("com.google.android.youtube".equals(pkg)
                     && KevinAgentPrefs.isPendingYouTubePlay(this)) {
-                if (tryClickFirstYouTubeResult(root)) {
+                if (tryClickFirstYouTubeResult(root, pkg)) {
                     KevinAgentPrefs.clearPendingYouTubePlay(this);
                 }
             } else if (isLarkPlayerPackage(pkg)
@@ -77,6 +84,40 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         } finally {
             root.recycle();
         }
+    }
+
+    private void scheduleActiveWindowPoll(final String expectedPkg, long delayMs) {
+        if (TextUtils.isEmpty(expectedPkg)) return;
+        if (pendingWindowPollRunnable != null) {
+            mainHandler.removeCallbacks(pendingWindowPollRunnable);
+        }
+        pendingWindowPollRunnable = () -> {
+            pendingWindowPollRunnable = null;
+            AccessibilityNodeInfo freshRoot = getRootInActiveWindow();
+            if (freshRoot == null) return;
+            try {
+                CharSequence pkgSeq = freshRoot.getPackageName();
+                String activePkg = pkgSeq != null ? pkgSeq.toString() : "";
+                if ("com.google.android.youtube".equals(expectedPkg)
+                        && "com.google.android.youtube".equals(activePkg)
+                        && KevinAgentPrefs.isPendingYouTubePlay(KevinAgentAccessibilityService.this)) {
+                    if (tryClickFirstYouTubeResult(freshRoot, activePkg)) {
+                        KevinAgentPrefs.clearPendingYouTubePlay(KevinAgentAccessibilityService.this);
+                    }
+                } else if (isLarkPlayerPackage(expectedPkg)
+                        && isLarkPlayerPackage(activePkg)
+                        && KevinAgentPrefs.isPendingLarkActionActive(KevinAgentAccessibilityService.this)) {
+                    handleLarkPlayerAction(freshRoot, activePkg);
+                } else if (isAudiomackPackage(expectedPkg)
+                        && isAudiomackPackage(activePkg)
+                        && KevinAgentPrefs.isPendingAudiomackActionActive(KevinAgentAccessibilityService.this)) {
+                    handleAudiomackAction(freshRoot, activePkg);
+                }
+            } finally {
+                freshRoot.recycle();
+            }
+        };
+        mainHandler.postDelayed(pendingWindowPollRunnable, Math.max(250L, delayMs));
     }
 
     private void handleWhatsAppUnreadScan(AccessibilityNodeInfo root, String pkg) {
@@ -447,15 +488,107 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         return false;
     }
 
-    private boolean tryClickFirstYouTubeResult(AccessibilityNodeInfo root) {
+    private boolean isMusicActivelyPlaying(String playerHint) {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null && am.isMusicActive()) {
+                return true;
+            }
+            if ("lark".equals(playerHint)) {
+                org.json.JSONObject np = new org.json.JSONObject(KevinNotificationListenerService.getLarkNowPlayingJson(this));
+                if (np.optBoolean("isPlaying", false)) return true;
+            } else if ("audiomack".equals(playerHint)) {
+                org.json.JSONObject np = new org.json.JSONObject(KevinNotificationListenerService.getAudiomackNowPlayingJson(this));
+                if (np.optBoolean("isPlaying", false)) return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private boolean dispatchMediaPlayKey() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) return false;
+            long eventTime = SystemClock.uptimeMillis();
+            am.dispatchMediaKeyEvent(new KeyEvent(eventTime, eventTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY, 0));
+            am.dispatchMediaKeyEvent(new KeyEvent(eventTime, eventTime, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY, 0));
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean tryClickFirstYouTubeResult(AccessibilityNodeInfo root, String pkg) {
+        long now = System.currentTimeMillis();
+        if (clickExactPromoDismissButton(root)) {
+            lastNavigationAt = now;
+            scheduleActiveWindowPoll(pkg, 650L);
+            return false;
+        }
+
         List<AccessibilityNodeInfo> watchPlayer = root.findAccessibilityNodeInfosByViewId(
                 "com.google.android.youtube:id/player_view");
         if (watchPlayer != null && !watchPlayer.isEmpty()) {
-            return true;
+            Rect playerBounds = new Rect();
+            watchPlayer.get(0).getBoundsInScreen(playerBounds);
+            boolean isFullWatchPlayer = playerBounds.height() > 260;
+            if (isFullWatchPlayer) {
+                if (isMusicActivelyPlaying("youtube")) {
+                    return true;
+                }
+                List<AccessibilityNodeInfo> playCtrls = root.findAccessibilityNodeInfosByViewId(
+                        "com.google.android.youtube:id/player_control_play_pause_replay_button");
+                if (playCtrls != null && !playCtrls.isEmpty()) {
+                    CharSequence desc = playCtrls.get(0).getContentDescription();
+                    String d = desc != null ? desc.toString().toLowerCase(Locale.ROOT) : "";
+                    if (d.contains("play") && !d.contains("pause")) {
+                        playCtrls.get(0).performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                        return true;
+                    }
+                }
+                if (clickNodeByKeywords(root, new String[] { "play video", "play" }, false)) {
+                    return true;
+                }
+                dispatchMediaPlayKey();
+                return true;
+            }
         }
+
+        if (now - lastNavigationAt < 500L) {
+            return false;
+        }
+
         List<AccessibilityNodeInfo> videoTitles = root.findAccessibilityNodeInfosByViewId(
                 "com.google.android.youtube:id/title");
-        return clickFirstClickable(videoTitles);
+        if (videoTitles != null && !videoTitles.isEmpty()) {
+            for (AccessibilityNodeInfo titleNode : videoTitles) {
+                CharSequence t = titleNode.getText();
+                String s = t != null ? t.toString().trim().toLowerCase(Locale.ROOT) : "";
+                if (TextUtils.isEmpty(s) || s.length() < 3
+                        || s.equals("shorts") || s.equals("all") || s.equals("videos")
+                        || s.equals("sponsored") || s.startsWith("ad ")) {
+                    continue;
+                }
+                Rect b = new Rect();
+                titleNode.getBoundsInScreen(b);
+                if (b.top < 160) continue;
+                AccessibilityNodeInfo clickable = climbToClickableParent(titleNode, 5);
+                if (clickable != null && clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    lastNavigationAt = now;
+                    scheduleActiveWindowPoll(pkg, 900L);
+                    return false;
+                }
+            }
+        }
+
+        if (clickFirstPlayableResult(root, "")) {
+            lastNavigationAt = now;
+            scheduleActiveWindowPoll(pkg, 900L);
+            return false;
+        }
+
+        scheduleActiveWindowPoll(pkg, 750L);
+        return false;
     }
 
     private boolean clickFirstClickable(List<AccessibilityNodeInfo> nodes) {
@@ -484,7 +617,8 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
 
     private void handleLarkPlayerAction(AccessibilityNodeInfo root, String pkg) {
         long now = System.currentTimeMillis();
-        if (now - lastNavigationAt < 650L) {
+        if (now - lastNavigationAt < 550L) {
+            scheduleActiveWindowPoll(pkg, 620L);
             return;
         }
         String actionJson = KevinAgentPrefs.getPendingLarkActionJson(this);
@@ -494,7 +628,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         }
 
         int step = KevinAgentPrefs.incrementPendingLarkStep(this);
-        if (step > 28) {
+        if (step > 32) {
             KevinAgentPrefs.clearPendingLarkAction(this);
             return;
         }
@@ -514,6 +648,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             // Dismiss any non-blocking promo/skip/permission popups safely (exact match so we never click "Play Later" or "Skip Next")
             if (clickExactPromoDismissButton(root)) {
                 lastNavigationAt = now;
+                scheduleActiveWindowPoll(pkg, 600L);
                 return;
             }
 
@@ -522,26 +657,81 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                 return;
             }
 
+            if ("ensure_play".equals(action)) {
+                if (isMusicActivelyPlaying("lark")) {
+                    KevinAgentPrefs.clearPendingLarkAction(this);
+                    return;
+                }
+                if (tryClickExplicitPlayButton(root)) {
+                    lastNavigationAt = now;
+                    KevinAgentPrefs.clearPendingLarkAction(this);
+                    return;
+                }
+                if (step >= 4) {
+                    dispatchMediaPlayKey();
+                    KevinAgentPrefs.clearPendingLarkAction(this);
+                    return;
+                }
+                scheduleActiveWindowPoll(pkg, 650L);
+                return;
+            }
+
+            if ("equalizer".equals(action) || "eq".equals(action)
+                    || "set_equalizer".equals(action) || "toggle_equalizer".equals(action)
+                    || "bass_boost".equals(action)) {
+                handleEqualizerUiAutomation(root, pkg, task, step, now, true);
+                return;
+            }
+
             if ("play".equals(action) || "play_song".equals(action) || "search".equals(action)) {
                 String targetText = !TextUtils.isEmpty(songTitle) ? songTitle : query;
                 if (TextUtils.isEmpty(targetText)) {
                     // Play all / first song
-                    if (clickNodeByKeywords(root, new String[] { "shuffle all", "play all", "play" }, false)) {
+                    if (isMusicActivelyPlaying("lark")) {
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                        return;
+                    }
+                    if (clickNodeByKeywords(root, new String[] { "shuffle all", "play all", "play" }, false)
+                            || clickFirstPlayableResult(root, "")) {
                         KevinAgentPrefs.clearPendingLarkAction(this);
                         lastNavigationAt = now;
+                    } else {
+                        scheduleActiveWindowPoll(pkg, 650L);
                     }
                     return;
                 }
 
-                // 1) If already searched, try clicking matching song result
+                // 0) If we already clicked a result, ensure playback is actually running!
+                if (task.optBoolean("_clickedResult", false)) {
+                    if (isMusicActivelyPlaying("lark")) {
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                        return;
+                    }
+                    if (tryClickExplicitPlayButton(root)) {
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                        lastNavigationAt = now;
+                        return;
+                    }
+                    if (step >= 8) {
+                        dispatchMediaPlayKey();
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                    } else {
+                        scheduleActiveWindowPoll(pkg, 650L);
+                    }
+                    return;
+                }
+
+                // 1) If already searched, try clicking matching song result (or first playable track after results settle)
                 if (alreadySearched) {
-                    if (clickBestMatchingSongNode(root, targetText, artist)) {
+                    if (clickBestMatchingSongNode(root, targetText, artist)
+                            || (step >= 4 && clickFirstPlayableResult(root, targetText))) {
                         lastNavigationAt = now;
                         if ("search".equals(action)) {
                             KevinAgentPrefs.clearPendingLarkAction(this);
                         } else {
                             task.put("_clickedResult", true);
                             KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+                            scheduleActiveWindowPoll(pkg, 700L);
                         }
                         return;
                     }
@@ -558,43 +748,47 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                         KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
                         lastNavigationAt = now;
                         submitSearchNode(searchBox, root);
+                        scheduleActiveWindowPoll(pkg, 700L);
                         return;
                     }
                 }
 
                 // 3) If song is already visible right on the current list, click it directly!
-                if (!task.optBoolean("_clickedResult", false) && clickBestMatchingSongNode(root, targetText, artist)) {
+                if (clickBestMatchingSongNode(root, targetText, artist)) {
                     lastNavigationAt = now;
-                    KevinAgentPrefs.clearPendingLarkAction(this);
+                    task.put("_clickedResult", true);
+                    KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+                    scheduleActiveWindowPoll(pkg, 700L);
                     return;
                 }
 
                 // 4) Otherwise tap the Search icon/bar in Lark Player to open search
                 if (!alreadySearched && clickSearchTrigger(root, pkg)) {
                     lastNavigationAt = now;
+                    scheduleActiveWindowPoll(pkg, 650L);
                     return;
                 }
 
-                // 5) If we already clicked a result and a Play button is shown, click Play
-                if (task.optBoolean("_clickedResult", false)) {
-                    if (clickNodeByKeywords(root, new String[] { "play", "curanga", "pause" }, true)) {
-                        KevinAgentPrefs.clearPendingLarkAction(this);
-                        lastNavigationAt = now;
-                    } else if (step >= 10) {
-                        KevinAgentPrefs.clearPendingLarkAction(this);
-                    }
-                }
+                scheduleActiveWindowPoll(pkg, 700L);
                 return;
             }
 
             if ("play_all".equals(action) || "shuffle_all".equals(action) || "shuffle".equals(action)) {
-                if (clickNodeByKeywords(root, new String[] { "shuffle all", "shuffle", "play all", "play" }, true)) {
+                if (isMusicActivelyPlaying("lark") && task.optBoolean("_clickedResult", false)) {
                     KevinAgentPrefs.clearPendingLarkAction(this);
+                    return;
+                }
+                if (clickNodeByKeywords(root, new String[] { "shuffle all", "shuffle", "play all", "play" }, true)
+                        || clickFirstPlayableResult(root, "")) {
+                    task.put("_clickedResult", true);
+                    KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
                     lastNavigationAt = now;
+                    scheduleActiveWindowPoll(pkg, 700L);
                     return;
                 }
                 clickNodeByKeywords(root, new String[] { "songs", "music", "tracks", "local" }, false);
                 lastNavigationAt = now;
+                scheduleActiveWindowPoll(pkg, 650L);
                 return;
             }
 
@@ -808,7 +1002,8 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
 
     private void handleAudiomackAction(AccessibilityNodeInfo root, String pkg) {
         long now = System.currentTimeMillis();
-        if (now - lastNavigationAt < 650L) {
+        if (now - lastNavigationAt < 550L) {
+            scheduleActiveWindowPoll(pkg, 620L);
             return;
         }
         String actionJson = KevinAgentPrefs.getPendingAudiomackActionJson(this);
@@ -818,7 +1013,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         }
 
         int step = KevinAgentPrefs.incrementPendingAudiomackStep(this);
-        if (step > 30) {
+        if (step > 34) {
             KevinAgentPrefs.clearPendingAudiomackAction(this);
             return;
         }
@@ -838,11 +1033,19 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             // Dismiss Audiomack onboarding/upgrade/promo dialogs safely (exact text match)
             if (clickExactPromoDismissButton(root)) {
                 lastNavigationAt = now;
+                scheduleActiveWindowPoll(pkg, 600L);
                 return;
             }
 
             if ("open".equals(action) || "open_app".equals(action)) {
                 KevinAgentPrefs.clearPendingAudiomackAction(this);
+                return;
+            }
+
+            if ("equalizer".equals(action) || "eq".equals(action)
+                    || "set_equalizer".equals(action) || "toggle_equalizer".equals(action)
+                    || "bass_boost".equals(action)) {
+                handleEqualizerUiAutomation(root, pkg, task, step, now, false);
                 return;
             }
 
@@ -856,12 +1059,15 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             );
 
             if (needsSongSearchFirst && !clickedResult) {
-                if (alreadySearched && clickBestMatchingSongNode(root, targetText, artist)) {
+                if (alreadySearched && (clickBestMatchingSongNode(root, targetText, artist)
+                        || (step >= 4 && clickFirstPlayableResult(root, targetText)))) {
                     task.put("_clickedResult", true);
                     KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
                     lastNavigationAt = now;
                     if ("search".equals(action)) {
                         KevinAgentPrefs.clearPendingAudiomackAction(this);
+                    } else {
+                        scheduleActiveWindowPoll(pkg, 700L);
                     }
                     return;
                 }
@@ -876,6 +1082,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                         KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
                         lastNavigationAt = now;
                         submitSearchNode(searchBox, root);
+                        scheduleActiveWindowPoll(pkg, 700L);
                         return;
                     }
                 }
@@ -884,32 +1091,47 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                     task.put("_clickedResult", true);
                     KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
                     lastNavigationAt = now;
+                    scheduleActiveWindowPoll(pkg, 700L);
                     return;
                 }
 
                 if (!alreadySearched && clickSearchTrigger(root, pkg)) {
                     lastNavigationAt = now;
+                    scheduleActiveWindowPoll(pkg, 650L);
                     return;
                 }
+
+                scheduleActiveWindowPoll(pkg, 700L);
+                return;
             }
 
             // If we clicked a track/result for playback
             if ("play".equals(action) || "play_song".equals(action)) {
                 if (clickedResult) {
-                    if (clickNodeByKeywords(root, new String[] { "play", "play all", "shuffle", "curanga" }, true)) {
+                    if (isMusicActivelyPlaying("audiomack")) {
+                        KevinAgentPrefs.clearPendingAudiomackAction(this);
+                        return;
+                    }
+                    if (tryClickExplicitPlayButton(root)) {
                         KevinAgentPrefs.clearPendingAudiomackAction(this);
                         lastNavigationAt = now;
                         return;
                     }
                     if (step >= 10) {
+                        dispatchMediaPlayKey();
                         KevinAgentPrefs.clearPendingAudiomackAction(this);
+                    } else {
+                        scheduleActiveWindowPoll(pkg, 650L);
                     }
                     return;
                 }
                 if (TextUtils.isEmpty(targetText)) {
-                    if (clickNodeByKeywords(root, new String[] { "play", "play all", "shuffle", "trending" }, true)) {
+                    if (clickNodeByKeywords(root, new String[] { "play", "play all", "shuffle", "trending" }, true)
+                            || clickFirstPlayableResult(root, "")) {
                         KevinAgentPrefs.clearPendingAudiomackAction(this);
                         lastNavigationAt = now;
+                    } else {
+                        scheduleActiveWindowPoll(pkg, 650L);
                     }
                     return;
                 }
@@ -1170,6 +1392,18 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         return clickNodeByKeywords(root, new String[] { lowerTarget }, false);
     }
 
+    private boolean isSkippedTabOrUiLabel(String txtLower) {
+        if (TextUtils.isEmpty(txtLower)) return true;
+        return txtLower.equals("all") || txtLower.equals("songs") || txtLower.equals("music")
+                || txtLower.equals("videos") || txtLower.equals("artists") || txtLower.equals("albums")
+                || txtLower.equals("playlists") || txtLower.equals("folders") || txtLower.equals("local")
+                || txtLower.equals("online") || txtLower.equals("top") || txtLower.equals("shorts")
+                || txtLower.equals("channels") || txtLower.equals("search") || txtLower.equals("cancel")
+                || txtLower.equals("clear") || txtLower.equals("back") || txtLower.equals("sponsored")
+                || txtLower.equals("ad") || txtLower.equals("home") || txtLower.equals("trending")
+                || txtLower.equals("feed") || txtLower.equals("my library") || txtLower.equals("library");
+    }
+
     private boolean clickBestMatchingSongNode(AccessibilityNodeInfo root, String queryOrTitle, String artist) {
         if (root == null || TextUtils.isEmpty(queryOrTitle)) return false;
         String combined = (queryOrTitle + " " + (artist != null ? artist : "")).trim().toLowerCase(Locale.ROOT);
@@ -1185,7 +1419,8 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                     && !clean.equals("song")
                     && !clean.equals("curanga")
                     && !clean.equals("play")
-                    && !clean.equals("lark")) {
+                    && !clean.equals("lark")
+                    && !clean.equals("audiomack")) {
                 tokens.add(clean);
             }
         }
@@ -1196,25 +1431,32 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
         queue.add(root);
         int visited = 0;
-        while (!queue.isEmpty() && visited < 400) {
+        while (!queue.isEmpty() && visited < 450) {
             AccessibilityNodeInfo node = queue.poll();
             visited++;
             if (node == null) continue;
             CharSequence cls = node.getClassName();
-            boolean isEdit = cls != null && cls.toString().contains("EditText");
+            boolean isEdit = node.isEditable() || (cls != null && cls.toString().contains("EditText"));
             if (!isEdit) {
                 String txt = node.getText() != null ? node.getText().toString().trim().toLowerCase(Locale.ROOT) : "";
-                if (!TextUtils.isEmpty(txt) && txt.length() >= 2 && txt.length() <= 160) {
+                String desc = node.getContentDescription() != null ? node.getContentDescription().toString().trim().toLowerCase(Locale.ROOT) : "";
+                String checkStr = !TextUtils.isEmpty(txt) ? txt : desc;
+                if (!TextUtils.isEmpty(checkStr) && checkStr.length() >= 2 && checkStr.length() <= 180
+                        && !isSkippedTabOrUiLabel(checkStr)) {
                     int score = 0;
                     for (String tok : tokens) {
-                        if (txt.contains(tok)) score += 2;
+                        if (checkStr.contains(tok)) score += 2;
                     }
-                    if (txt.contains(queryOrTitle.toLowerCase(Locale.ROOT))) score += 5;
+                    if (checkStr.contains(queryOrTitle.toLowerCase(Locale.ROOT))) score += 5;
                     if (score > bestScore) {
                         AccessibilityNodeInfo clickable = climbToClickableParent(node, 5);
                         if (clickable != null) {
-                            bestScore = score;
-                            bestNode = clickable;
+                            Rect cb = new Rect();
+                            clickable.getBoundsInScreen(cb);
+                            if (cb.top > 130 && cb.height() >= 36) {
+                                bestScore = score;
+                                bestNode = clickable;
+                            }
                         }
                     }
                 }
@@ -1232,6 +1474,652 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         return false;
     }
 
+    private boolean clickFirstPlayableResult(AccessibilityNodeInfo root, String queryHint) {
+        if (root == null) return false;
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 400) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            CharSequence cls = node.getClassName();
+            String clsStr = cls != null ? cls.toString() : "";
+            if (clsStr.contains("RecyclerView") || clsStr.contains("ListView")) {
+                int cCount = node.getChildCount();
+                for (int i = 0; i < Math.min(cCount, 6); i++) {
+                    AccessibilityNodeInfo item = node.getChild(i);
+                    if (item == null || !item.isEnabled()) continue;
+                    Rect b = new Rect();
+                    item.getBoundsInScreen(b);
+                    if (b.height() >= 64 && b.top > 170) {
+                        String summary = collectSubtreeText(item).toLowerCase(Locale.ROOT);
+                        if (!isSkippedTabOrUiLabel(summary.trim())
+                                && !summary.contains("sponsored")
+                                && !summary.contains("history")) {
+                            if (item.isClickable() && item.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                                return true;
+                            }
+                            AccessibilityNodeInfo innerClick = findFirstClickableDescendant(item);
+                            if (innerClick != null && innerClick.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            int count = node.getChildCount();
+            for (int i = 0; i < count; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
+            }
+        }
+        return false;
+    }
+
+    private AccessibilityNodeInfo findFirstClickableDescendant(AccessibilityNodeInfo parent) {
+        if (parent == null) return null;
+        if (parent.isClickable() && parent.isEnabled() && !parent.isEditable()) {
+            return parent;
+        }
+        int count = parent.getChildCount();
+        for (int i = 0; i < count; i++) {
+            AccessibilityNodeInfo found = findFirstClickableDescendant(parent.getChild(i));
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private boolean tryClickExplicitPlayButton(AccessibilityNodeInfo root) {
+        if (root == null) return false;
+        String[] playKeywords = new String[] {
+                "play all", "shuffle all", "play video", "iv_play", "btn_play", "fab_play", "play_button", "play"
+        };
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 400) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            CharSequence cls = node.getClassName();
+            boolean isEdit = node.isEditable() || (cls != null && cls.toString().contains("EditText"));
+            if (!isEdit) {
+                String text = node.getText() != null ? node.getText().toString().trim().toLowerCase(Locale.ROOT) : "";
+                String desc = node.getContentDescription() != null ? node.getContentDescription().toString().trim().toLowerCase(Locale.ROOT) : "";
+                String viewId = node.getViewIdResourceName() != null ? node.getViewIdResourceName().toLowerCase(Locale.ROOT) : "";
+                if (text.equals("pause") || desc.equals("pause") || desc.startsWith("pause ")) {
+                    // Already playing
+                    return true;
+                }
+                for (String kw : playKeywords) {
+                    boolean matched = text.equals(kw) || desc.equals(kw)
+                            || (text.length() <= 24 && text.contains(kw) && !text.contains("later") && !text.contains("playlist"))
+                            || (desc.length() <= 28 && desc.contains(kw) && !desc.contains("later") && !desc.contains("playlist"))
+                            || (!TextUtils.isEmpty(viewId) && viewId.contains(kw) && !viewId.contains("playlist"));
+                    if (matched) {
+                        AccessibilityNodeInfo clickable = climbToClickableParent(node, 4);
+                        if (clickable != null && clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            int count = node.getChildCount();
+            for (int i = 0; i < count; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
+            }
+        }
+        return false;
+    }
+
+    private String collectSubtreeText(AccessibilityNodeInfo node) {
+        if (node == null) return "";
+        StringBuilder sb = new StringBuilder();
+        collectSubtreeTextRecursive(node, sb, 0);
+        return sb.toString().trim();
+    }
+
+    private void collectSubtreeTextRecursive(AccessibilityNodeInfo node, StringBuilder sb, int depth) {
+        if (node == null || depth > 4 || sb.length() > 260) return;
+        CharSequence t = node.getText();
+        CharSequence d = node.getContentDescription();
+        if (t != null && !TextUtils.isEmpty(t.toString().trim())) {
+            sb.append(t.toString().trim()).append(" ");
+        } else if (d != null && !TextUtils.isEmpty(d.toString().trim())) {
+            sb.append(d.toString().trim()).append(" ");
+        }
+        int c = node.getChildCount();
+        for (int i = 0; i < c; i++) {
+            collectSubtreeTextRecursive(node.getChild(i), sb, depth + 1);
+        }
+    }
+
+    private boolean isOnEqualizerScreen(AccessibilityNodeInfo root) {
+        if (root == null) return false;
+        int seekBarCount = 0;
+        int freqHints = 0;
+        boolean hasBassOrVirt = false;
+        boolean hasEqualizerHeader = false;
+
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 450) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            CharSequence cls = node.getClassName();
+            String clsStr = cls != null ? cls.toString() : "";
+            if (clsStr.contains("SeekBar") || node.getRangeInfo() != null) {
+                seekBarCount++;
+            }
+            String t = node.getText() != null ? node.getText().toString().trim().toLowerCase(Locale.ROOT) : "";
+            String d = node.getContentDescription() != null ? node.getContentDescription().toString().trim().toLowerCase(Locale.ROOT) : "";
+            String s = !TextUtils.isEmpty(t) ? t : d;
+            if (!TextUtils.isEmpty(s)) {
+                if (s.contains("60hz") || s.contains("230hz") || s.contains("910hz")
+                        || s.contains("3.6khz") || s.contains("14khz") || s.contains("1khz")
+                        || s.equals("60") || s.equals("230") || s.equals("910")) {
+                    freqHints++;
+                }
+                if (s.contains("bass boost") || s.contains("virtualizer") || s.contains("reverb")
+                        || s.contains("3d effect") || s.contains("surround")) {
+                    hasBassOrVirt = true;
+                }
+                if (s.equals("equalizer") || s.contains("sound effect") || s.contains("preset")) {
+                    hasEqualizerHeader = true;
+                }
+            }
+            int c = node.getChildCount();
+            for (int i = 0; i < c; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
+            }
+        }
+        return seekBarCount >= 2 || freqHints >= 2 || (hasEqualizerHeader && hasBassOrVirt);
+    }
+
+    private void handleEqualizerUiAutomation(
+            AccessibilityNodeInfo root,
+            String pkg,
+            org.json.JSONObject task,
+            int step,
+            long now,
+            boolean isLark
+    ) {
+        try {
+            if (!isOnEqualizerScreen(root)) {
+                // Step 0..N: Navigate into Equalizer screen inside Lark Player / Audiomack
+                String[] directEqKeywords = new String[] {
+                        "equalizer", "sound effect", "sound effects", "audio effect",
+                        "audio settings", "iv_eq", "btn_eq", "tv_eq"
+                };
+                if (clickNodeByKeywords(root, directEqKeywords, true)) {
+                    lastNavigationAt = now;
+                    scheduleActiveWindowPoll(pkg, 700L);
+                    return;
+                }
+
+                String navStage = task.optString("_eqNavStage", "");
+                if (!"opened_player".equals(navStage) && !"opened_menu".equals(navStage)) {
+                    // Try mini-player bar or menu/settings
+                    if (clickNodeByKeywords(root, new String[] {
+                            "mini_player", "play_bar", "player_bar", "bottom_player",
+                            "now playing", "iv_cover", "more", "menu", "drawer", "settings", "me"
+                    }, true)) {
+                        task.put("_eqNavStage", "opened_player");
+                        updatePendingEqTask(isLark, task);
+                        lastNavigationAt = now;
+                        scheduleActiveWindowPoll(pkg, 700L);
+                        return;
+                    }
+                } else if ("opened_player".equals(navStage)) {
+                    if (clickNodeByKeywords(root, new String[] {
+                            "more", "menu", "options", "overflow", "settings", "sound", "effect", "iv_more", "btn_more"
+                    }, true)) {
+                        task.put("_eqNavStage", "opened_menu");
+                        updatePendingEqTask(isLark, task);
+                        lastNavigationAt = now;
+                        scheduleActiveWindowPoll(pkg, 700L);
+                        return;
+                    }
+                }
+
+                if (step >= 8) {
+                    clearPendingEqTask(isLark);
+                } else {
+                    scheduleActiveWindowPoll(pkg, 700L);
+                }
+                return;
+            }
+
+            // We ARE on the Equalizer screen!
+            boolean eqEnabled = task.optBoolean("eqEnabled", true);
+            String eqPreset = task.optString("eqPreset", "").trim();
+            boolean hasBassBoost = task.optBoolean("hasBassBoost", false);
+            int bassBoost = task.optInt("bassBoost", 0);
+            boolean hasVirtualizer = task.optBoolean("hasVirtualizer", false);
+            int virtualizer = task.optInt("virtualizer", 0);
+            boolean hasLoudness = task.optBoolean("hasLoudness", false);
+            int loudness = task.optInt("loudness", 0);
+            String reverb = task.optString("reverb", "").trim();
+            org.json.JSONArray eqBands = task.optJSONArray("eqBands");
+            boolean eqBandsExplicit = task.optBoolean("eqBandsExplicit", false);
+
+            // 1) Master Equalizer Toggle Switch
+            if (!task.optBoolean("_eqSwitchDone", false)) {
+                AccessibilityNodeInfo eqSwitch = findMasterEqualizerSwitch(root);
+                if (eqSwitch != null && eqSwitch.isCheckable()) {
+                    boolean currentlyChecked = eqSwitch.isChecked();
+                    task.put("_eqSwitchDone", true);
+                    updatePendingEqTask(isLark, task);
+                    if (currentlyChecked != eqEnabled) {
+                        AccessibilityNodeInfo clickTarget = eqSwitch.isClickable() ? eqSwitch : climbToClickableParent(eqSwitch, 3);
+                        if (clickTarget != null && clickTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                            lastNavigationAt = now;
+                            if (!eqEnabled) {
+                                clearPendingEqTask(isLark);
+                                return;
+                            }
+                            scheduleActiveWindowPoll(pkg, 550L);
+                            return;
+                        }
+                    } else if (!eqEnabled) {
+                        clearPendingEqTask(isLark);
+                        return;
+                    }
+                } else {
+                    task.put("_eqSwitchDone", true);
+                    updatePendingEqTask(isLark, task);
+                    if (!eqEnabled) {
+                        clearPendingEqTask(isLark);
+                        return;
+                    }
+                }
+            }
+
+            // 2) Preset Selection (only when eqPreset requested and no explicit custom band override only)
+            if (!TextUtils.isEmpty(eqPreset) && !task.optBoolean("_eqPresetDone", false)) {
+                boolean dropdownOpened = task.optBoolean("_eqPresetDropdownOpened", false);
+                if (clickExactPresetOption(root, eqPreset, dropdownOpened)) {
+                    task.put("_eqPresetDone", true);
+                    updatePendingEqTask(isLark, task);
+                    lastNavigationAt = now;
+                    scheduleActiveWindowPoll(pkg, 550L);
+                    return;
+                }
+                if (!dropdownOpened) {
+                    if (openPresetSelectorOrScroll(root)) {
+                        task.put("_eqPresetDropdownOpened", true);
+                        updatePendingEqTask(isLark, task);
+                        lastNavigationAt = now;
+                        scheduleActiveWindowPoll(pkg, 550L);
+                        return;
+                    }
+                }
+                // Preset already active or unavailable cleanly mark done so sliders/effects proceed
+                task.put("_eqPresetDone", true);
+                updatePendingEqTask(isLark, task);
+            }
+
+            // 3) Sliders: 5-Band EQ (if explicit or Custom or no named preset) + Bass Boost + Virtualizer + Loudness
+            if (!task.optBoolean("_eqSlidersDone", false)) {
+                boolean shouldSetBands = eqBands != null && eqBands.length() > 0
+                        && (eqBandsExplicit || TextUtils.isEmpty(eqPreset) || "Custom".equalsIgnoreCase(eqPreset));
+                if (shouldSetBands || hasBassBoost || hasVirtualizer || hasLoudness) {
+                    applyAllEqualizerSliders(
+                            root,
+                            shouldSetBands ? eqBands : null,
+                            hasBassBoost ? bassBoost : -1,
+                            hasVirtualizer ? virtualizer : -1,
+                            hasLoudness ? loudness : -1
+                    );
+                }
+                task.put("_eqSlidersDone", true);
+                updatePendingEqTask(isLark, task);
+                if (!TextUtils.isEmpty(reverb)) {
+                    lastNavigationAt = now;
+                    scheduleActiveWindowPoll(pkg, 550L);
+                    return;
+                }
+            }
+
+            // 4) Reverb Preset Selection
+            if (!TextUtils.isEmpty(reverb) && !task.optBoolean("_eqReverbDone", false)) {
+                boolean reverbOpened = task.optBoolean("_eqReverbOpened", false);
+                if (clickExactOrContainsText(root, reverb)) {
+                    task.put("_eqReverbDone", true);
+                    updatePendingEqTask(isLark, task);
+                    clearPendingEqTask(isLark);
+                    lastNavigationAt = now;
+                    return;
+                }
+                if (!reverbOpened && clickNodeByKeywords(root, new String[] {
+                        "reverb", "none", "small room", "medium room", "large room", "medium hall", "large hall", "plate"
+                }, true)) {
+                    task.put("_eqReverbOpened", true);
+                    updatePendingEqTask(isLark, task);
+                    lastNavigationAt = now;
+                    scheduleActiveWindowPoll(pkg, 550L);
+                    return;
+                }
+            }
+
+            clearPendingEqTask(isLark);
+        } catch (Exception ignored) {
+            clearPendingEqTask(isLark);
+        }
+    }
+
+    private void updatePendingEqTask(boolean isLark, org.json.JSONObject task) {
+        if (isLark) {
+            KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+        } else {
+            KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
+        }
+    }
+
+    private void clearPendingEqTask(boolean isLark) {
+        if (isLark) {
+            KevinAgentPrefs.clearPendingLarkAction(this);
+        } else {
+            KevinAgentPrefs.clearPendingAudiomackAction(this);
+        }
+    }
+
+    private AccessibilityNodeInfo findMasterEqualizerSwitch(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> switches = new ArrayList<>();
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 400) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            CharSequence cls = node.getClassName();
+            String clsStr = cls != null ? cls.toString() : "";
+            if (node.isCheckable() || clsStr.contains("Switch") || clsStr.contains("ToggleButton")) {
+                switches.add(node);
+            }
+            int c = node.getChildCount();
+            for (int i = 0; i < c; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
+            }
+        }
+        if (switches.isEmpty()) return null;
+        AccessibilityNodeInfo topMost = null;
+        int minTop = Integer.MAX_VALUE;
+        for (AccessibilityNodeInfo sw : switches) {
+            AccessibilityNodeInfo parent = sw.getParent();
+            String nearText = parent != null ? collectSubtreeText(parent).toLowerCase(Locale.ROOT) : "";
+            if (nearText.contains("equalizer") || nearText.contains("eq") || nearText.contains("effect")) {
+                return sw;
+            }
+            Rect b = new Rect();
+            sw.getBoundsInScreen(b);
+            if (b.top < minTop) {
+                minTop = b.top;
+                topMost = sw;
+            }
+        }
+        return topMost;
+    }
+
+    private boolean clickExactPresetOption(AccessibilityNodeInfo root, String presetName, boolean dropdownOpen) {
+        if (root == null || TextUtils.isEmpty(presetName)) return false;
+        String target = presetName.trim().toLowerCase(Locale.ROOT);
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 450) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            String txt = node.getText() != null ? node.getText().toString().trim().toLowerCase(Locale.ROOT) : "";
+            String desc = node.getContentDescription() != null ? node.getContentDescription().toString().trim().toLowerCase(Locale.ROOT) : "";
+            if (txt.equals(target) || desc.equals(target)
+                    || (txt.length() <= 24 && txt.contains(target) && !txt.contains("preset"))) {
+                CharSequence cls = node.getClassName();
+                String clsStr = cls != null ? cls.toString() : "";
+                // Avoid endlessly clicking a closed Spinner showing the current preset name unless dropdown is open
+                if (!dropdownOpen && (clsStr.contains("Spinner") || (node.getParent() != null && node.getParent().getClassName() != null
+                        && node.getParent().getClassName().toString().contains("Spinner")))) {
+                    return true;
+                }
+                AccessibilityNodeInfo clickable = climbToClickableParent(node, 4);
+                if (clickable != null && clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    return true;
+                }
+            }
+            int c = node.getChildCount();
+            for (int i = 0; i < c; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
+            }
+        }
+        return false;
+    }
+
+    private boolean openPresetSelectorOrScroll(AccessibilityNodeInfo root) {
+        if (clickNodeByKeywords(root, new String[] {
+                "preset", "tv_preset", "spinner", "normal", "custom", "flat", "pop", "rock", "jazz", "classical", "dance", "hip hop"
+        }, true)) {
+            return true;
+        }
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 300) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            CharSequence cls = node.getClassName();
+            String clsStr = cls != null ? cls.toString() : "";
+            if (node.isScrollable() && (clsStr.contains("HorizontalScrollView") || clsStr.contains("RecyclerView"))) {
+                Rect b = new Rect();
+                node.getBoundsInScreen(b);
+                if (b.height() < 260) {
+                    return node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);
+                }
+            }
+            int c = node.getChildCount();
+            for (int i = 0; i < c; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
+            }
+        }
+        return false;
+    }
+
+    private void applyAllEqualizerSliders(
+            AccessibilityNodeInfo root,
+            org.json.JSONArray eqBands,
+            int bassBoostPct,
+            int virtualizerPct,
+            int loudnessPct
+    ) {
+        List<AccessibilityNodeInfo> allSeekBars = new ArrayList<>();
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 500) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            CharSequence cls = node.getClassName();
+            String clsStr = cls != null ? cls.toString() : "";
+            String viewId = node.getViewIdResourceName() != null ? node.getViewIdResourceName().toLowerCase(Locale.ROOT) : "";
+            if (clsStr.contains("SeekBar") || node.getRangeInfo() != null
+                    || viewId.contains("seekbar") || viewId.contains("slider") || viewId.contains("eq_bar")) {
+                allSeekBars.add(node);
+            }
+            int c = node.getChildCount();
+            for (int i = 0; i < c; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
+            }
+        }
+        if (allSeekBars.isEmpty()) return;
+
+        List<AccessibilityNodeInfo> verticalBars = new ArrayList<>();
+        List<AccessibilityNodeInfo> horizontalBars = new ArrayList<>();
+        java.util.Set<AccessibilityNodeInfo> alreadySet = new java.util.HashSet<>();
+
+        for (AccessibilityNodeInfo sb : allSeekBars) {
+            String vid = sb.getViewIdResourceName() != null ? sb.getViewIdResourceName().toLowerCase(Locale.ROOT) : "";
+            AccessibilityNodeInfo parent = sb.getParent();
+            String contextTxt = ((parent != null ? collectSubtreeText(parent) : "") + " " + vid).toLowerCase(Locale.ROOT);
+
+            if (bassBoostPct >= 0 && contextTxt.contains("bass")) {
+                setSeekBarProgressOrSwipe(sb, bassBoostPct);
+                alreadySet.add(sb);
+                continue;
+            }
+            if (virtualizerPct >= 0 && (contextTxt.contains("virtual") || contextTxt.contains("3d") || contextTxt.contains("surround"))) {
+                setSeekBarProgressOrSwipe(sb, virtualizerPct);
+                alreadySet.add(sb);
+                continue;
+            }
+            if (loudnessPct >= 0 && (contextTxt.contains("loud") || contextTxt.contains("preamp") || contextTxt.contains("gain"))) {
+                setSeekBarProgressOrSwipe(sb, loudnessPct);
+                alreadySet.add(sb);
+                continue;
+            }
+            if (eqBands != null && eqBands.length() >= 5) {
+                int bandIdx = -1;
+                if (contextTxt.contains("60")) bandIdx = 0;
+                else if (contextTxt.contains("230") || contextTxt.contains("250")) bandIdx = 1;
+                else if (contextTxt.contains("910") || contextTxt.contains("1k")) bandIdx = 2;
+                else if (contextTxt.contains("3.6") || contextTxt.contains("3600") || contextTxt.contains("4k")) bandIdx = 3;
+                else if (contextTxt.contains("14k") || contextTxt.contains("16k")) bandIdx = 4;
+                if (bandIdx >= 0) {
+                    setSeekBarProgressOrSwipe(sb, eqBands.optInt(bandIdx, 50));
+                    alreadySet.add(sb);
+                    continue;
+                }
+            }
+
+            Rect r = new Rect();
+            sb.getBoundsInScreen(r);
+            if (r.height() > r.width() * 1.15f) {
+                verticalBars.add(sb);
+            } else {
+                horizontalBars.add(sb);
+            }
+        }
+
+        if (eqBands != null && eqBands.length() > 0 && !verticalBars.isEmpty()) {
+            verticalBars.sort((a, b) -> {
+                Rect ra = new Rect();
+                Rect rb = new Rect();
+                a.getBoundsInScreen(ra);
+                b.getBoundsInScreen(rb);
+                return Integer.compare(ra.left, rb.left);
+            });
+            for (int i = 0; i < verticalBars.size() && i < eqBands.length(); i++) {
+                AccessibilityNodeInfo bar = verticalBars.get(i);
+                if (!alreadySet.contains(bar)) {
+                    setSeekBarProgressOrSwipe(bar, eqBands.optInt(i, 50));
+                    alreadySet.add(bar);
+                }
+            }
+        }
+
+        horizontalBars.sort((a, b) -> {
+            Rect ra = new Rect();
+            Rect rb = new Rect();
+            a.getBoundsInScreen(ra);
+            b.getBoundsInScreen(rb);
+            int cmpTop = Integer.compare(ra.top, rb.top);
+            return cmpTop != 0 ? cmpTop : Integer.compare(ra.left, rb.left);
+        });
+        int hIdx = 0;
+        if (bassBoostPct >= 0 && hIdx < horizontalBars.size()) {
+            boolean alreadyAppliedBass = false;
+            for (AccessibilityNodeInfo setNode : alreadySet) {
+                String v = setNode.getViewIdResourceName() != null ? setNode.getViewIdResourceName().toLowerCase(Locale.ROOT) : "";
+                if (v.contains("bass")) {
+                    alreadyAppliedBass = true;
+                    break;
+                }
+            }
+            if (!alreadyAppliedBass) {
+                setSeekBarProgressOrSwipe(horizontalBars.get(hIdx++), bassBoostPct);
+            }
+        }
+        if (virtualizerPct >= 0 && hIdx < horizontalBars.size()) {
+            boolean alreadyAppliedVirt = false;
+            for (AccessibilityNodeInfo setNode : alreadySet) {
+                String v = setNode.getViewIdResourceName() != null ? setNode.getViewIdResourceName().toLowerCase(Locale.ROOT) : "";
+                if (v.contains("virt") || v.contains("3d")) {
+                    alreadyAppliedVirt = true;
+                    break;
+                }
+            }
+            if (!alreadyAppliedVirt) {
+                setSeekBarProgressOrSwipe(horizontalBars.get(hIdx++), virtualizerPct);
+            }
+        }
+        if (loudnessPct >= 0 && hIdx < horizontalBars.size()) {
+            setSeekBarProgressOrSwipe(horizontalBars.get(hIdx), loudnessPct);
+        }
+    }
+
+    private void setSeekBarProgressOrSwipe(AccessibilityNodeInfo seekBar, int percent) {
+        if (seekBar == null) return;
+        int clampedPct = Math.max(0, Math.min(100, percent));
+        boolean progressSet = false;
+        AccessibilityNodeInfo.RangeInfo range = seekBar.getRangeInfo();
+        if (range != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            float min = range.getMin();
+            float max = range.getMax();
+            if (max > min) {
+                float targetVal = min + (clampedPct / 100.0f) * (max - min);
+                Bundle args = new Bundle();
+                args.putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_FLOAT, targetVal);
+                progressSet = seekBar.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.getId(), args);
+            }
+        }
+
+        if (!progressSet && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            Rect bounds = new Rect();
+            seekBar.getBoundsInScreen(bounds);
+            if (bounds.width() > 10 && bounds.height() > 10) {
+                Path path = new Path();
+                float ratio = clampedPct / 100.0f;
+                if (bounds.height() > bounds.width() * 1.15f) {
+                    int padY = Math.min(16, bounds.height() / 10);
+                    float usableH = Math.max(10, bounds.height() - 2 * padY);
+                    float startY = bounds.centerY();
+                    float targetY = (bounds.bottom - padY) - ratio * usableH;
+                    if (Math.abs(targetY - startY) < 4f) {
+                        startY = Math.min(bounds.bottom - padY, targetY + 8f);
+                    }
+                    float cx = bounds.centerX();
+                    path.moveTo(cx, startY);
+                    path.lineTo(cx, targetY);
+                } else {
+                    int padX = Math.min(16, bounds.width() / 10);
+                    float usableW = Math.max(10, bounds.width() - 2 * padX);
+                    float startX = bounds.centerX();
+                    float targetX = (bounds.left + padX) + ratio * usableW;
+                    if (Math.abs(targetX - startX) < 4f) {
+                        startX = Math.max(bounds.left + padX, targetX - 8f);
+                    }
+                    float cy = bounds.centerY();
+                    path.moveTo(startX, cy);
+                    path.lineTo(targetX, cy);
+                }
+                GestureDescription.Builder builder = new GestureDescription.Builder();
+                builder.addStroke(new GestureDescription.StrokeDescription(path, 0L, 160L));
+                dispatchGesture(builder.build(), null, null);
+            }
+        }
+    }
+
     private boolean clickNodeByKeywords(AccessibilityNodeInfo root, String[] keywords, boolean checkViewId) {
         if (root == null || keywords == null || keywords.length == 0) return false;
         java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
@@ -1242,7 +2130,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             visited++;
             if (node == null) continue;
             CharSequence cls = node.getClassName();
-            boolean isEdit = cls != null && cls.toString().contains("EditText");
+            boolean isEdit = node.isEditable() || (cls != null && cls.toString().contains("EditText"));
             if (!isEdit) {
                 String text = node.getText() != null ? node.getText().toString().trim().toLowerCase(Locale.ROOT) : "";
                 String desc = node.getContentDescription() != null ? node.getContentDescription().toString().trim().toLowerCase(Locale.ROOT) : "";
@@ -1275,6 +2163,10 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        if (pendingWindowPollRunnable != null) {
+            mainHandler.removeCallbacks(pendingWindowPollRunnable);
+            pendingWindowPollRunnable = null;
+        }
         scanExecutor.shutdownNow();
         super.onDestroy();
     }
