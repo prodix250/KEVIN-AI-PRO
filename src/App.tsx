@@ -8,7 +8,7 @@ import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settin
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, playWhatsAppSound, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, playWhatsAppSound, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource, playSongInLarkPlayer, getDeviceSongs, DeviceSong } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
@@ -2532,6 +2532,7 @@ export default function App() {
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-xl bg-[#075E54] text-white flex items-center justify-center text-lg shrink-0">
                             {message.action.name === 'open_youtube' || message.action.name === 'open_audiomack' ? '▶️' :
+                              message.action.name === 'open_lark_player' || message.action.name === 'query_device_music' ? '🎵' :
                               message.action.name === 'make_call' ? '📞' :
                               message.action.name === 'send_sms' ? '📩' :
                               message.action.name === 'open_whatsapp' || message.action.name === 'configure_whatsapp_autoreply' || message.action.name === 'scan_whatsapp_chats' ? '💬' :
@@ -2555,6 +2556,23 @@ export default function App() {
                                           : 'Kevin AI Device Action'}
                             </p>
                           </div>
+                          {(message.action.name === 'open_lark_player' || message.action.name === 'query_device_music') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const q = message.action!.songTitle || message.action!.args?.query || '';
+                                playSongInLarkPlayer(q, message.action!.songTitle, message.action!.artist);
+                                showToastMessage(
+                                  message.action!.songTitle
+                                    ? `🎵 Curanga "${message.action!.songTitle}" muri Lark Player!`
+                                    : '🎵 Fungura Lark Player!'
+                                );
+                              }}
+                              className="shrink-0 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] px-3.5 py-1.5 text-xs font-bold text-white cursor-pointer shadow-sm flex items-center gap-1.5"
+                            >
+                              <Play size={12} fill="currentColor" /> Lark Player
+                            </button>
+                          )}
                           {message.action.status === 'needs_permission' ? (
                             <button
                               type="button"
@@ -2627,6 +2645,40 @@ export default function App() {
                             </button>
                           ) : null}
                         </div>
+
+                        {(message.action.name === 'open_lark_player' || message.action.name === 'query_device_music') && message.action.songs && message.action.songs.length > 0 && (
+                          <div className="space-y-1.5 pt-1.5">
+                            <div className="flex items-center justify-between text-[11px] font-bold text-gray-600 dark:text-gray-300 px-1">
+                              <span>Indirimbo zo muri telefone ({message.action.songs.length}):</span>
+                              <span className="text-[#00a884]">Lark Player Ready 🎧</span>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                              {message.action.songs.slice(0, 20).map((song) => (
+                                <div
+                                  key={song.id || song.uri}
+                                  className="flex items-center justify-between gap-2 rounded-lg bg-white dark:bg-[#111b21] px-3 py-2 border border-gray-200 dark:border-[#2f3b43] hover:border-[#00a884] transition-colors"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold text-gray-800 dark:text-[#e9edef] truncate">{song.title}</p>
+                                    <p className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate">
+                                      {song.artist || 'Unknown Artist'}{song.album ? ` • ${song.album}` : ''}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      playSongInLarkPlayer(song.uri || song.id, song.title, song.artist);
+                                      showToastMessage(`🎵 Curanga "${song.title}" muri Lark Player!`);
+                                    }}
+                                    className="shrink-0 rounded-full bg-[#00a884] hover:bg-[#075E54] px-3 py-1 text-[11px] font-bold text-white cursor-pointer flex items-center gap-1"
+                                  >
+                                    <Play size={10} fill="currentColor" /> Curanga
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
                         {message.action.status === 'choose_contact' && message.action.contactMatches && (
                           <div className="space-y-1.5 pt-1">
@@ -3830,6 +3882,12 @@ export default function App() {
                       <div className={`px-2.5 py-1.5 rounded-lg font-semibold ${nativeAgentStatus.hasContactsPermission ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200' : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}>
                         Contacts: {nativeAgentStatus.hasContactsPermission ? 'Yemewe' : 'Ntiraboneka'}
                       </div>
+                      <div className={`px-2.5 py-1.5 rounded-lg font-semibold ${nativeAgentStatus.hasMusicPermission ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200' : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}>
+                        Music Access: {nativeAgentStatus.hasMusicPermission ? 'Yemewe' : 'Ntiraboneka'}
+                      </div>
+                      <div className={`px-2.5 py-1.5 rounded-lg font-semibold ${nativeAgentStatus.larkPlayerInstalled ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200' : 'bg-blue-500/20 text-blue-800 dark:text-blue-200'}`}>
+                        Lark Player: {nativeAgentStatus.larkPlayerInstalled ? 'Installed' : 'Ready'}
+                      </div>
                       <button
                         type="button"
                         onClick={() => (window as any).KevinAgentBridge?.openAccessibilitySettings?.()}
@@ -3857,13 +3915,13 @@ export default function App() {
                         Kanda &ldquo;Accessibility: Fungura&rdquo; wemerere &ldquo;Kevin AI Full Agent&rdquo; kugira ngo ubutumwa bwa WhatsApp buhite bukanda Send ako kanya.
                       </p>
                     )}
-                    {(!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission || !nativeAgentStatus.hasMicPermission) && (
+                    {(!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission || !nativeAgentStatus.hasMicPermission || !nativeAgentStatus.hasMusicPermission) && (
                       <button
                         type="button"
                         onClick={() => (window as any).KevinAgentBridge?.requestAgentPermissions?.()}
                         className="w-full py-2 rounded-lg bg-[#00a884] hover:bg-[#075E54] text-white text-xs font-bold cursor-pointer"
                       >
-                        Saba Permissions (SMS, Direct Call, Contacts &amp; Mic)
+                        Saba Permissions (SMS, Call, Contacts, Mic &amp; Audio Music)
                       </button>
                     )}
                   </div>

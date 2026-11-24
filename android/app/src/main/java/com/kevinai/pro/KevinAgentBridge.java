@@ -116,6 +116,11 @@ public class KevinAgentBridge {
             obj.put("hasNotificationPermission", Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
                     || ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED);
             obj.put("speechRecognizerAvailable", SpeechRecognizer.isRecognitionAvailable(activity));
+            boolean hasAudioPerm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                    ? ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+                    : ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+            obj.put("hasMusicPermission", hasAudioPerm);
+            obj.put("larkPlayerInstalled", findInstalledLarkPlayerPackage() != null);
             return obj.toString();
         } catch (Exception e) {
             return "{\"isAndroid\":true}";
@@ -147,7 +152,10 @@ public class KevinAgentBridge {
             perms.add(Manifest.permission.READ_CONTACTS);
             perms.add(Manifest.permission.RECORD_AUDIO);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                perms.add(Manifest.permission.READ_MEDIA_AUDIO);
                 perms.add(Manifest.permission.POST_NOTIFICATIONS);
+            } else {
+                perms.add(Manifest.permission.READ_EXTERNAL_STORAGE);
             }
             ActivityCompat.requestPermissions(
                     activity,
@@ -533,6 +541,212 @@ public class KevinAgentBridge {
                     activity.startActivity(fallback);
                 } catch (Exception ignored) {}
             }
+        });
+        return true;
+    }
+
+    public String findInstalledLarkPlayerPackage() {
+        PackageManager pm = activity.getPackageManager();
+        String[] candidatePkgs = new String[] {
+                "com.gemini.larkplayer",
+                "com.larkplayer.music",
+                "com.dywx.larkplayer",
+                "com.larkplayer"
+        };
+        for (String pkg : candidatePkgs) {
+            try {
+                pm.getPackageInfo(pkg, 0);
+                return pkg;
+            } catch (Exception ignored) {}
+        }
+        try {
+            List<android.content.pm.ApplicationInfo> apps = pm.getInstalledApplications(0);
+            for (android.content.pm.ApplicationInfo app : apps) {
+                if (app.packageName != null && app.packageName.toLowerCase(Locale.ROOT).contains("larkplayer")) {
+                    return app.packageName;
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    @JavascriptInterface
+    public String lookupDeviceMusicJson(String query) {
+        boolean hasPerm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                ? ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+                : ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+        if (!hasPerm) {
+            return "[]";
+        }
+        JSONArray results = new JSONArray();
+        String normalizedQuery = normalizeForSearch(query);
+        String[] queryTokens = TextUtils.isEmpty(normalizedQuery)
+                ? new String[0]
+                : normalizedQuery.split("\\s+");
+        int limit = TextUtils.isEmpty(normalizedQuery) ? 500 : 80;
+
+        String[] projection = new String[] {
+                android.provider.MediaStore.Audio.Media._ID,
+                android.provider.MediaStore.Audio.Media.TITLE,
+                android.provider.MediaStore.Audio.Media.ARTIST,
+                android.provider.MediaStore.Audio.Media.ALBUM,
+                android.provider.MediaStore.Audio.Media.DURATION,
+                android.provider.MediaStore.Audio.Media.DATA
+        };
+        String selection = android.provider.MediaStore.Audio.Media.IS_MUSIC + " != 0";
+
+        try (Cursor cursor = activity.getContentResolver().query(
+                android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                android.provider.MediaStore.Audio.Media.TITLE + " ASC"
+        )) {
+            if (cursor == null) return "[]";
+            int idCol = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media._ID);
+            int titleCol = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media.TITLE);
+            int artistCol = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media.ARTIST);
+            int albumCol = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media.ALBUM);
+            int durCol = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media.DURATION);
+            int dataCol = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media.DATA);
+
+            while (cursor.moveToNext() && results.length() < limit) {
+                long id = idCol >= 0 ? cursor.getLong(idCol) : 0L;
+                String title = titleCol >= 0 ? cursor.getString(titleCol) : "";
+                String artist = artistCol >= 0 ? cursor.getString(artistCol) : "";
+                String album = albumCol >= 0 ? cursor.getString(albumCol) : "";
+                long duration = durCol >= 0 ? cursor.getLong(durCol) : 0L;
+                String path = dataCol >= 0 ? cursor.getString(dataCol) : "";
+
+                if (TextUtils.isEmpty(title)) continue;
+
+                if (queryTokens.length > 0) {
+                    String normTitle = normalizeForSearch(title);
+                    String normArtist = normalizeForSearch(artist);
+                    String normAlbum = normalizeForSearch(album);
+                    boolean allMatch = true;
+                    for (String token : queryTokens) {
+                        if (!normTitle.contains(token) && !normArtist.contains(token) && !normAlbum.contains(token)) {
+                            allMatch = false;
+                            break;
+                        }
+                    }
+                    if (!allMatch) continue;
+                }
+
+                JSONObject song = new JSONObject();
+                song.put("id", String.valueOf(id));
+                song.put("title", title.trim());
+                song.put("artist", TextUtils.isEmpty(artist) || "<unknown>".equalsIgnoreCase(artist) ? "" : artist.trim());
+                song.put("album", TextUtils.isEmpty(album) || "<unknown>".equalsIgnoreCase(album) ? "" : album.trim());
+                song.put("durationMs", duration);
+                song.put("uri", "content://media/external/audio/media/" + id);
+                song.put("path", path != null ? path : "");
+                results.put(song);
+            }
+        } catch (Exception ignored) {
+            return "[]";
+        }
+        return results.toString();
+    }
+
+    @JavascriptInterface
+    public boolean playInLarkPlayer(String songIdOrQuery, String songTitle, String artist) {
+        activity.runOnUiThread(() -> {
+            try {
+                String larkPkg = findInstalledLarkPlayerPackage();
+                Uri songContentUri = null;
+                String resolvedTitle = songTitle;
+                String resolvedArtist = artist;
+
+                if (!TextUtils.isEmpty(songIdOrQuery) && songIdOrQuery.startsWith("content://")) {
+                    songContentUri = Uri.parse(songIdOrQuery);
+                } else {
+                    String searchQuery = !TextUtils.isEmpty(songTitle) ? songTitle : songIdOrQuery;
+                    if (!TextUtils.isEmpty(searchQuery)) {
+                        String[] projection = new String[] {
+                                android.provider.MediaStore.Audio.Media._ID,
+                                android.provider.MediaStore.Audio.Media.TITLE,
+                                android.provider.MediaStore.Audio.Media.ARTIST
+                        };
+                        String selection = android.provider.MediaStore.Audio.Media.IS_MUSIC + " != 0 AND ("
+                                + android.provider.MediaStore.Audio.Media.TITLE + " LIKE ? OR "
+                                + android.provider.MediaStore.Audio.Media.ARTIST + " LIKE ?)";
+                        String[] selectionArgs = new String[] { "%" + searchQuery + "%", "%" + searchQuery + "%" };
+                        try (Cursor cursor = activity.getContentResolver().query(
+                                android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                projection,
+                                selection,
+                                selectionArgs,
+                                null
+                        )) {
+                            if (cursor != null && cursor.moveToFirst()) {
+                                int idIdx = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media._ID);
+                                int titleIdx = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media.TITLE);
+                                int artistIdx = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media.ARTIST);
+                                if (idIdx >= 0) {
+                                    long id = cursor.getLong(idIdx);
+                                    songContentUri = Uri.withAppendedPath(android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
+                                }
+                                if (titleIdx >= 0 && TextUtils.isEmpty(resolvedTitle)) {
+                                    resolvedTitle = cursor.getString(titleIdx);
+                                }
+                                if (artistIdx >= 0 && TextUtils.isEmpty(resolvedArtist)) {
+                                    resolvedArtist = cursor.getString(artistIdx);
+                                }
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                }
+
+                if (songContentUri != null) {
+                    Intent playIntent = new Intent(Intent.ACTION_VIEW);
+                    playIntent.setDataAndType(songContentUri, "audio/*");
+                    playIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    if (larkPkg != null) {
+                        playIntent.setPackage(larkPkg);
+                    }
+                    try {
+                        activity.startActivity(playIntent);
+                        return;
+                    } catch (Exception ignored) {}
+                }
+
+                String queryToSearch = !TextUtils.isEmpty(songTitle) ? songTitle : songIdOrQuery;
+                if (!TextUtils.isEmpty(queryToSearch)) {
+                    Intent searchIntent = new Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
+                    searchIntent.putExtra(android.app.SearchManager.QUERY, queryToSearch);
+                    if (!TextUtils.isEmpty(resolvedArtist)) {
+                        searchIntent.putExtra(android.provider.MediaStore.EXTRA_MEDIA_ARTIST, resolvedArtist);
+                    }
+                    if (!TextUtils.isEmpty(resolvedTitle)) {
+                        searchIntent.putExtra(android.provider.MediaStore.EXTRA_MEDIA_TITLE, resolvedTitle);
+                    }
+                    searchIntent.putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*");
+                    searchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (larkPkg != null) {
+                        searchIntent.setPackage(larkPkg);
+                    }
+                    try {
+                        activity.startActivity(searchIntent);
+                        return;
+                    } catch (Exception ignored) {}
+                }
+
+                if (larkPkg != null) {
+                    Intent launchIntent = activity.getPackageManager().getLaunchIntentForPackage(larkPkg);
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        activity.startActivity(launchIntent);
+                        return;
+                    }
+                }
+
+                Intent genericIntent = new Intent(Intent.ACTION_MAIN);
+                genericIntent.addCategory(Intent.CATEGORY_APP_MUSIC);
+                genericIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(genericIntent);
+            } catch (Exception ignored) {}
         });
         return true;
     }

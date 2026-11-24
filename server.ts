@@ -110,7 +110,11 @@ You are a full autonomous agent with direct permission-backed control over apps 
 - Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately. For phone numbers in Rwanda, ensure the country code +250 is used (e.g. +250788123456 or 250788123456 instead of 0788123456) so WhatsApp can deliver the message immediately without missing country code errors. In the 'message' parameter, write ONLY ONE single natural human message matching the user's/recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions.
 - WhatsApp Auto-Reply Mode: When the user asks you to enable, disable, stop, or pause WhatsApp auto-reply for a specific duration (e.g., 'ujye unsubiriza kuri whatsapp', 'hagarika gusubiza kuri whatsapp iminota 30', 'pause whatsapp auto-reply for 1 hour', 'funga auto reply'), ALWAYS call configure_whatsapp_autoreply(enabled, reply_style, pause_minutes).
 - Check All WhatsApp Chats & Reply to Unreplied Messages: When the user asks you to check their WhatsApp chats and reply to unread/unreplied messages (e.g., 'reba muri whatsapp zanjye usubize ubutumwa budasubije', 'check all whatsapp chats and reply'), ALWAYS call scan_whatsapp_chats().
-- Calls & Other Apps: Use make_call, open_audiomack, open_lark_player, open_camera, or open_app ONLY when explicitly requested by the user (never guess or fabricate targets when uncertain).`;
+- Lark Player & Local Phone Music:
+  * You have 100% full autonomous access to Lark Player and all local audio songs stored on the user's phone.
+  * When the user asks to play a song on Lark Player or local phone audio (e.g., 'curanga ... kuri Lark Player', 'play ... on Lark Player', 'curanga indirimbo zo muri telefone', 'curangira kuri lark'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately.
+  * When the user asks you to check, list, find local songs, or organize/create a playlist of songs on their phone (e.g., 'reba indirimbo ziri muri telefone', 'nkorera playlist y'indirimbo za...', 'shyira indirimbo ku murongo muri Lark Player'), call query_device_music(query) or open_lark_player(query, song_title, artist, playlist_name, 'create_playlist').
+- Calls & Other Apps: Use make_call, open_audiomack, open_camera, or open_app ONLY when explicitly requested by the user (never guess or fabricate targets when uncertain).`;
 
 const deviceActionDeclarations: FunctionDeclaration[] = [
   {
@@ -135,10 +139,27 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: "open_lark_player",
-    description: "Open Lark Player and play/search the requested song or artist.",
+    description: "Play music directly in Lark Player or organize/create a playlist from local device songs.",
     parametersJsonSchema: {
       type: "object",
-      properties: { query: { type: "string" } }
+      properties: {
+        query: { type: "string", description: "Song title, artist, album, or genre to play in Lark Player." },
+        song_title: { type: "string", description: "Exact song title to play." },
+        artist: { type: "string", description: "Artist name of the song." },
+        playlist_name: { type: "string", description: "Optional name of the playlist to create or play." },
+        action: { type: "string", enum: ["play", "search", "create_playlist", "list_songs"], description: "Action to perform in Lark Player (default: play)." }
+      }
+    }
+  },
+  {
+    name: "query_device_music",
+    description: "Scan, search, and list local audio/music songs stored on the user's phone to browse the library or create a playlist.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query or artist name to filter device songs, or leave empty to list library." },
+        genre: { type: "string", description: "Optional genre filter." }
+      }
     }
   },
   {

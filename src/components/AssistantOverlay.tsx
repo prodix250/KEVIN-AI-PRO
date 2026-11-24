@@ -20,6 +20,7 @@ import {
   formatWhatsAppPhoneNumber,
   GroundingSource,
   playWhatsAppSound,
+  playSongInLarkPlayer,
 } from '../services/geminiService';
 
 interface AssistantOverlayProps {
@@ -1046,7 +1047,34 @@ export default function AssistantOverlay({
                           {action.name === 'make_call' ? 'Emerera & Hamagara' : 'Emerera & Ohereza'}
                         </button>
                       )}
+                      {(action.name === 'open_lark_player' || action.name === 'query_device_music') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playSongInLarkPlayer(action.songTitle || action.args?.query || '', action.songTitle, action.artist);
+                          }}
+                          className="shrink-0 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] px-3 py-1 text-[11px] font-bold text-white cursor-pointer flex items-center gap-1"
+                        >
+                          <Play size={10} fill="currentColor" /> Lark Player
+                        </button>
+                      )}
                     </div>
+
+                    {(action.name === 'open_lark_player' || action.name === 'query_device_music') && action.songs && action.songs.length > 0 && (
+                      <div className="space-y-1 max-h-36 overflow-y-auto pt-1">
+                        {action.songs.slice(0, 6).map((s) => (
+                          <button
+                            key={s.id || s.uri}
+                            type="button"
+                            onClick={() => playSongInLarkPlayer(s.uri || s.id, s.title, s.artist)}
+                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] text-xs cursor-pointer hover:border-[#00a884]"
+                          >
+                            <span className="font-bold truncate text-left">{s.title}{s.artist ? ` - ${s.artist}` : ''}</span>
+                            <span className="text-[#00a884] text-[11px] font-semibold shrink-0 ml-1">▶ Curanga</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     {action.status === 'choose_contact' && action.contactMatches && (
                       <div className="space-y-1">

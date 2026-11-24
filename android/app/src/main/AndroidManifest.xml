@@ -28,7 +28,7 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
 
-    <!-- Storage / Photos -->
+    <!-- Storage / Photos & Local Audio -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -36,6 +36,7 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <!-- Vibration -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -60,9 +61,18 @@
         <!-- Audiomack -->
         <package android:name="com.audiomack" />
 
-        <!-- Lark Player -->
+        <!-- Lark Player (Local Music & Player) -->
         <package android:name="com.gemini.larkplayer" />
         <package android:name="com.larkplayer.music" />
+        <package android:name="com.dywx.larkplayer" />
+        <package android:name="com.larkplayer" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="audio/*" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+        </intent>
 
         <!-- Phone Calls -->
         <intent>

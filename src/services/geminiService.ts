@@ -41,6 +41,46 @@ export interface NativeAgentStatus {
   hasOverlayPermission?: boolean;
   hasNotificationPermission?: boolean;
   speechRecognizerAvailable?: boolean;
+  hasMusicPermission?: boolean;
+  larkPlayerInstalled?: boolean;
+}
+
+export interface DeviceSong {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  durationMs: number;
+  uri: string;
+  path: string;
+}
+
+export function getDeviceSongs(query = ''): DeviceSong[] {
+  if (typeof window === 'undefined') return [];
+  const bridge = (window as any).KevinAgentBridge;
+  if (bridge?.lookupDeviceMusicJson) {
+    try {
+      const raw = bridge.lookupDeviceMusicJson(query || '');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as DeviceSong[];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+export function playSongInLarkPlayer(songIdOrQuery: string, title?: string, artist?: string): boolean {
+  if (typeof window === 'undefined') return false;
+  const bridge = (window as any).KevinAgentBridge;
+  if (bridge?.playInLarkPlayer) {
+    try {
+      return Boolean(bridge.playInLarkPlayer(songIdOrQuery || '', title || '', artist || ''));
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 export interface AgentOutboxItem {
@@ -720,6 +760,10 @@ export interface DeviceAction {
   messageText?: string;
   contactName?: string;
   contactMatches?: SavedContact[];
+  songTitle?: string;
+  artist?: string;
+  playlistName?: string;
+  songs?: DeviceSong[];
   status?: 'executed' | 'needs_permission' | 'dialed_needs_permission' | 'choose_contact' | 'contact_not_found' | 'pending';
 }
 
@@ -766,6 +810,32 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
 
   if (action.name === 'open_camera') {
     window.dispatchEvent(new CustomEvent("open-device-camera"));
+    return true;
+  }
+
+  if (action.name === 'open_lark_player') {
+    const songTarget = String(action.args?.song_uri || action.args?.song_id || action.args?.query || action.songTitle || '').trim();
+    const title = String(action.songTitle || action.args?.song_title || action.args?.query || '').trim();
+    const artist = String(action.artist || action.args?.artist || '').trim();
+    if (bridge?.playInLarkPlayer) {
+      bridge.playInLarkPlayer(songTarget, title, artist);
+      action.status = 'executed';
+      return true;
+    }
+    // Fallback if not on Android bridge
+    action.status = 'executed';
+    return true;
+  }
+
+  if (action.name === 'query_device_music') {
+    if (bridge?.lookupDeviceMusicJson) {
+      try {
+        const raw = bridge.lookupDeviceMusicJson(action.args?.query || '');
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) action.songs = list;
+      } catch {}
+    }
+    action.status = 'executed';
     return true;
   }
 
@@ -1050,6 +1120,72 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
     return actionObj;
   }
 
+  if (name === "open_lark_player") {
+    const q = String(args.query || args.song_title || "music").trim();
+    const songTitle = String(args.song_title || q).trim();
+    const artist = String(args.artist || "").trim();
+    const playlistName = String(args.playlist_name || "").trim();
+    const actionType = String(args.action || "play").toLowerCase();
+
+    let matchedSongs: DeviceSong[] = [];
+    if (typeof window !== 'undefined') {
+      const bridge = (window as any).KevinAgentBridge;
+      if (bridge?.lookupDeviceMusicJson) {
+        try {
+          const raw = bridge.lookupDeviceMusicJson(q || artist || songTitle || '');
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) matchedSongs = parsed;
+        } catch {}
+      }
+    }
+
+    if (actionType === 'create_playlist' || playlistName) {
+      label = `Lark Player: Kora playlist "${playlistName || songTitle}" (${matchedSongs.length > 0 ? `${matchedSongs.length} indirimbo` : 'indirimbo'})`;
+    } else {
+      label = `Lark Player: Curanga ${songTitle}${artist ? ` - ${artist}` : ''}`;
+    }
+
+    const actionObj: DeviceAction = {
+      name,
+      args,
+      label,
+      songTitle,
+      artist,
+      playlistName,
+      songs: matchedSongs,
+      status: 'executed',
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+
+  if (name === "query_device_music") {
+    const q = String(args.query || "").trim();
+    let foundSongs: DeviceSong[] = [];
+    if (typeof window !== 'undefined') {
+      const bridge = (window as any).KevinAgentBridge;
+      if (bridge?.lookupDeviceMusicJson) {
+        try {
+          const raw = bridge.lookupDeviceMusicJson(q);
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) foundSongs = parsed;
+        } catch {}
+      }
+    }
+    const label = q
+      ? `Shakisha muri telefone: "${q}" (${foundSongs.length} zibonetse)`
+      : `Indirimbo zo muri telefone (${foundSongs.length} zose)`;
+    const actionObj: DeviceAction = {
+      name,
+      args,
+      label,
+      songs: foundSongs,
+      status: 'executed',
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+
   if (name === "open_youtube") {
     const q = query || "trending music";
     const resolvedVideoId = typeof args.videoId === 'string' && args.videoId.trim() ? args.videoId.trim() : undefined;
@@ -1146,6 +1282,16 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
 }
 
 function actionConfirmation(action: DeviceAction): string {
+  if (action.name === 'open_lark_player') {
+    if (action.playlistName || action.args?.action === 'create_playlist') {
+      return `🎵 Playlist **${action.playlistName || 'Nshya'}** yateguwe muri **Lark Player** ikubiyemo indirimbo zatoranyijwe! 🎶✨`;
+    }
+    return `🎵 Indirimbo **${action.songTitle || action.args?.query || 'yo muri telefone'}** irimo gucurangwa muri **Lark Player**! 🎧✨`;
+  }
+  if (action.name === 'query_device_music') {
+    const count = action.songs?.length || 0;
+    return `🎶 Muri telefone yawe habonetse indirimbo **${count}**! Urashaka ko Kevin AI igucurangira iyihe muri Lark Player cyangwa igukorera playlist? 🎧✨`;
+  }
   if (action.name === 'open_youtube') {
     return `▶ Yamaze gufungura YouTube ngo icurange: **${action.videoTitle || 'Indirimbo'}** 🎶✨`;
   }
@@ -1441,6 +1587,31 @@ const getEndpoint = (path: string): string => {
 };
 
 const APK_DEVICE_ACTION_DECLARATIONS = [
+  {
+    name: 'open_lark_player',
+    description: "Play music directly in Lark Player or organize/create a playlist from local device songs.",
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        query: { type: 'STRING', description: 'Song title, artist, album, or genre to play in Lark Player.' },
+        song_title: { type: 'STRING', description: 'Exact song title to play.' },
+        artist: { type: 'STRING', description: 'Artist name of the song.' },
+        playlist_name: { type: 'STRING', description: 'Optional name of the playlist to create or play.' },
+        action: { type: 'STRING', description: 'Action to perform in Lark Player (e.g. play, search, create_playlist, list_songs).' },
+      },
+    },
+  },
+  {
+    name: 'query_device_music',
+    description: "Scan, search, and list local audio/music songs stored on the user's phone to browse the library or create a playlist.",
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        query: { type: 'STRING', description: 'Search query or artist name to filter device songs, or leave empty to list library.' },
+        genre: { type: 'STRING', description: 'Optional genre filter.' },
+      },
+    },
+  },
   {
     name: 'open_youtube',
     description: 'Search and play a song or video on YouTube.',
@@ -1843,10 +2014,10 @@ function buildApkSystemInstruction(
 The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, or Kinyarwanda mixed with French/English words).
 - ALWAYS listen directly to the attached raw audio recording as your PRIMARY source of truth—even if a preliminary text transcript is also shown. If the preliminary transcript misheard any Kinyarwanda word, prefix, Rwandan name, or verb, trust what you actually hear in the raw audio!
 - Pay close attention to authentic Kinyarwanda phonetics, prefixes (na-, nta-, ndi-, nda-, nshaka-, mbwira-, mfasha-, sobanura-, hamagara-, uhamagare-, uncurangire-, wohereze-, fungura-, funga-), consonant clusters (cy, by, ry, ny, shy, pf, ts, mp, mb, nd, ng, nj, nk, bw, tw, rw), and Rwandan names. Never force Kinyarwanda sounds into random English words.
-- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.`
+- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
+    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to Lark Player and all local audio songs stored on the user's phone. When the user asks to play a song on Lark Player or local phone audio (e.g. 'curanga ... kuri Lark Player', 'curanga indirimbo zo muri telefone', 'play on Lark'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately. When asked to list local songs or organize/create a playlist, call query_device_music(query) or open_lark_player(query, song_title, artist, playlist_name, 'create_playlist'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }
