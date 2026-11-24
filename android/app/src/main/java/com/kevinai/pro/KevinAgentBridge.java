@@ -817,8 +817,33 @@ public class KevinAgentBridge {
     }
 
     @JavascriptInterface
-    public void playBeep() {
+    public void playPopSound() {
         activity.runOnUiThread(() -> {
+            try {
+                int resId = activity.getResources().getIdentifier("pop_sound", "raw", activity.getPackageName());
+                if (resId != 0) {
+                    android.media.MediaPlayer mp = android.media.MediaPlayer.create(activity, resId);
+                    if (mp != null) {
+                        mp.setAudioStreamType(android.media.AudioManager.STREAM_MUSIC);
+                        mp.setOnCompletionListener(android.media.MediaPlayer::release);
+                        mp.start();
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            try {
+                android.content.res.AssetFileDescriptor afd = activity.getAssets().openFd("public/assets/aistudio/mixkit-long-pop-2358_551c9e9a.wav");
+                android.media.MediaPlayer mp = new android.media.MediaPlayer();
+                mp.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+                afd.close();
+                mp.setAudioStreamType(android.media.AudioManager.STREAM_MUSIC);
+                mp.prepare();
+                mp.setOnCompletionListener(android.media.MediaPlayer::release);
+                mp.start();
+                return;
+            } catch (Exception ignored) {}
+
             try {
                 android.media.ToneGenerator tg = new android.media.ToneGenerator(
                         android.media.AudioManager.STREAM_NOTIFICATION,
@@ -828,5 +853,10 @@ public class KevinAgentBridge {
                 new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(tg::release, 200L);
             } catch (Exception ignored) {}
         });
+    }
+
+    @JavascriptInterface
+    public void playBeep() {
+        playPopSound();
     }
 }

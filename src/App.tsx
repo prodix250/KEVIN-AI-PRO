@@ -1557,6 +1557,7 @@ export default function App() {
 
         const newMessages = [...messages, userMessage, aiMessage];
         updateSessionMessages(newMessages);
+        playWhatsAppSound('receive');
         return;
       } catch (err) {
         console.warn("Kevin photo request handler error:", err);
@@ -1594,6 +1595,7 @@ export default function App() {
 
         const newMessages = [...messages, userMessage, aiMessage];
         updateSessionMessages(newMessages);
+        playWhatsAppSound('receive');
         return;
       } catch (imgErr) {
         console.warn("AI Image Generation failed, proceeding with text response:", imgErr);
