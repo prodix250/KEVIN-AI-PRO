@@ -58,6 +58,8 @@ public class KevinAssistantActivity extends AppCompatActivity {
     private boolean waitingForNotificationPermission = false;
     private boolean waitingForInitialCleanCapture = false;
     private boolean cleanCapturePending = false;
+    private boolean isOverlayResumed = false;
+    private boolean hasPausedWhileCapturing = false;
     private int activityDepth = 0;
     private long pendingWakeId = 0L;
     private String pendingWakeCommand = null;
@@ -72,12 +74,18 @@ public class KevinAssistantActivity extends AppCompatActivity {
             if (ScreenCaptureService.ACTION_CAPTURE_READY.equals(action)) {
                 if (waitingForInitialCleanCapture) {
                     waitingForInitialCleanCapture = false;
-                    mainHandler.postDelayed(KevinAssistantActivity.this::performCleanBehindCapture, 60L);
+                    mainHandler.postDelayed(KevinAssistantActivity.this::performCleanBehindCapture, 300L);
                 }
             } else if (ScreenCaptureService.ACTION_CLEAN_FRAME_CAPTURED.equals(action)) {
                 String frame = intent.getStringExtra(ScreenCaptureService.EXTRA_FRAME);
                 finishCleanBehindCapture(frame);
             } else if (ScreenCaptureService.ACTION_SCREEN_FRAME.equals(action)) {
+                if (isOverlayResumed
+                        || cleanCapturePending
+                        || waitingForInitialCleanCapture
+                        || ScreenCaptureService.suppressOverlayFrames) {
+                    return;
+                }
                 String frame = intent.getStringExtra(ScreenCaptureService.EXTRA_FRAME);
                 if (frame != null) {
                     dispatchScreenFrame(frame);
@@ -299,17 +307,36 @@ public class KevinAssistantActivity extends AppCompatActivity {
         } catch (Throwable ignored) {}
     }
 
-    private void setOverlayDimVisible(boolean visible) {
+    private void setAssistantWindowHidden(boolean hidden) {
         try {
-            if (visible) {
-                getWindow().addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-                WindowManager.LayoutParams lp = getWindow().getAttributes();
-                lp.dimAmount = 0.42f;
-                getWindow().setAttributes(lp);
-            } else {
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            if (hidden) {
                 getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-                WindowManager.LayoutParams lp = getWindow().getAttributes();
                 lp.dimAmount = 0f;
+                lp.alpha = 0f;
+                getWindow().setAttributes(lp);
+                getWindow().getDecorView().setAlpha(0f);
+                if (bridge != null && bridge.getWebView() != null) {
+                    bridge.getWebView().setAlpha(0f);
+                    bridge.getWebView().setVisibility(View.INVISIBLE);
+                }
+                if (overlayRoot != null) {
+                    overlayRoot.setAlpha(0f);
+                    overlayRoot.setVisibility(View.INVISIBLE);
+                }
+            } else {
+                if (overlayRoot != null) {
+                    overlayRoot.setVisibility(View.VISIBLE);
+                    overlayRoot.setAlpha(1f);
+                }
+                if (bridge != null && bridge.getWebView() != null) {
+                    bridge.getWebView().setVisibility(View.VISIBLE);
+                    bridge.getWebView().setAlpha(1f);
+                }
+                getWindow().getDecorView().setAlpha(1f);
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                lp.dimAmount = 0.42f;
+                lp.alpha = 1f;
                 getWindow().setAttributes(lp);
             }
         } catch (Throwable ignored) {}
@@ -325,27 +352,17 @@ public class KevinAssistantActivity extends AppCompatActivity {
         }
         cleanCapturePending = true;
         ScreenCaptureService.setSuppressOverlayFrames(true);
-        overlayRoot.setVisibility(View.INVISIBLE);
-        setOverlayDimVisible(false);
-
-        overlayRoot.postOnAnimation(() -> {
-            if (!cleanCapturePending || isFinishing() || isDestroyed()) {
-                return;
-            }
-            ScreenCaptureService.beginCleanCaptureWindow(45L);
-            mainHandler.removeCallbacks(cleanCaptureWatchdog);
-            mainHandler.postDelayed(cleanCaptureWatchdog, 250L);
-        });
+        setAssistantWindowHidden(true);
+        ScreenCaptureService.beginCleanCaptureWindow(75L, 150L);
+        mainHandler.removeCallbacks(cleanCaptureWatchdog);
+        mainHandler.postDelayed(cleanCaptureWatchdog, 480L);
     }
 
     private void finishCleanBehindCapture(String capturedFrame) {
         mainHandler.removeCallbacks(cleanCaptureWatchdog);
         String fallback = ScreenCaptureService.finishCleanCaptureWindow();
         ScreenCaptureService.setSuppressOverlayFrames(!isFinishing() && !isDestroyed());
-        if (overlayRoot != null) {
-            overlayRoot.setVisibility(View.VISIBLE);
-        }
-        setOverlayDimVisible(true);
+        setAssistantWindowHidden(false);
         cleanCapturePending = false;
 
         String frameToSend = (capturedFrame != null && !capturedFrame.isEmpty()) ? capturedFrame : fallback;
@@ -357,10 +374,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
     private void cancelCleanCaptureAndRestore() {
         mainHandler.removeCallbacks(cleanCaptureWatchdog);
         ScreenCaptureService.finishCleanCaptureWindow();
-        if (overlayRoot != null) {
-            overlayRoot.setVisibility(View.VISIBLE);
-        }
-        setOverlayDimVisible(true);
+        setAssistantWindowHidden(false);
         cleanCapturePending = false;
     }
 
@@ -503,6 +517,7 @@ public class KevinAssistantActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        isOverlayResumed = true;
         KevinWakeWordService.setOverlayVisible(true);
         KevinWakeWordService.pauseListening(this);
         ScreenCaptureService.setSuppressOverlayFrames(true);
@@ -510,11 +525,23 @@ public class KevinAssistantActivity extends AppCompatActivity {
             bridge.getApp().fireStatusChange(true);
             bridge.onResume();
         }
+        boolean shouldRefreshBehindFrame = hasPausedWhileCapturing;
+        hasPausedWhileCapturing = false;
+        if (shouldRefreshBehindFrame
+                && ScreenCaptureService.isCaptureRunning
+                && !waitingForInitialCleanCapture
+                && !cleanCapturePending) {
+            mainHandler.postDelayed(this::performCleanBehindCapture, 220L);
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        isOverlayResumed = false;
+        if (ScreenCaptureService.isCaptureRunning) {
+            hasPausedWhileCapturing = true;
+        }
         KevinWakeWordService.setOverlayVisible(false);
         cancelCleanCaptureAndRestore();
         ScreenCaptureService.setSuppressOverlayFrames(false);
@@ -539,6 +566,8 @@ public class KevinAssistantActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        isOverlayResumed = false;
+        hasPausedWhileCapturing = false;
         waitingForInitialCleanCapture = false;
         KevinWakeWordService.setOverlayVisible(false);
         cancelCleanCaptureAndRestore();

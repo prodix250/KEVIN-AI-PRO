@@ -537,7 +537,7 @@ export default function AssistantOverlay({
       const timer = setTimeout(() => {
         cleanFrameWaitersRef.current = cleanFrameWaitersRef.current.filter((w) => w !== onFrame);
         done(liveFrameRef.current || liveScreenFrame);
-      }, 900);
+      }, 1400);
       cleanFrameWaitersRef.current.push(onFrame);
       try {
         nativeCapture.captureCleanFrame();
