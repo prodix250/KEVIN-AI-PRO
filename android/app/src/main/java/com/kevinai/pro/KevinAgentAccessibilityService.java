@@ -2079,7 +2079,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             if (max > min) {
                 float targetVal = min + (clampedPct / 100.0f) * (max - min);
                 Bundle args = new Bundle();
-                args.putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_FLOAT, targetVal);
+                args.putFloat("android.view.accessibility.action.ARGUMENT_PROGRESS_VALUE", targetVal);
                 progressSet = seekBar.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.getId(), args);
             }
         }
