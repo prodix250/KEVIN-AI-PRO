@@ -22,6 +22,7 @@ import {
   playWhatsAppSound,
   playSongInLarkPlayer,
   executeLarkPlayerCommand,
+  executeAudiomackCommand,
 } from '../services/geminiService';
 
 interface AssistantOverlayProps {
@@ -1072,6 +1073,24 @@ export default function AssistantOverlay({
                           <Play size={10} fill="currentColor" /> Lark Player
                         </button>
                       )}
+                      {action.name === 'open_audiomack' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            executeAudiomackCommand({
+                              action: String(action.args?.action || 'play'),
+                              query: action.args?.query || action.songTitle || '',
+                              songTitle: action.songTitle,
+                              artist: action.artist,
+                              playlistName: action.playlistName,
+                              tab: action.args?.tab,
+                            });
+                          }}
+                          className="shrink-0 rounded-full bg-[#FFA200] hover:bg-[#e59200] px-3 py-1 text-[11px] font-bold text-black cursor-pointer flex items-center gap-1"
+                        >
+                          <Play size={10} fill="currentColor" /> Audiomack
+                        </button>
+                      )}
                     </div>
 
                     {(action.name === 'open_lark_player' || action.name === 'query_device_music') && (
@@ -1088,6 +1107,29 @@ export default function AssistantOverlay({
                             type="button"
                             onClick={() => executeLarkPlayerCommand({ action: ctrl.cmd })}
                             className="rounded-full bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] hover:border-[#00a884] px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer"
+                          >
+                            {ctrl.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {action.name === 'open_audiomack' && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {[
+                          { cmd: 'previous', label: '⏮️' },
+                          { cmd: 'toggle', label: '⏯️' },
+                          { cmd: 'next', label: '⏭️' },
+                          { cmd: 'shuffle', label: '🔀' },
+                          { cmd: 'download', label: '⬇️' },
+                          { cmd: 'favorite', label: '❤️' },
+                          { cmd: 'list_playlists', label: '📋' },
+                        ].map((ctrl) => (
+                          <button
+                            key={ctrl.cmd}
+                            type="button"
+                            onClick={() => executeAudiomackCommand({ action: ctrl.cmd })}
+                            className="rounded-full bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] hover:border-[#FFA200] px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer"
                           >
                             {ctrl.label}
                           </button>

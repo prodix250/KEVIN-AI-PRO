@@ -115,7 +115,11 @@ You are a full autonomous agent with direct permission-backed control over apps 
   * When the user asks to open Lark Player, play a song/artist/album/all songs on Lark Player or local phone audio (e.g., 'fungura lark player', 'curanga ... kuri Lark Player', 'play ... on Lark Player', 'curanga indirimbo zo muri telefone'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately.
   * You can do EVERYTHING inside Lark Player via open_lark_player: play/search songs, pause/resume/toggle/stop/next/previous/seek, volume_up/volume_down/set_volume/mute/unmute, create_playlist (with optional songs array), add_to_playlist, play_playlist, delete_playlist, list_playlists/list_artists/list_albums/list_folders/list_songs, shuffle/play_all/shuffle_all, repeat/loop, favorite/like, equalizer, sleep_timer, lyrics, queue/add_to_queue/play_next, open_tab (songs/playlists/artists/albums/folders/videos/downloads/settings), share, ringtone, speed, and now_playing.
   * When the user asks to list local songs or browse library, call query_device_music(query) or open_lark_player(..., action='list_songs').
-- Calls & Other Apps: Use make_call, open_audiomack, open_camera, or open_app ONLY when explicitly requested by the user (never guess or fabricate targets when uncertain).`;
+- Audiomack (100% Full Control):
+  * You have 100% full autonomous access to Audiomack for streaming, searching, and managing music.
+  * When the user asks to open Audiomack, search or play a song/artist/album/mixtape/trending track on Audiomack (e.g. 'fungura audiomack', 'shakisha ... kuri audiomack', 'curanga ... kuri audiomack', 'play ... on audiomack'), ALWAYS call open_audiomack(query, song_title, artist, playlist_name, action) immediately.
+  * You can perform ALL Audiomack actions via open_audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite (like), repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab (home, feed, trending, search, library, playlists, downloads, favorites, offline), volume_up, volume_down, set_volume, mute, unmute, now_playing.
+- Calls & Other Apps: Use make_call, open_camera, or open_app ONLY when explicitly requested by the user (never guess or fabricate targets when uncertain).`;
 
 const deviceActionDeclarations: FunctionDeclaration[] = [
   {
@@ -131,11 +135,31 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: "open_audiomack",
-    description: "Immediately open Audiomack and play/search the requested song or artist.",
+    description: "Full control over Audiomack: open app, search/play songs, artists, albums or playlists, create/add/play playlists, download for offline, favorite/like, repost, follow artists, queue/play next, playback controls (pause, resume, next, previous, stop, seek, shuffle, repeat), equalizer, sleep timer, lyrics, share, tabs, volume, and now playing.",
     parametersJsonSchema: {
       type: "object",
-      properties: { query: { type: "string" } },
-      required: ["query"]
+      properties: {
+        query: { type: "string", description: "Song title, artist, album, playlist name, or search query for Audiomack." },
+        song_title: { type: "string", description: "Exact song title to search, play, download, like, or add." },
+        artist: { type: "string", description: "Artist name to search, play, or follow." },
+        playlist_name: { type: "string", description: "Playlist name to create, update, or play on Audiomack." },
+        tab: { type: "string", description: "Optional Audiomack tab to open (home, feed, trending, search, library, playlists, downloads, favorites, offline)." },
+        volume_percent: { type: "number", description: "Volume percentage (0-100) when action is set_volume." },
+        seek_seconds: { type: "number", description: "Position in seconds when action is seek." },
+        action: {
+          type: "string",
+          enum: [
+            "open", "play", "search",
+            "create_playlist", "add_to_playlist", "play_playlist", "list_playlists",
+            "download", "favorite", "like", "repost", "follow",
+            "queue", "add_to_queue", "play_next",
+            "pause", "resume", "toggle", "stop", "next", "previous", "fast_forward", "rewind", "seek",
+            "shuffle", "repeat", "equalizer", "sleep_timer", "lyrics", "share", "open_tab",
+            "volume_up", "volume_down", "set_volume", "mute", "unmute", "now_playing"
+          ],
+          description: "Action to perform in Audiomack (default: play)."
+        }
+      }
     }
   },
   {
@@ -1143,7 +1167,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       let lastErr: unknown = null;
       const chatModelErrors: string[] = [];
       let streamStarted = false;
-      const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|ijwi|komeza|subiramo|ongeraho|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|ringtone|artists|albums|folders|now\s*playing|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
+      const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|ijwi|komeza|subiramo|ongeraho|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|repost|follow|download|offline|trending|library|ringtone|artists|albums|folders|now\s*playing|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
       const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
       const shouldTryWebSearch = Boolean(
         latestUserText

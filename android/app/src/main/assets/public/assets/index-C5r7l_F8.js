@@ -23767,7 +23767,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-CxRj-2Zg.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-DT65Apwz.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -24300,6 +24300,80 @@ const Camera = registerPlugin("Camera", {
   web: () => new CameraWeb()
 });
 const kevin2Url = "/assets/kevin_2-BBVMJjaL.jpg";
+const popSoundUrl = "/assets/pop_sound-BKluTmtq.wav";
+function playSongInLarkPlayer(songIdOrQuery, title, artist) {
+  if (typeof window === "undefined") return false;
+  const bridge = window.KevinAgentBridge;
+  if (bridge == null ? void 0 : bridge.playInLarkPlayer) {
+    try {
+      return Boolean(bridge.playInLarkPlayer(songIdOrQuery || "", title || "", artist || ""));
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+function executeLarkPlayerCommand(payload) {
+  if (typeof window === "undefined") return { ok: false };
+  const bridge = window.KevinAgentBridge;
+  if (bridge == null ? void 0 : bridge.executeLarkPlayerAction) {
+    try {
+      const raw = bridge.executeLarkPlayerAction(JSON.stringify(payload || {}));
+      const parsed = JSON.parse(raw || "{}");
+      if (parsed && typeof parsed === "object") {
+        if (Array.isArray(parsed.playlists)) {
+          try {
+            window.localStorage.setItem("kevin_lark_playlists", JSON.stringify(parsed.playlists));
+          } catch {
+          }
+        }
+        return parsed;
+      }
+    } catch {
+    }
+  }
+  const action = String((payload == null ? void 0 : payload.action) || "play").toLowerCase();
+  if ((action === "play" || action === "play_song" || action === "open") && (bridge == null ? void 0 : bridge.playInLarkPlayer)) {
+    const ok2 = bridge.playInLarkPlayer(
+      String((payload == null ? void 0 : payload.query) || (payload == null ? void 0 : payload.songTitle) || (payload == null ? void 0 : payload.song_title) || ""),
+      String((payload == null ? void 0 : payload.songTitle) || (payload == null ? void 0 : payload.song_title) || ""),
+      String((payload == null ? void 0 : payload.artist) || "")
+    );
+    return { ok: Boolean(ok2), action };
+  }
+  return { ok: false, action };
+}
+function executeAudiomackCommand(payload) {
+  if (typeof window === "undefined") return { ok: false };
+  const bridge = window.KevinAgentBridge;
+  if (bridge == null ? void 0 : bridge.executeAudiomackAction) {
+    try {
+      const raw = bridge.executeAudiomackAction(JSON.stringify(payload || {}));
+      const parsed = JSON.parse(raw || "{}");
+      if (parsed && typeof parsed === "object") {
+        if (Array.isArray(parsed.playlists)) {
+          try {
+            window.localStorage.setItem("kevin_audiomack_playlists", JSON.stringify(parsed.playlists));
+          } catch {
+          }
+        }
+        return parsed;
+      }
+    } catch {
+    }
+  }
+  const q2 = String((payload == null ? void 0 : payload.query) || (payload == null ? void 0 : payload.songTitle) || (payload == null ? void 0 : payload.song_title) || (payload == null ? void 0 : payload.artist) || "").trim();
+  const action = String((payload == null ? void 0 : payload.action) || (q2 ? "play" : "open")).toLowerCase();
+  if (bridge == null ? void 0 : bridge.openAudiomack) {
+    try {
+      const ok2 = bridge.openAudiomack(q2, action);
+      return { ok: Boolean(ok2), action };
+    } catch {
+    }
+  }
+  const webUrl = q2 ? `https://audiomack.com/search?q=${encodeURIComponent(q2)}` : "https://audiomack.com";
+  return { ok: true, action, webFallbackUrl: webUrl };
+}
 const CHAT_HISTORY_STORAGE_KEY = "kevin_ai_chat_history";
 const AGENT_PERMISSIONS_STORAGE_KEY = "kevin_ai_agent_permissions";
 const AGENT_OUTBOX_STORAGE_KEY = "kevin_ai_agent_outbox";
@@ -24841,17 +24915,141 @@ function saveChatHistory(history) {
     }
   }
 }
+function playWhatsAppSound(type = "pop") {
+  if (typeof window === "undefined") return;
+  try {
+    const bridge = window.KevinAgentBridge;
+    if (bridge == null ? void 0 : bridge.playPopSound) {
+      bridge.playPopSound();
+      return;
+    }
+    if (bridge == null ? void 0 : bridge.playBeep) {
+      bridge.playBeep();
+      return;
+    }
+  } catch {
+  }
+  try {
+    const audio = new Audio(popSoundUrl);
+    audio.volume = 0.9;
+    const playPromise = audio.play();
+    if (playPromise !== void 0) {
+      playPromise.catch(() => {
+        try {
+          const fallback = new Audio("/assets/aistudio/mixkit-long-pop-2358_551c9e9a.wav");
+          fallback.volume = 0.9;
+          void fallback.play().catch(() => {
+          });
+        } catch {
+        }
+      });
+    }
+  } catch {
+  }
+}
 function runDeviceAction(action, forceExecute = false) {
-  var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k, _l;
+  var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I;
   const bridge = window.KevinAgentBridge;
   const perms = getAgentPermissions();
   if (action.name === "open_camera") {
     window.dispatchEvent(new CustomEvent("open-device-camera"));
     return true;
   }
+  if (action.name === "open_lark_player") {
+    const larkAction = String(((_a2 = action.args) == null ? void 0 : _a2.action) || (action.playlistName ? "create_playlist" : "play")).trim().toLowerCase();
+    const songTarget = String(((_b2 = action.args) == null ? void 0 : _b2.song_uri) || ((_c = action.args) == null ? void 0 : _c.song_id) || ((_d = action.args) == null ? void 0 : _d.query) || action.songTitle || "").trim();
+    const title = String(action.songTitle || ((_e2 = action.args) == null ? void 0 : _e2.song_title) || ((_f = action.args) == null ? void 0 : _f.query) || "").trim();
+    const artist = String(action.artist || ((_g = action.args) == null ? void 0 : _g.artist) || "").trim();
+    const playlistName = String(action.playlistName || ((_h = action.args) == null ? void 0 : _h.playlist_name) || "").trim();
+    if (bridge == null ? void 0 : bridge.executeLarkPlayerAction) {
+      const larkRes = executeLarkPlayerCommand({
+        action: larkAction,
+        query: String(((_i = action.args) == null ? void 0 : _i.query) || songTarget || "").trim(),
+        songTitle: title,
+        artist,
+        playlistName,
+        songs: Array.isArray((_j = action.args) == null ? void 0 : _j.songs) ? action.args.songs : void 0,
+        tab: (_k = action.args) == null ? void 0 : _k.tab,
+        volumePercent: (_l = action.args) == null ? void 0 : _l.volume_percent,
+        seekSeconds: (_m = action.args) == null ? void 0 : _m.seek_seconds
+      });
+      action.larkResult = larkRes;
+      if (Array.isArray(larkRes.songs) && larkRes.songs.length > 0) {
+        action.songs = larkRes.songs;
+      }
+      if (larkRes.playlistName && !action.playlistName) {
+        action.playlistName = String(larkRes.playlistName);
+      }
+      action.status = "executed";
+      return true;
+    }
+    if (bridge == null ? void 0 : bridge.playInLarkPlayer) {
+      bridge.playInLarkPlayer(songTarget, title, artist);
+      action.status = "executed";
+      return true;
+    }
+    action.status = "executed";
+    return true;
+  }
+  if (action.name === "query_device_music") {
+    if (bridge == null ? void 0 : bridge.lookupDeviceMusicJson) {
+      try {
+        const raw = bridge.lookupDeviceMusicJson(((_n = action.args) == null ? void 0 : _n.query) || "");
+        const list2 = JSON.parse(raw);
+        if (Array.isArray(list2)) action.songs = list2;
+      } catch {
+      }
+    }
+    action.status = "executed";
+    return true;
+  }
+  if (action.name === "open_audiomack") {
+    const amAction = String(((_o = action.args) == null ? void 0 : _o.action) || (action.playlistName ? "create_playlist" : ((_p = action.args) == null ? void 0 : _p.query) || action.songTitle || action.artist ? "play" : "open")).trim().toLowerCase();
+    const title = String(action.songTitle || ((_q = action.args) == null ? void 0 : _q.song_title) || "").trim();
+    const artist = String(action.artist || ((_r = action.args) == null ? void 0 : _r.artist) || "").trim();
+    const q2 = String(((_s = action.args) == null ? void 0 : _s.query) || [title, artist].filter(Boolean).join(" ") || "").trim();
+    const playlistName = String(action.playlistName || ((_t = action.args) == null ? void 0 : _t.playlist_name) || "").trim();
+    if (bridge == null ? void 0 : bridge.executeAudiomackAction) {
+      const amRes = executeAudiomackCommand({
+        action: amAction,
+        query: q2,
+        songTitle: title,
+        artist,
+        playlistName,
+        tab: (_u = action.args) == null ? void 0 : _u.tab,
+        volumePercent: (_v = action.args) == null ? void 0 : _v.volume_percent,
+        seekSeconds: (_w = action.args) == null ? void 0 : _w.seek_seconds
+      });
+      action.audiomackResult = amRes;
+      if (amRes.playlistName && !action.playlistName) {
+        action.playlistName = String(amRes.playlistName);
+      }
+      if (!amRes.audiomackInstalled && amRes.webFallbackUrl && !(bridge == null ? void 0 : bridge.openAudiomack)) {
+        const link22 = document.createElement("a");
+        link22.href = String(amRes.webFallbackUrl);
+        link22.target = "_blank";
+        link22.rel = "noopener noreferrer";
+        document.body.appendChild(link22);
+        link22.click();
+        document.body.removeChild(link22);
+      }
+      action.status = "executed";
+      return true;
+    }
+    const fallbackUrl2 = action.url || action.fallbackUrl || (q2 ? `https://audiomack.com/search?q=${encodeURIComponent(q2)}` : "https://audiomack.com");
+    const link2 = document.createElement("a");
+    link2.href = fallbackUrl2;
+    link2.target = "_blank";
+    link2.rel = "noopener noreferrer";
+    document.body.appendChild(link2);
+    link2.click();
+    document.body.removeChild(link2);
+    action.status = "executed";
+    return true;
+  }
   if (action.name === "open_youtube") {
-    const videoId = action.videoId || ((_a2 = action.args) == null ? void 0 : _a2.videoId);
-    const query = ((_b2 = action.args) == null ? void 0 : _b2.query) || "";
+    const videoId = action.videoId || ((_x = action.args) == null ? void 0 : _x.videoId);
+    const query = ((_y = action.args) == null ? void 0 : _y.query) || "";
     const shouldAutoPlay = perms.autoPlayYouTube !== false || forceExecute;
     if ((bridge == null ? void 0 : bridge.playYouTube) && shouldAutoPlay) {
       bridge.playYouTube(videoId || "", query);
@@ -24878,13 +25076,13 @@ function runDeviceAction(action, forceExecute = false) {
       action.status = "needs_permission";
       return false;
     }
-    const phone = sanitizePhoneNumber(action.phoneNumber || ((_c = action.args) == null ? void 0 : _c.phone_number) || "");
-    const msg = action.messageText || ((_d = action.args) == null ? void 0 : _d.message) || "";
+    const phone = sanitizePhoneNumber(action.phoneNumber || ((_z = action.args) == null ? void 0 : _z.phone_number) || "");
+    const msg = action.messageText || ((_A = action.args) == null ? void 0 : _A.message) || "";
     if (!isLikelyPhoneNumber(phone)) return false;
     if (bridge == null ? void 0 : bridge.sendSms) {
       const sent = bridge.sendSms(phone, msg);
       if (!sent) {
-        (_e2 = bridge.requestAgentPermissions) == null ? void 0 : _e2.call(bridge);
+        (_B = bridge.requestAgentPermissions) == null ? void 0 : _B.call(bridge);
         action.status = "needs_permission";
         return false;
       }
@@ -24903,10 +25101,11 @@ function runDeviceAction(action, forceExecute = false) {
       action.status = "needs_permission";
       return false;
     }
-    const rawPhone = action.phoneNumber || ((_f = action.args) == null ? void 0 : _f.phone_number) || "";
+    const rawPhone = action.phoneNumber || ((_C = action.args) == null ? void 0 : _C.phone_number) || "";
     const phone = formatWhatsAppPhoneNumber(rawPhone);
-    const msg = action.messageText || ((_g = action.args) == null ? void 0 : _g.message) || "";
+    const msg = action.messageText || ((_D = action.args) == null ? void 0 : _D.message) || "";
     if (!isLikelyPhoneNumber(phone)) return false;
+    playWhatsAppSound("send");
     if (bridge == null ? void 0 : bridge.sendWhatsApp) {
       bridge.sendWhatsApp(phone, msg);
     } else {
@@ -24933,7 +25132,7 @@ function runDeviceAction(action, forceExecute = false) {
       action.status = "needs_permission";
       return false;
     }
-    const phone = sanitizePhoneNumber(action.phoneNumber || ((_h = action.args) == null ? void 0 : _h.phone_number) || "");
+    const phone = sanitizePhoneNumber(action.phoneNumber || ((_E = action.args) == null ? void 0 : _E.phone_number) || "");
     if (!isLikelyPhoneNumber(phone)) return false;
     if (bridge == null ? void 0 : bridge.placeCall) {
       const result2 = bridge.placeCall(phone);
@@ -24957,11 +25156,11 @@ function runDeviceAction(action, forceExecute = false) {
     return true;
   }
   if (action.name === "configure_whatsapp_autoreply") {
-    const pauseMinutes = Number(((_i = action.args) == null ? void 0 : _i.pause_minutes) || 0);
+    const pauseMinutes = Number(((_F = action.args) == null ? void 0 : _F.pause_minutes) || 0);
     const hasPause = Number.isFinite(pauseMinutes) && pauseMinutes > 0;
-    const enabled = hasPause ? true : ((_j = action.args) == null ? void 0 : _j.enabled) !== false;
+    const enabled = hasPause ? true : ((_G = action.args) == null ? void 0 : _G.enabled) !== false;
     const pausedUntil = hasPause ? Date.now() + Math.round(pauseMinutes * 6e4) : 0;
-    const replyStyle = typeof ((_k = action.args) == null ? void 0 : _k.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
+    const replyStyle = typeof ((_H = action.args) == null ? void 0 : _H.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
     saveAgentPermissions({
       ...perms,
       whatsappAutoReply: enabled,
@@ -24979,7 +25178,7 @@ function runDeviceAction(action, forceExecute = false) {
     return true;
   }
   if (action.name === "scan_whatsapp_chats") {
-    const replyStyle = typeof ((_l = action.args) == null ? void 0 : _l.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
+    const replyStyle = typeof ((_I = action.args) == null ? void 0 : _I.reply_style) === "string" && action.args.reply_style.trim() ? action.args.reply_style.trim() : perms.whatsappReplyStyle;
     if (!perms.whatsappAutoReply || perms.whatsappAutoReplyPausedUntil || replyStyle !== perms.whatsappReplyStyle) {
       saveAgentPermissions({
         ...perms,
@@ -25092,6 +25291,178 @@ function executeDeviceAction(name2, args) {
     runDeviceAction(actionObj, false);
     return actionObj;
   }
+  if (name2 === "open_lark_player") {
+    const q2 = String(args.query || args.song_title || "").trim();
+    const songTitle = String(args.song_title || q2).trim();
+    const artist = String(args.artist || "").trim();
+    const playlistName = String(args.playlist_name || "").trim();
+    const actionType = String(args.action || (playlistName ? "create_playlist" : "play")).toLowerCase();
+    let matchedSongs = [];
+    if (typeof window !== "undefined") {
+      const bridge = window.KevinAgentBridge;
+      if ((bridge == null ? void 0 : bridge.lookupDeviceMusicJson) && ["play", "play_song", "search", "create_playlist", "add_to_playlist", "list_songs"].includes(actionType)) {
+        try {
+          const raw = bridge.lookupDeviceMusicJson(q2 || artist || songTitle || "");
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) matchedSongs = parsed;
+        } catch {
+        }
+      }
+    }
+    const labelMap = {
+      open: "Fungura Lark Player",
+      open_app: "Fungura Lark Player",
+      pause: "Lark Player: Hagarika indirimbo (Pause)",
+      resume: "Lark Player: Komeza indirimbo (Play)",
+      toggle: "Lark Player: Play / Pause",
+      stop: "Lark Player: Hagarika burundu (Stop)",
+      next: "Lark Player: Indirimbo ikurikira (Next)",
+      previous: "Lark Player: Indirimbo ibanza (Previous)",
+      prev: "Lark Player: Indirimbo ibanza (Previous)",
+      fast_forward: "Lark Player: Imbere vuba (Forward)",
+      rewind: "Lark Player: Subiza inyuma (Rewind)",
+      seek: "Lark Player: Simbuka umwanya w'indirimbo",
+      volume_up: "Lark Player: Ongera ijwi (Volume Up)",
+      volume_down: "Lark Player: Gabanya ijwi (Volume Down)",
+      set_volume: `Lark Player: Ijwi kuri ${args.volume_percent ?? 50}%`,
+      mute: "Lark Player: Cecekesha (Mute)",
+      unmute: "Lark Player: Subiza ijwi (Unmute)",
+      shuffle: "Lark Player: Vanga indirimbo (Shuffle)",
+      shuffle_all: "Lark Player: Vanga indirimbo zose (Shuffle All)",
+      play_all: "Lark Player: Curanga indirimbo zose",
+      repeat: "Lark Player: Subiramo (Repeat)",
+      loop: "Lark Player: Subiramo (Loop)",
+      favorite: "Lark Player: Kunda indirimbo (Favorite)",
+      equalizer: "Lark Player: Equalizer (EQ)",
+      sleep_timer: "Lark Player: Sleep Timer",
+      lyrics: "Lark Player: Reba Lyrics",
+      queue: "Lark Player: Reba Queue (Playing Next)",
+      add_to_queue: `Lark Player: Shyira "${songTitle || q2}" muri Queue`,
+      play_next: `Lark Player: Curanga ikurikira "${songTitle || q2}"`,
+      now_playing: "Lark Player: Indirimbo irimo gucurangwa",
+      list_playlists: "Lark Player: Urutonde rwa Playlists",
+      list_artists: "Lark Player: Abahanzi bo muri telefone",
+      list_albums: "Lark Player: Albums zo muri telefone",
+      list_folders: "Lark Player: Folders z'indirimbo",
+      list_songs: `Lark Player: Indirimbo (${matchedSongs.length})`,
+      play_playlist: `Lark Player: Curanga playlist "${playlistName || q2}"`,
+      delete_playlist: `Lark Player: Siba playlist "${playlistName || q2}"`,
+      add_to_playlist: `Lark Player: Ongera muri playlist "${playlistName || "Playlist"}"`,
+      open_tab: `Lark Player: Fungura igice cya "${args.tab || q2 || "Music"}"`,
+      share: "Lark Player: Sangiza indirimbo (Share)",
+      ringtone: "Lark Player: Gira indirimbo Ringtone",
+      speed: "Lark Player: Hindura umuvuduko (Speed)",
+      search: `Lark Player: Shakisha "${q2 || songTitle}"`
+    };
+    if (actionType === "create_playlist" || playlistName && actionType === "play" && !songTitle) {
+      label = `Lark Player: Kora playlist "${playlistName || songTitle || "Kevin Mix"}" (${matchedSongs.length > 0 ? `${matchedSongs.length} indirimbo` : "indirimbo"})`;
+    } else if (labelMap[actionType]) {
+      label = labelMap[actionType];
+    } else {
+      label = `Lark Player: Curanga ${songTitle || q2 || "indirimbo"}${artist ? ` - ${artist}` : ""}`;
+    }
+    const actionObj = {
+      name: name2,
+      args: { ...args, action: actionType },
+      label,
+      songTitle,
+      artist,
+      playlistName,
+      songs: matchedSongs,
+      status: "executed"
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+  if (name2 === "query_device_music") {
+    const q2 = String(args.query || "").trim();
+    let foundSongs = [];
+    if (typeof window !== "undefined") {
+      const bridge = window.KevinAgentBridge;
+      if (bridge == null ? void 0 : bridge.lookupDeviceMusicJson) {
+        try {
+          const raw = bridge.lookupDeviceMusicJson(q2);
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) foundSongs = parsed;
+        } catch {
+        }
+      }
+    }
+    const label2 = q2 ? `Shakisha muri telefone: "${q2}" (${foundSongs.length} zibonetse)` : `Indirimbo zo muri telefone (${foundSongs.length} zose)`;
+    const actionObj = {
+      name: name2,
+      args,
+      label: label2,
+      songs: foundSongs,
+      status: "executed"
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+  if (name2 === "open_audiomack") {
+    const q2 = String(args.query || args.song_title || "").trim();
+    const songTitle = String(args.song_title || q2).trim();
+    const artist = String(args.artist || "").trim();
+    const playlistName = String(args.playlist_name || "").trim();
+    const actionType = String(args.action || (playlistName ? "create_playlist" : q2 || songTitle || artist ? "play" : "open")).toLowerCase();
+    const effectiveQuery = q2 || [songTitle, artist].filter(Boolean).join(" ").trim();
+    const searchUrl = effectiveQuery ? `https://audiomack.com/search?q=${encodeURIComponent(effectiveQuery)}` : "https://audiomack.com";
+    const labelMap = {
+      open: "Fungura Audiomack",
+      open_app: "Fungura Audiomack",
+      search: `Audiomack: Shakisha "${effectiveQuery || "umuziki"}"`,
+      pause: "Audiomack: Hagarika indirimbo (Pause)",
+      resume: "Audiomack: Komeza indirimbo (Play)",
+      toggle: "Audiomack: Play / Pause",
+      stop: "Audiomack: Hagarika burundu (Stop)",
+      next: "Audiomack: Indirimbo ikurikira (Next)",
+      previous: "Audiomack: Indirimbo ibanza (Previous)",
+      prev: "Audiomack: Indirimbo ibanza (Previous)",
+      fast_forward: "Audiomack: Imbere vuba (Forward)",
+      rewind: "Audiomack: Subiza inyuma (Rewind)",
+      seek: "Audiomack: Simbuka umwanya w'indirimbo",
+      volume_up: "Audiomack: Ongera ijwi (Volume Up)",
+      volume_down: "Audiomack: Gabanya ijwi (Volume Down)",
+      set_volume: `Audiomack: Ijwi kuri ${args.volume_percent ?? 50}%`,
+      mute: "Audiomack: Cecekesha (Mute)",
+      unmute: "Audiomack: Subiza ijwi (Unmute)",
+      shuffle: "Audiomack: Vanga indirimbo (Shuffle)",
+      repeat: "Audiomack: Subiramo (Repeat)",
+      loop: "Audiomack: Subiramo (Loop)",
+      download: `Audiomack: Download "${songTitle || effectiveQuery || "indirimbo"}"`,
+      favorite: `Audiomack: Kunda "${songTitle || effectiveQuery || "indirimbo"}"`,
+      like: `Audiomack: Kunda "${songTitle || effectiveQuery || "indirimbo"}"`,
+      repost: `Audiomack: Repost "${songTitle || effectiveQuery || "indirimbo"}"`,
+      follow: `Audiomack: Follow ${artist || effectiveQuery || "umuhanzi"}`,
+      queue: "Audiomack: Reba Queue",
+      add_to_queue: `Audiomack: Shyira "${songTitle || effectiveQuery}" muri Queue`,
+      play_next: `Audiomack: Curanga ikurikira "${songTitle || effectiveQuery}"`,
+      equalizer: "Audiomack: Equalizer (EQ)",
+      sleep_timer: "Audiomack: Sleep Timer",
+      lyrics: "Audiomack: Reba Lyrics",
+      share: "Audiomack: Sangiza (Share)",
+      list_playlists: "Audiomack: Urutonde rwa Playlists",
+      play_playlist: `Audiomack: Curanga playlist "${playlistName || effectiveQuery}"`,
+      add_to_playlist: `Audiomack: Ongera muri playlist "${playlistName || "Playlist"}"`,
+      create_playlist: `Audiomack: Kora playlist "${playlistName || "Kevin Mix"}"`,
+      open_tab: `Audiomack: Fungura igice cya "${args.tab || effectiveQuery || "Home"}"`,
+      now_playing: "Audiomack: Indirimbo irimo gucurangwa"
+    };
+    label = labelMap[actionType] || `Audiomack: Curanga ${songTitle || effectiveQuery || "indirimbo"}${artist ? ` - ${artist}` : ""}`;
+    const actionObj = {
+      name: name2,
+      args: { ...args, action: actionType },
+      label,
+      url: searchUrl,
+      fallbackUrl: searchUrl,
+      songTitle,
+      artist,
+      playlistName,
+      status: "executed"
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
   if (name2 === "open_youtube") {
     const q2 = query || "trending music";
     const resolvedVideoId = typeof args.videoId === "string" && args.videoId.trim() ? args.videoId.trim() : void 0;
@@ -25176,7 +25547,101 @@ function executeDeviceAction(name2, args) {
   return null;
 }
 function actionConfirmation(action) {
-  var _a2, _b2, _c;
+  var _a2, _b2, _c, _d, _e2, _f, _g, _h, _i, _j, _k, _l;
+  if (action.name === "open_lark_player") {
+    const act = String(((_a2 = action.args) == null ? void 0 : _a2.action) || "play").toLowerCase();
+    const lr = action.larkResult || {};
+    const songCount = ((_b2 = action.songs) == null ? void 0 : _b2.length) || 0;
+    if (act === "create_playlist") {
+      return `🎵 Playlist **${action.playlistName || "Nshya"}** yakozwe muri **Lark Player**${songCount > 0 ? ` ikubiyemo indirimbo **${songCount}**` : ""}! 🎶✨`;
+    }
+    if (act === "add_to_playlist") {
+      return `➕ Indirimbo zongewe muri playlist **${action.playlistName || "Playlist"}** muri **Lark Player**! 🎶`;
+    }
+    if (act === "play_playlist") {
+      return `▶️ Playlist **${action.playlistName || ((_c = action.args) == null ? void 0 : _c.query) || ""}** irimo gucurangwa muri **Lark Player**! 🎧`;
+    }
+    if (act === "delete_playlist") {
+      return `🗑️ Playlist **${action.playlistName || ((_d = action.args) == null ? void 0 : _d.query) || ""}** yasibwe!`;
+    }
+    if (act === "list_playlists") {
+      const pls = Array.isArray(lr.playlists) ? lr.playlists : [];
+      return pls.length > 0 ? `📋 Playlists zibonetse muri **Lark Player**: ${pls.map((p2) => {
+        var _a3;
+        return `**${p2.name}** (${((_a3 = p2.songs) == null ? void 0 : _a3.length) || 0})`;
+      }).join(", ")} 🎶` : `📋 Nafunguye igice cya **Playlists** muri **Lark Player**! 🎶`;
+    }
+    if (act === "now_playing") {
+      const np = lr.nowPlaying || {};
+      return np.title ? `🎧 Ubu muri **Lark Player** harimo gucuranga: **${np.title}**${np.artist ? ` — ${np.artist}` : ""}!` : `🎧 Nta ndirimbo igaragara irimo gucurangwa ubu (cyangwa Notification Access ntirafungurwa).`;
+    }
+    if (act === "pause") return `⏸️ Indirimbo muri **Lark Player** yahagaritswe (Paused).`;
+    if (act === "resume" || act === "toggle") return `▶️ Indirimbo muri **Lark Player** irakomeje gucuranga! 🎶`;
+    if (act === "stop") return `⏹️ **Lark Player** yahagaze.`;
+    if (act === "next") return `⏭️ Nasimbukiye ku ndirimbo ikurikira muri **Lark Player**! 🎵`;
+    if (act === "previous" || act === "prev") return `⏮️ Nasubiye ku ndirimbo ibanza muri **Lark Player**! 🎵`;
+    if (act === "shuffle" || act === "shuffle_all") return `🔀 Indirimbo zirimo kuvangwa (Shuffle) muri **Lark Player**! 🎶`;
+    if (act === "repeat" || act === "loop") return `🔁 Uburyo bwo gusubiramo (Repeat) bwashyizweho muri **Lark Player**!`;
+    if (act === "equalizer") return `🎚️ Equalizer ya **Lark Player** yafunguwe!`;
+    if (act === "sleep_timer") return `⏲️ Sleep Timer muri **Lark Player** yafunguwe!`;
+    if (act === "lyrics") return `📝 Lyrics z'indirimbo zafunguwe muri **Lark Player**!`;
+    if (act === "favorite") return `❤️ Indirimbo yashyizwe muri Favorites muri **Lark Player**!`;
+    if (act === "volume_up" || act === "volume_down" || act === "set_volume" || act === "mute" || act === "unmute") {
+      const vol = typeof lr.volumePercent === "number" ? ` (${lr.volumePercent}%)` : "";
+      return `🔊 Ijwi ry'umuziki ryahinduwe${vol}!`;
+    }
+    if (act === "open" || act === "open_app") {
+      return `🎵 **Lark Player** yafunguwe! 🎧✨`;
+    }
+    return `🎵 Indirimbo **${action.songTitle || ((_e2 = action.args) == null ? void 0 : _e2.query) || "yo muri telefone"}** irimo gucurangwa muri **Lark Player**! 🎧✨`;
+  }
+  if (action.name === "open_audiomack") {
+    const act = String(((_f = action.args) == null ? void 0 : _f.action) || "play").toLowerCase();
+    const ar = action.audiomackResult || {};
+    const target = action.songTitle || ((_g = action.args) == null ? void 0 : _g.query) || action.artist || "indirimbo";
+    if (act === "create_playlist") {
+      return `🟠 Playlist **${action.playlistName || "Nshya"}** yakozwe muri **Audiomack**! 🎶✨`;
+    }
+    if (act === "add_to_playlist") {
+      return `➕ Indirimbo yongewe muri playlist **${action.playlistName || "Playlist"}** muri **Audiomack**! 🎶`;
+    }
+    if (act === "play_playlist") {
+      return `▶️ Playlist **${action.playlistName || ((_h = action.args) == null ? void 0 : _h.query) || ""}** irimo gucurangwa muri **Audiomack**! 🎧`;
+    }
+    if (act === "list_playlists") {
+      return `📋 Nafunguye igice cya **Playlists** muri **Audiomack**! 🎶`;
+    }
+    if (act === "download") {
+      return `⬇️ **Audiomack** yafunguwe ngo i-downloade **${target}** offline!`;
+    }
+    if (act === "favorite" || act === "like") {
+      return `❤️ **${target}** yakunzwe (Liked) muri **Audiomack**!`;
+    }
+    if (act === "repost") {
+      return `🔁 **${target}** yakorewe Repost muri **Audiomack**!`;
+    }
+    if (act === "follow") {
+      return `➕ Wakurikiye (Follow) **${action.artist || target}** muri **Audiomack**!`;
+    }
+    if (act === "now_playing") {
+      const np = ar.nowPlaying || {};
+      return np.title ? `🎧 Ubu muri **Audiomack** harimo gucuranga: **${np.title}**${np.artist ? ` — ${np.artist}` : ""}!` : `🎧 Nta ndirimbo ya **Audiomack** igaragara irimo gucurangwa ubu.`;
+    }
+    if (act === "pause") return `⏸️ Indirimbo muri **Audiomack** yahagaritswe (Paused).`;
+    if (act === "resume" || act === "toggle") return `▶️ Indirimbo muri **Audiomack** irakomeje gucuranga! 🎶`;
+    if (act === "stop") return `⏹️ **Audiomack** yahagaze.`;
+    if (act === "next") return `⏭️ Nasimbukiye ku ndirimbo ikurikira muri **Audiomack**! 🎵`;
+    if (act === "previous" || act === "prev") return `⏮️ Nasubiye ku ndirimbo ibanza muri **Audiomack**! 🎵`;
+    if (act === "shuffle") return `🔀 Indirimbo zirimo kuvangwa (Shuffle) muri **Audiomack**! 🎶`;
+    if (act === "repeat" || act === "loop") return `🔁 Repeat yashyizweho muri **Audiomack**!`;
+    if (act === "search") return `🔍 Ndashakisha **${target}** muri **Audiomack**! 🎧`;
+    if (act === "open" || act === "open_app") return `🟠 **Audiomack** yafunguwe! 🎧✨`;
+    return `🟠 **Audiomack** irimo gushakisha no gucuranga **${target}**! 🎧✨`;
+  }
+  if (action.name === "query_device_music") {
+    const count = ((_i = action.songs) == null ? void 0 : _i.length) || 0;
+    return `🎶 Muri telefone yawe habonetse indirimbo **${count}**! Urashaka ko Kevin AI igucurangira iyihe muri Lark Player cyangwa igukorera playlist? 🎧✨`;
+  }
   if (action.name === "open_youtube") {
     return `▶ Yamaze gufungura YouTube ngo icurange: **${action.videoTitle || "Indirimbo"}** 🎶✨`;
   }
@@ -25197,16 +25662,16 @@ function actionConfirmation(action) {
     return `💚 WhatsApp ifunguwe kuri **${action.contactName || action.phoneNumber}**!`;
   }
   if (action.name === "configure_whatsapp_autoreply") {
-    const pauseMinutes = Number(((_a2 = action.args) == null ? void 0 : _a2.pause_minutes) || 0);
+    const pauseMinutes = Number(((_j = action.args) == null ? void 0 : _j.pause_minutes) || 0);
     if (Number.isFinite(pauseMinutes) && pauseMinutes > 0) {
       const durationStr = formatRemainingPauseDuration(pauseMinutes * 6e4);
       return `⏸️ WhatsApp Auto-Reply yahagaritsweho **${durationStr}**! Nta butumwa izasubiza kugeza icyo gihe kirangiye cyangwa uyisubukuye.`;
     }
-    const enabled = ((_b2 = action.args) == null ? void 0 : _b2.enabled) !== false;
+    const enabled = ((_k = action.args) == null ? void 0 : _k.enabled) !== false;
     return enabled ? `💬 WhatsApp Auto-Reply yafunguwe! Kevin AI irahita isubiza ubutumwa bwinjiye kuri WhatsApp.` : `🔕 WhatsApp Auto-Reply yafunzwe burundu kugeza igihe uzayifungurira.`;
   }
   if (action.name === "scan_whatsapp_chats") {
-    const sr = ((_c = action.args) == null ? void 0 : _c.scanResult) || {};
+    const sr = ((_l = action.args) == null ? void 0 : _l.scanResult) || {};
     if (action.status === "needs_permission") {
       return `⚠️ Kugira ngo Kevin AI irebe chat za WhatsApp zose, emera **WA Notif** cyangwa **Accessibility** muri **Kevin Permission**.`;
     }
@@ -25435,6 +25900,62 @@ const getEndpoint = (path2) => {
   return `${PRODUCTION_BACKEND_URL}${path2}`;
 };
 const APK_DEVICE_ACTION_DECLARATIONS = [
+  {
+    name: "open_audiomack",
+    description: "Full control over Audiomack: open app, search/play songs, artists, albums or playlists, create/add/play playlists, download for offline, favorite/like, repost, follow artists, queue/play next, playback controls (pause, resume, next, previous, stop, seek, shuffle, repeat), equalizer, sleep timer, lyrics, share, tabs, volume, and now playing.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        query: { type: "STRING", description: "Song title, artist, album, playlist name, or search query for Audiomack." },
+        song_title: { type: "STRING", description: "Exact song title to search, play, download, like, or add." },
+        artist: { type: "STRING", description: "Artist name to search, play, or follow." },
+        playlist_name: { type: "STRING", description: "Playlist name to create, update, or play on Audiomack." },
+        tab: { type: "STRING", description: "Optional Audiomack tab to open (home, feed, trending, search, library, playlists, downloads, favorites, offline)." },
+        volume_percent: { type: "NUMBER", description: "Volume percentage (0-100) when action is set_volume." },
+        seek_seconds: { type: "NUMBER", description: "Position in seconds when action is seek." },
+        action: {
+          type: "STRING",
+          description: "Action to perform in Audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite, like, repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab, volume_up, volume_down, set_volume, mute, unmute, now_playing."
+        }
+      }
+    }
+  },
+  {
+    name: "open_lark_player",
+    description: "Full control over Lark Player: open app, play/search songs, create/edit/play/delete playlists, control playback (pause, resume, next, previous, stop, seek, shuffle, repeat), volume, equalizer, sleep timer, lyrics, queue, favorites, tabs, and now playing.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        query: { type: "STRING", description: "Song title, artist, album, playlist name, or search query for Lark Player." },
+        song_title: { type: "STRING", description: "Exact song title to play or add." },
+        artist: { type: "STRING", description: "Artist name of the song or playlist." },
+        playlist_name: { type: "STRING", description: "Playlist name to create, update, play, or delete." },
+        songs: {
+          type: "ARRAY",
+          items: { type: "STRING" },
+          description: "Optional list of song titles/queries to include when creating or updating a playlist."
+        },
+        tab: { type: "STRING", description: "Optional Lark Player tab to open (songs, playlists, artists, albums, folders, videos, downloads, settings)." },
+        volume_percent: { type: "NUMBER", description: "Volume percentage (0-100) when action is set_volume." },
+        seek_seconds: { type: "NUMBER", description: "Position in seconds when action is seek." },
+        action: {
+          type: "STRING",
+          description: "Action to perform in Lark Player: open, play, play_all, shuffle_all, search, create_playlist, add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing."
+        }
+      }
+    }
+  },
+  {
+    name: "query_device_music",
+    description: "Scan, search, and list local audio/music songs stored on the user's phone to browse the library or create a playlist.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        query: { type: "STRING", description: "Search query or artist name to filter device songs, or leave empty to list library." },
+        genre: { type: "STRING", description: "Optional genre filter." }
+      }
+    }
+  },
   {
     name: "open_youtube",
     description: "Search and play a song or video on YouTube.",
@@ -25859,9 +26380,9 @@ ${customInstructions}` : "",
 The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, or Kinyarwanda mixed with French/English words).
 - ALWAYS listen directly to the attached raw audio recording as your PRIMARY source of truth—even if a preliminary text transcript is also shown. If the preliminary transcript misheard any Kinyarwanda word, prefix, Rwandan name, or verb, trust what you actually hear in the raw audio!
 - Pay close attention to authentic Kinyarwanda phonetics, prefixes (na-, nta-, ndi-, nda-, nshaka-, mbwira-, mfasha-, sobanura-, hamagara-, uhamagare-, uncurangire-, wohereze-, fungura-, funga-), consonant clusters (cy, by, ry, ny, shy, pf, ts, mp, mb, nd, ng, nj, nk, bw, tw, rw), and Rwandan names. Never force Kinyarwanda sounds into random English words.
-- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.` : "",
+- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_audiomack, open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.` : "",
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(" | ")}]` : "",
-    `[AGENT PERMISSIONS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
+    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER + AUDIOMACK ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to BOTH Lark Player (local phone audio) AND Audiomack (online/offline streaming). When the user asks to open Audiomack, search a song/artist/album, play, download, like/favorite, repost, follow, create/add/play a playlist, queue, or control playback on Audiomack (e.g. 'fungura audiomack', 'shakisha ... kuri audiomack', 'curanga ... kuri audiomack', 'play ... on audiomack'), ALWAYS call open_audiomack(query, song_title, artist, playlist_name, action) immediately. You can perform ALL Audiomack actions via open_audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite, like, repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab, volume_up, volume_down, set_volume, mute, unmute, now_playing. When the user asks to open Lark Player, play a song/artist/album/all songs on Lark Player or local phone audio (e.g. 'fungura lark player', 'curanga ... kuri Lark Player', 'curanga indirimbo zo muri telefone', 'play on Lark'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately. You can perform ALL Lark Player actions via open_lark_player: open, play, play_all, shuffle_all, search, create_playlist (with optional songs array), add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing. When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext
   ].filter(Boolean).join("\n\n");
 }
@@ -26243,7 +26764,7 @@ ${att.textContent}` });
     var _a2, _b2, _c, _d, _e2, _f, _g, _h;
     const latestUserText = Array.isArray(requestContents) && requestContents.length > 0 ? (((_a2 = requestContents[requestContents.length - 1]) == null ? void 0 : _a2.parts) || []).map((p2) => typeof (p2 == null ? void 0 : p2.text) === "string" ? p2.text : "").join(" ").trim() : "";
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
-    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
+    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|ijwi|komeza|subiramo|ongeraho|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|repost|follow|download|offline|trending|library|ringtone|artists|albums|folders|now\s*playing|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
     const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText && !includeAudioFlag && !isExplicitDeviceCommand && !isAmakuruGreeting && /\b(news|amakuru|agezweho|bigezweho|ibigezweho|mashya|masha|weather|iteganyagihe|forecast|meteo|météo|score|scores|match|matches|umukino|imikino|results|standings|table|ranking|amanota|shampiyona|champiyona|premier league|champions league|la liga|afcon|world cup|price|igiciro|ibiciro|dollar|idorari|exchange rate|bitcoin|crypto|latest|recent|recently|update|updates|breaking|headlines|trending|tonight|last night|internet|google|search|shaka|online|live|president|perezida|minister|minisiteri|minisitiri|winner|who won|watsinze|yatsinze|batsinze|mancity|man city|manutd|man utd|arsenal|chelsea|liverpool|real madrid|barcelona|rayon|apr|kiyovu|mukura|amavubi|actualites|actualités|nouvelles|igihe|kigalitoday|rba|bbc)\b/i.test(latestUserText)
@@ -37635,7 +38156,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-Bo4edc0d.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-D_6yerzI.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -102788,6 +103309,7 @@ function AssistantOverlay({
       if (response) {
         setReplyText(response);
       }
+      playWhatsAppSound("receive");
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Habaye ikibazo mu gusubiza.");
     } finally {
@@ -103084,8 +103606,108 @@ function AssistantOverlay({
                       className: "shrink-0 rounded-full bg-[#25D366] px-3 py-1 text-[11px] font-bold text-white cursor-pointer",
                       children: action.name === "make_call" ? "Emerera & Hamagara" : "Emerera & Ohereza"
                     }
+                  ),
+                  (action.name === "open_lark_player" || action.name === "query_device_music") && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => {
+                        var _a2, _b2, _c;
+                        const act = String(((_a2 = action.args) == null ? void 0 : _a2.action) || "").toLowerCase();
+                        const q2 = action.songTitle || ((_b2 = action.args) == null ? void 0 : _b2.query) || "";
+                        if (act && act !== "play" && act !== "list_songs") {
+                          executeLarkPlayerCommand({
+                            action: act,
+                            query: q2,
+                            songTitle: action.songTitle,
+                            artist: action.artist,
+                            playlistName: action.playlistName,
+                            tab: (_c = action.args) == null ? void 0 : _c.tab
+                          });
+                        } else {
+                          playSongInLarkPlayer(q2, action.songTitle, action.artist);
+                        }
+                      },
+                      className: "shrink-0 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] px-3 py-1 text-[11px] font-bold text-white cursor-pointer flex items-center gap-1",
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { size: 10, fill: "currentColor" }),
+                        " Lark Player"
+                      ]
+                    }
+                  ),
+                  action.name === "open_audiomack" && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => {
+                        var _a2, _b2, _c;
+                        executeAudiomackCommand({
+                          action: String(((_a2 = action.args) == null ? void 0 : _a2.action) || "play"),
+                          query: ((_b2 = action.args) == null ? void 0 : _b2.query) || action.songTitle || "",
+                          songTitle: action.songTitle,
+                          artist: action.artist,
+                          playlistName: action.playlistName,
+                          tab: (_c = action.args) == null ? void 0 : _c.tab
+                        });
+                      },
+                      className: "shrink-0 rounded-full bg-[#FFA200] hover:bg-[#e59200] px-3 py-1 text-[11px] font-bold text-black cursor-pointer flex items-center gap-1",
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { size: 10, fill: "currentColor" }),
+                        " Audiomack"
+                      ]
+                    }
                   )
                 ] }),
+                (action.name === "open_lark_player" || action.name === "query_device_music") && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1 pt-1", children: [
+                  { cmd: "previous", label: "⏮️" },
+                  { cmd: "toggle", label: "⏯️" },
+                  { cmd: "next", label: "⏭️" },
+                  { cmd: "shuffle", label: "🔀" },
+                  { cmd: "equalizer", label: "🎚️ EQ" }
+                ].map((ctrl) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => executeLarkPlayerCommand({ action: ctrl.cmd }),
+                    className: "rounded-full bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] hover:border-[#00a884] px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer",
+                    children: ctrl.label
+                  },
+                  ctrl.cmd
+                )) }),
+                action.name === "open_audiomack" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1 pt-1", children: [
+                  { cmd: "previous", label: "⏮️" },
+                  { cmd: "toggle", label: "⏯️" },
+                  { cmd: "next", label: "⏭️" },
+                  { cmd: "shuffle", label: "🔀" },
+                  { cmd: "download", label: "⬇️" },
+                  { cmd: "favorite", label: "❤️" },
+                  { cmd: "list_playlists", label: "📋" }
+                ].map((ctrl) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => executeAudiomackCommand({ action: ctrl.cmd }),
+                    className: "rounded-full bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] hover:border-[#FFA200] px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer",
+                    children: ctrl.label
+                  },
+                  ctrl.cmd
+                )) }),
+                (action.name === "open_lark_player" || action.name === "query_device_music") && action.songs && action.songs.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1 max-h-36 overflow-y-auto pt-1", children: action.songs.slice(0, 6).map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => playSongInLarkPlayer(s2.uri || s2.id, s2.title, s2.artist),
+                    className: "w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] text-xs cursor-pointer hover:border-[#00a884]",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "font-bold truncate text-left", children: [
+                        s2.title,
+                        s2.artist ? ` - ${s2.artist}` : ""
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[#00a884] text-[11px] font-semibold shrink-0 ml-1", children: "▶ Curanga" })
+                    ]
+                  },
+                  s2.id || s2.uri
+                )) }),
                 action.status === "choose_contact" && action.contactMatches && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1", children: action.contactMatches.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   "button",
                   {
@@ -103530,7 +104152,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-6Gjsx5Yr.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-UzzCp2b8.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -104311,6 +104933,7 @@ function App() {
     const handleWaReplied = (e) => {
       const detail = e.detail;
       if (!detail) return;
+      playWhatsAppSound("receive");
       appendAgentOutbox({
         channel: "whatsapp-autoreply",
         recipient: detail.sender || "WhatsApp Contact",
@@ -105096,6 +105719,7 @@ function App() {
         };
         const newMessages = [...messages2, userMessage, aiMessage];
         updateSessionMessages(newMessages);
+        playWhatsAppSound("receive");
         return;
       } catch (err) {
         console.warn("Kevin photo request handler error:", err);
@@ -105130,6 +105754,7 @@ function App() {
         };
         const newMessages = [...messages2, userMessage, aiMessage];
         updateSessionMessages(newMessages);
+        playWhatsAppSound("receive");
         return;
       } catch (imgErr) {
         console.warn("AI Image Generation failed, proceeding with text response:", imgErr);
@@ -105197,6 +105822,7 @@ function App() {
           return updatedMessages;
         });
       });
+      playWhatsAppSound("receive");
       const lowerText = textToSend.toLowerCase();
       const isImageRequest = isImageGenerationRequest(textToSend);
       const isDocReq = !isImageRequest && (lowerText.includes("pdf") || lowerText.includes("dosiye") || lowerText.includes("inyandiko") || lowerText.includes("document") || lowerText.includes("report") || lowerText.includes("cv") || lowerText.includes("word") || lowerText.includes("docx") || lowerText.includes("doc") || lowerText.includes("txt"));
@@ -105842,7 +106468,21 @@ Click the **${docName}** file below to download and view the complete document.`
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-6xl", children: "😊" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-5xl absolute -top-1 -right-2 animate-wave", children: "👋" })
       ] }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold mb-3 text-gray-800 dark:text-[#e9edef]", children: "Muraho! Ndi Kevin AI." }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        motion.div,
+        {
+          initial: { opacity: 0, y: -8 },
+          animate: { opacity: 1, y: 0 },
+          transition: { duration: 0.5, ease: "easeOut" },
+          children: /* @__PURE__ */ jsxRuntimeExports.jsxs("h1", { className: "text-3xl sm:text-4xl md:text-5xl font-black mb-4 text-gray-900 dark:text-white tracking-tight", children: [
+            "Happy ",
+            (/* @__PURE__ */ new Date()).toLocaleDateString("en-US", { weekday: "long" }),
+            " ",
+            userName || localStorage.getItem("kevin_user_name") || localStorage.getItem("kevin_ai_user_name") || "Kevin",
+            "!"
+          ] })
+        }
+      ),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 dark:text-[#8696a0] mb-10 max-w-md leading-relaxed", dangerouslySetInnerHTML: { __html: "<span class='text-amber-600 dark:text-amber-500 font-bold'>Uwumukiza Kevin</span> ni we wandemye. Ubu ushobora kumbaza ikibazo icyo ari cyose, niteguye guhita nkugufasha?" } }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 gap-2.5 sm:gap-3 w-full max-w-md mx-auto", children: [
         { q: "Kevin ni muntu ki?", s: "Menya Kevin" },
@@ -105946,11 +106586,67 @@ Click the **${docName}** file below to download and view the complete document.`
                     }
                   ) }),
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-xl bg-[#075E54] text-white flex items-center justify-center text-lg shrink-0", children: message.action.name === "open_youtube" || message.action.name === "open_audiomack" ? "▶️" : message.action.name === "make_call" ? "📞" : message.action.name === "send_sms" ? "📩" : message.action.name === "open_whatsapp" || message.action.name === "configure_whatsapp_autoreply" || message.action.name === "scan_whatsapp_chats" ? "💬" : message.action.name === "open_camera" ? "📸" : "🚀" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-xl bg-[#075E54] text-white flex items-center justify-center text-lg shrink-0", children: message.action.name === "open_youtube" || message.action.name === "open_audiomack" ? "▶️" : message.action.name === "open_lark_player" || message.action.name === "query_device_music" ? "🎵" : message.action.name === "make_call" ? "📞" : message.action.name === "send_sms" ? "📩" : message.action.name === "open_whatsapp" || message.action.name === "configure_whatsapp_autoreply" || message.action.name === "scan_whatsapp_chats" ? "💬" : message.action.name === "open_camera" ? "📸" : "🚀" }),
                     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
                       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-bold text-gray-800 dark:text-[#e9edef] truncate", children: message.action.label }),
                       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0] truncate", children: message.action.name === "open_youtube" && message.action.channel ? `${message.action.channel} • Playing Now` : message.action.status === "choose_contact" ? "Hitamo contact imwe hasi" : message.action.status === "contact_not_found" ? "Contact ntirabikwa — shyiramo nimero cyangwa import" : message.action.status === "dialed_needs_permission" ? "Dialer yafunguwe — emera Direct Call permission" : message.action.status === "needs_permission" ? "Permission ikenewe kugira ngo ikore ako kanya" : message.action.status === "executed" ? "Byakozwe ako kanya (Full Agent)" : "Kevin AI Device Action" })
                     ] }),
+                    (message.action.name === "open_lark_player" || message.action.name === "query_device_music") && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => {
+                          var _a3, _b3, _c2;
+                          const act = String(((_a3 = message.action.args) == null ? void 0 : _a3.action) || "").toLowerCase();
+                          const q2 = message.action.songTitle || ((_b3 = message.action.args) == null ? void 0 : _b3.query) || "";
+                          if (act && act !== "play" && act !== "list_songs") {
+                            executeLarkPlayerCommand({
+                              action: act,
+                              query: q2,
+                              songTitle: message.action.songTitle,
+                              artist: message.action.artist,
+                              playlistName: message.action.playlistName,
+                              tab: (_c2 = message.action.args) == null ? void 0 : _c2.tab
+                            });
+                          } else {
+                            playSongInLarkPlayer(q2, message.action.songTitle, message.action.artist);
+                          }
+                          showToastMessage(
+                            message.action.playlistName ? `🎵 Fungura "${message.action.playlistName}" muri Lark Player!` : message.action.songTitle ? `🎵 Curanga "${message.action.songTitle}" muri Lark Player!` : "🎵 Fungura Lark Player!"
+                          );
+                        },
+                        className: "shrink-0 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] px-3.5 py-1.5 text-xs font-bold text-white cursor-pointer shadow-sm flex items-center gap-1.5",
+                        children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { size: 12, fill: "currentColor" }),
+                          " Lark Player"
+                        ]
+                      }
+                    ),
+                    message.action.name === "open_audiomack" && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => {
+                          var _a3, _b3, _c2, _d, _e2;
+                          executeAudiomackCommand({
+                            action: String(((_a3 = message.action.args) == null ? void 0 : _a3.action) || "play"),
+                            query: ((_b3 = message.action.args) == null ? void 0 : _b3.query) || message.action.songTitle || "",
+                            songTitle: message.action.songTitle,
+                            artist: message.action.artist,
+                            playlistName: message.action.playlistName,
+                            tab: (_c2 = message.action.args) == null ? void 0 : _c2.tab
+                          });
+                          showToastMessage(
+                            message.action.songTitle || ((_d = message.action.args) == null ? void 0 : _d.query) ? `🟠 Audiomack: "${message.action.songTitle || ((_e2 = message.action.args) == null ? void 0 : _e2.query)}"` : "🟠 Fungura Audiomack!"
+                          );
+                        },
+                        className: "shrink-0 rounded-full bg-[#FFA200] hover:bg-[#e59200] px-3.5 py-1.5 text-xs font-bold text-black cursor-pointer shadow-sm flex items-center gap-1.5",
+                        children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { size: 12, fill: "currentColor" }),
+                          " Audiomack"
+                        ]
+                      }
+                    ),
                     message.action.status === "needs_permission" ? /* @__PURE__ */ jsxRuntimeExports.jsx(
                       "button",
                       {
@@ -106013,6 +106709,88 @@ Click the **${docName}** file below to download and view the complete document.`
                         children: message.action.name === "open_youtube" ? "YouTube App" : message.action.name === "make_call" ? "Hamagara Nanone" : "Fungura"
                       }
                     ) : null
+                  ] }),
+                  (message.action.name === "open_lark_player" || message.action.name === "query_device_music") && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap items-center gap-1.5 pt-1", children: [
+                    { cmd: "previous", label: "⏮️ Prev" },
+                    { cmd: "toggle", label: "⏯️ Play/Pause" },
+                    { cmd: "next", label: "⏭️ Next" },
+                    { cmd: "shuffle", label: "🔀 Shuffle" },
+                    { cmd: "equalizer", label: "🎚️ EQ" },
+                    { cmd: "list_playlists", label: "📋 Playlists" }
+                  ].map((ctrl) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => {
+                        executeLarkPlayerCommand({ action: ctrl.cmd });
+                        showToastMessage(`🎵 Lark Player: ${ctrl.label}`);
+                      },
+                      className: "rounded-full bg-white dark:bg-[#111b21] hover:border-[#00a884] border border-gray-200 dark:border-[#2f3b43] px-2.5 py-1 text-[11px] font-semibold text-gray-700 dark:text-[#d1d7db] cursor-pointer",
+                      children: ctrl.label
+                    },
+                    ctrl.cmd
+                  )) }),
+                  message.action.name === "open_audiomack" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap items-center gap-1.5 pt-1", children: [
+                    { cmd: "previous", label: "⏮️ Prev" },
+                    { cmd: "toggle", label: "⏯️ Play/Pause" },
+                    { cmd: "next", label: "⏭️ Next" },
+                    { cmd: "shuffle", label: "🔀 Shuffle" },
+                    { cmd: "download", label: "⬇️ Download" },
+                    { cmd: "favorite", label: "❤️ Like" },
+                    { cmd: "list_playlists", label: "📋 Playlists" }
+                  ].map((ctrl) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => {
+                        executeAudiomackCommand({ action: ctrl.cmd });
+                        showToastMessage(`🟠 Audiomack: ${ctrl.label}`);
+                      },
+                      className: "rounded-full bg-white dark:bg-[#111b21] hover:border-[#FFA200] border border-gray-200 dark:border-[#2f3b43] px-2.5 py-1 text-[11px] font-semibold text-gray-700 dark:text-[#d1d7db] cursor-pointer",
+                      children: ctrl.label
+                    },
+                    ctrl.cmd
+                  )) }),
+                  (message.action.name === "open_lark_player" || message.action.name === "query_device_music") && message.action.songs && message.action.songs.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1.5 pt-1.5", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between text-[11px] font-bold text-gray-600 dark:text-gray-300 px-1", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+                        "Indirimbo zo muri telefone (",
+                        message.action.songs.length,
+                        "):"
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[#00a884]", children: "Lark Player Ready 🎧" })
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-48 overflow-y-auto space-y-1 pr-1", children: message.action.songs.slice(0, 20).map((song) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                      "div",
+                      {
+                        className: "flex items-center justify-between gap-2 rounded-lg bg-white dark:bg-[#111b21] px-3 py-2 border border-gray-200 dark:border-[#2f3b43] hover:border-[#00a884] transition-colors",
+                        children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-bold text-gray-800 dark:text-[#e9edef] truncate", children: song.title }),
+                            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-[11px] text-gray-500 dark:text-[#8696a0] truncate", children: [
+                              song.artist || "Unknown Artist",
+                              song.album ? ` • ${song.album}` : ""
+                            ] })
+                          ] }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                            "button",
+                            {
+                              type: "button",
+                              onClick: () => {
+                                playSongInLarkPlayer(song.uri || song.id, song.title, song.artist);
+                                showToastMessage(`🎵 Curanga "${song.title}" muri Lark Player!`);
+                              },
+                              className: "shrink-0 rounded-full bg-[#00a884] hover:bg-[#075E54] px-3 py-1 text-[11px] font-bold text-white cursor-pointer flex items-center gap-1",
+                              children: [
+                                /* @__PURE__ */ jsxRuntimeExports.jsx(Play, { size: 10, fill: "currentColor" }),
+                                " Curanga"
+                              ]
+                            }
+                          )
+                        ]
+                      },
+                      song.id || song.uri
+                    )) })
                   ] }),
                   message.action.status === "choose_contact" && message.action.contactMatches && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1.5 pt-1", children: message.action.contactMatches.map((contact) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
                     "div",
@@ -107226,6 +108004,14 @@ Click the **${docName}** file below to download and view the complete document.`
                   "Contacts: ",
                   nativeAgentStatus.hasContactsPermission ? "Yemewe" : "Ntiraboneka"
                 ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `px-2.5 py-1.5 rounded-lg font-semibold ${nativeAgentStatus.hasMusicPermission ? "bg-emerald-500/20 text-emerald-800 dark:text-emerald-200" : "bg-amber-500/20 text-amber-800 dark:text-amber-200"}`, children: [
+                  "Music Access: ",
+                  nativeAgentStatus.hasMusicPermission ? "Yemewe" : "Ntiraboneka"
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `px-2.5 py-1.5 rounded-lg font-semibold ${nativeAgentStatus.larkPlayerInstalled ? "bg-emerald-500/20 text-emerald-800 dark:text-emerald-200" : "bg-blue-500/20 text-blue-800 dark:text-blue-200"}`, children: [
+                  "Lark Player: ",
+                  nativeAgentStatus.larkPlayerInstalled ? "Installed" : "Ready"
+                ] }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   "button",
                   {
@@ -107273,7 +108059,7 @@ Click the **${docName}** file below to download and view the complete document.`
                 )
               ] }),
               !nativeAgentStatus.hasAccessibility && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-amber-800 dark:text-amber-200", children: "Kanda “Accessibility: Fungura” wemerere “Kevin AI Full Agent” kugira ngo ubutumwa bwa WhatsApp buhite bukanda Send ako kanya." }),
-              (!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission || !nativeAgentStatus.hasMicPermission) && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              (!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission || !nativeAgentStatus.hasMicPermission || !nativeAgentStatus.hasMusicPermission) && /* @__PURE__ */ jsxRuntimeExports.jsx(
                 "button",
                 {
                   type: "button",
@@ -107282,7 +108068,7 @@ Click the **${docName}** file below to download and view the complete document.`
                     return (_b3 = (_a3 = window.KevinAgentBridge) == null ? void 0 : _a3.requestAgentPermissions) == null ? void 0 : _b3.call(_a3);
                   },
                   className: "w-full py-2 rounded-lg bg-[#00a884] hover:bg-[#075E54] text-white text-xs font-bold cursor-pointer",
-                  children: "Saba Permissions (SMS, Direct Call, Contacts & Mic)"
+                  children: "Saba Permissions (SMS, Call, Contacts, Mic & Audio Music)"
                 }
               )
             ] }),

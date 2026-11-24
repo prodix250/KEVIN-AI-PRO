@@ -8,7 +8,7 @@ import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settin
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, playWhatsAppSound, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource, playSongInLarkPlayer, executeLarkPlayerCommand, getDeviceSongs, DeviceSong } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, playWhatsAppSound, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource, playSongInLarkPlayer, executeLarkPlayerCommand, executeAudiomackCommand, getDeviceSongs, DeviceSong } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
@@ -2587,6 +2587,29 @@ export default function App() {
                               <Play size={12} fill="currentColor" /> Lark Player
                             </button>
                           )}
+                          {message.action.name === 'open_audiomack' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                executeAudiomackCommand({
+                                  action: String(message.action!.args?.action || 'play'),
+                                  query: message.action!.args?.query || message.action!.songTitle || '',
+                                  songTitle: message.action!.songTitle,
+                                  artist: message.action!.artist,
+                                  playlistName: message.action!.playlistName,
+                                  tab: message.action!.args?.tab,
+                                });
+                                showToastMessage(
+                                  message.action!.songTitle || message.action!.args?.query
+                                    ? `🟠 Audiomack: "${message.action!.songTitle || message.action!.args?.query}"`
+                                    : '🟠 Fungura Audiomack!'
+                                );
+                              }}
+                              className="shrink-0 rounded-full bg-[#FFA200] hover:bg-[#e59200] px-3.5 py-1.5 text-xs font-bold text-black cursor-pointer shadow-sm flex items-center gap-1.5"
+                            >
+                              <Play size={12} fill="currentColor" /> Audiomack
+                            </button>
+                          )}
                           {message.action.status === 'needs_permission' ? (
                             <button
                               type="button"
@@ -2678,6 +2701,32 @@ export default function App() {
                                   showToastMessage(`🎵 Lark Player: ${ctrl.label}`);
                                 }}
                                 className="rounded-full bg-white dark:bg-[#111b21] hover:border-[#00a884] border border-gray-200 dark:border-[#2f3b43] px-2.5 py-1 text-[11px] font-semibold text-gray-700 dark:text-[#d1d7db] cursor-pointer"
+                              >
+                                {ctrl.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {message.action.name === 'open_audiomack' && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            {[
+                              { cmd: 'previous', label: '⏮️ Prev' },
+                              { cmd: 'toggle', label: '⏯️ Play/Pause' },
+                              { cmd: 'next', label: '⏭️ Next' },
+                              { cmd: 'shuffle', label: '🔀 Shuffle' },
+                              { cmd: 'download', label: '⬇️ Download' },
+                              { cmd: 'favorite', label: '❤️ Like' },
+                              { cmd: 'list_playlists', label: '📋 Playlists' },
+                            ].map((ctrl) => (
+                              <button
+                                key={ctrl.cmd}
+                                type="button"
+                                onClick={() => {
+                                  executeAudiomackCommand({ action: ctrl.cmd });
+                                  showToastMessage(`🟠 Audiomack: ${ctrl.label}`);
+                                }}
+                                className="rounded-full bg-white dark:bg-[#111b21] hover:border-[#FFA200] border border-gray-200 dark:border-[#2f3b43] px-2.5 py-1 text-[11px] font-semibold text-gray-700 dark:text-[#d1d7db] cursor-pointer"
                               >
                                 {ctrl.label}
                               </button>

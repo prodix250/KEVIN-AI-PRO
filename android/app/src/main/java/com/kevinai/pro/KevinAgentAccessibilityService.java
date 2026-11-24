@@ -69,6 +69,9 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             } else if (isLarkPlayerPackage(pkg)
                     && KevinAgentPrefs.isPendingLarkActionActive(this)) {
                 handleLarkPlayerAction(root, pkg);
+            } else if (isAudiomackPackage(pkg)
+                    && KevinAgentPrefs.isPendingAudiomackActionActive(this)) {
+                handleAudiomackAction(root, pkg);
             }
         } finally {
             root.recycle();
@@ -772,6 +775,284 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                     return new String[] { tab.toLowerCase(Locale.ROOT) };
                 }
                 return new String[] { "music", "songs" };
+            default:
+                return new String[0];
+        }
+    }
+
+    private boolean isAudiomackPackage(String pkg) {
+        if (TextUtils.isEmpty(pkg)) return false;
+        return pkg.toLowerCase(Locale.ROOT).contains("audiomack");
+    }
+
+    private void handleAudiomackAction(AccessibilityNodeInfo root, String pkg) {
+        long now = System.currentTimeMillis();
+        if (now - lastNavigationAt < 650L) {
+            return;
+        }
+        String actionJson = KevinAgentPrefs.getPendingAudiomackActionJson(this);
+        if (TextUtils.isEmpty(actionJson)) {
+            KevinAgentPrefs.clearPendingAudiomackAction(this);
+            return;
+        }
+
+        int step = KevinAgentPrefs.incrementPendingAudiomackStep(this);
+        if (step > 24) {
+            KevinAgentPrefs.clearPendingAudiomackAction(this);
+            return;
+        }
+
+        try {
+            org.json.JSONObject task = new org.json.JSONObject(actionJson);
+            String action = task.optString("action", "play").toLowerCase(Locale.ROOT);
+            String query = task.optString("query", "").trim();
+            String songTitle = task.optString("songTitle", "").trim();
+            String artist = task.optString("artist", "").trim();
+            String playlistName = task.optString("playlistName", "").trim();
+            String tab = task.optString("tab", "").trim();
+            boolean alreadySearched = task.optBoolean("_searched", false);
+            boolean clickedResult = task.optBoolean("_clickedResult", false);
+            boolean secondaryDone = task.optBoolean("_secondaryDone", false);
+
+            // Dismiss Audiomack onboarding/upgrade/promo dialogs if present
+            if (clickNodeByKeywords(root, new String[] { "skip", "not now", "maybe later", "no thanks", "dismiss", "close ad" }, false)) {
+                lastNavigationAt = now;
+                return;
+            }
+
+            if ("open".equals(action) || "open_app".equals(action)) {
+                KevinAgentPrefs.clearPendingAudiomackAction(this);
+                return;
+            }
+
+            String targetText = !TextUtils.isEmpty(songTitle) ? songTitle : query;
+            boolean needsSongSearchFirst = !TextUtils.isEmpty(targetText) && (
+                    "play".equals(action) || "play_song".equals(action) || "search".equals(action)
+                            || "download".equals(action) || "favorite".equals(action) || "like".equals(action)
+                            || "repost".equals(action) || "follow".equals(action) || "queue".equals(action)
+                            || "add_to_queue".equals(action) || "play_next".equals(action)
+                            || "add_to_playlist".equals(action) || "share".equals(action)
+            );
+
+            if (needsSongSearchFirst && !clickedResult) {
+                if (alreadySearched && clickBestMatchingSongNode(root, targetText, artist)) {
+                    task.put("_clickedResult", true);
+                    KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
+                    lastNavigationAt = now;
+                    if ("search".equals(action)) {
+                        KevinAgentPrefs.clearPendingAudiomackAction(this);
+                    }
+                    return;
+                }
+
+                AccessibilityNodeInfo searchBox = findEditableNode(root);
+                if (searchBox != null && !alreadySearched) {
+                    Bundle args = new Bundle();
+                    args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, targetText);
+                    searchBox.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                    if (searchBox.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                        task.put("_searched", true);
+                        KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
+                        lastNavigationAt = now;
+                        clickNodeByKeywords(root, new String[] { "search", "done", "go" }, true);
+                        return;
+                    }
+                }
+
+                if (clickBestMatchingSongNode(root, targetText, artist)) {
+                    task.put("_clickedResult", true);
+                    KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
+                    lastNavigationAt = now;
+                    if ("search".equals(action) || "play".equals(action) || "play_song".equals(action)) {
+                        // Allow one more pass if a Play button shows up on track page
+                        return;
+                    }
+                    return;
+                }
+
+                if (!alreadySearched && clickSearchTrigger(root, pkg)) {
+                    lastNavigationAt = now;
+                    return;
+                }
+            }
+
+            // If we clicked a track/result for playback
+            if ("play".equals(action) || "play_song".equals(action)) {
+                if (clickedResult) {
+                    if (clickNodeByKeywords(root, new String[] { "play", "play all", "shuffle", "curanga" }, true)) {
+                        KevinAgentPrefs.clearPendingAudiomackAction(this);
+                        lastNavigationAt = now;
+                        return;
+                    }
+                    if (step >= 7) {
+                        KevinAgentPrefs.clearPendingAudiomackAction(this);
+                    }
+                    return;
+                }
+                if (TextUtils.isEmpty(targetText)) {
+                    if (clickNodeByKeywords(root, new String[] { "play", "play all", "shuffle", "trending" }, true)) {
+                        KevinAgentPrefs.clearPendingAudiomackAction(this);
+                        lastNavigationAt = now;
+                    }
+                    return;
+                }
+            }
+
+            // Playlist creation or adding track to playlist inside Audiomack
+            if ("create_playlist".equals(action) || "add_to_playlist".equals(action)) {
+                String pName = !TextUtils.isEmpty(playlistName) ? playlistName : (!TextUtils.isEmpty(query) ? query : "Kevin Mix");
+                if (!task.optBoolean("_playlistNamed", false)) {
+                    AccessibilityNodeInfo input = findEditableNode(root);
+                    if (input != null && (!needsSongSearchFirst || clickedResult)) {
+                        Bundle args = new Bundle();
+                        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, pName);
+                        input.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                        if (input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                            task.put("_playlistNamed", true);
+                            KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
+                            lastNavigationAt = now;
+                            mainHandler.postDelayed(() -> {
+                                AccessibilityNodeInfo fresh = getRootInActiveWindow();
+                                if (fresh != null) {
+                                    try {
+                                        clickNodeByKeywords(fresh, new String[] { "create", "save", "done", "ok", "confirm", "add" }, false);
+                                    } finally {
+                                        fresh.recycle();
+                                    }
+                                }
+                            }, 300L);
+                            return;
+                        }
+                    }
+                } else {
+                    clickNodeByKeywords(root, new String[] { "create", "save", "done", "ok", "confirm", "add" }, false);
+                    KevinAgentPrefs.clearPendingAudiomackAction(this);
+                    lastNavigationAt = now;
+                    return;
+                }
+
+                if ("add_to_playlist".equals(action) && clickedResult && !TextUtils.isEmpty(pName)) {
+                    if (clickExactOrContainsText(root, pName)) {
+                        KevinAgentPrefs.clearPendingAudiomackAction(this);
+                        lastNavigationAt = now;
+                        return;
+                    }
+                }
+                if (clickNodeByKeywords(root, new String[] { "add to playlist", "new playlist", "create playlist", "create new" }, true)) {
+                    lastNavigationAt = now;
+                    return;
+                }
+                if (!clickedResult && clickNodeByKeywords(root, new String[] { "my library", "library", "playlists", "playlist" }, true)) {
+                    lastNavigationAt = now;
+                    return;
+                }
+                if (clickedResult && !secondaryDone) {
+                    if (clickNodeByKeywords(root, new String[] { "more", "menu", "options", "overflow" }, true)) {
+                        task.put("_secondaryDone", true);
+                        KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
+                        lastNavigationAt = now;
+                    }
+                }
+                return;
+            }
+
+            if ("play_playlist".equals(action)) {
+                String pName = !TextUtils.isEmpty(playlistName) ? playlistName : query;
+                if (!task.optBoolean("_openedPlaylist", false) && !TextUtils.isEmpty(pName)) {
+                    if (clickExactOrContainsText(root, pName)) {
+                        task.put("_openedPlaylist", true);
+                        KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
+                        lastNavigationAt = now;
+                        return;
+                    }
+                }
+                if (task.optBoolean("_openedPlaylist", false)) {
+                    if (clickNodeByKeywords(root, new String[] { "play", "play all", "shuffle" }, true)) {
+                        KevinAgentPrefs.clearPendingAudiomackAction(this);
+                        lastNavigationAt = now;
+                        return;
+                    }
+                }
+                if (clickNodeByKeywords(root, new String[] { "playlists", "playlist", "my library", "library" }, true)) {
+                    lastNavigationAt = now;
+                    return;
+                }
+            }
+
+            // Track/Artist UI actions (download, favorite/like, repost, follow, queue, play_next, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab, list_playlists, playback controls)
+            String[] targetKeywords = resolveAudiomackActionKeywords(action, tab);
+            if (targetKeywords.length > 0 && clickNodeByKeywords(root, targetKeywords, true)) {
+                KevinAgentPrefs.clearPendingAudiomackAction(this);
+                lastNavigationAt = now;
+                return;
+            }
+
+            if (step <= 4) {
+                if (clickNodeByKeywords(root, new String[] { "more", "menu", "options", "now playing", "player" }, true)) {
+                    lastNavigationAt = now;
+                    return;
+                }
+            }
+            if (step >= 8) {
+                KevinAgentPrefs.clearPendingAudiomackAction(this);
+            }
+        } catch (Exception ignored) {
+            KevinAgentPrefs.clearPendingAudiomackAction(this);
+        }
+    }
+
+    private String[] resolveAudiomackActionKeywords(String action, String tab) {
+        switch (action) {
+            case "pause":
+                return new String[] { "pause" };
+            case "resume":
+            case "toggle":
+                return new String[] { "play", "pause" };
+            case "next":
+                return new String[] { "next", "skip next", "forward" };
+            case "previous":
+            case "prev":
+                return new String[] { "previous", "prev", "skip previous" };
+            case "download":
+                return new String[] { "download", "save offline", "offline" };
+            case "favorite":
+            case "like":
+                return new String[] { "favorite", "favourite", "like", "heart" };
+            case "repost":
+                return new String[] { "repost", "re-up", "reup" };
+            case "follow":
+                return new String[] { "follow", "subscribe" };
+            case "queue":
+            case "add_to_queue":
+                return new String[] { "add to queue", "queue", "up next" };
+            case "play_next":
+                return new String[] { "play next" };
+            case "shuffle":
+                return new String[] { "shuffle" };
+            case "repeat":
+            case "loop":
+                return new String[] { "repeat", "loop" };
+            case "equalizer":
+            case "eq":
+                return new String[] { "equalizer", "eq", "audio settings" };
+            case "sleep_timer":
+            case "timer":
+                return new String[] { "sleep timer", "sleep", "timer" };
+            case "lyrics":
+                return new String[] { "lyrics", "lyric" };
+            case "share":
+                return new String[] { "share" };
+            case "list_playlists":
+                return new String[] { "playlists", "playlist", "my library" };
+            case "open_tab":
+                if (!TextUtils.isEmpty(tab)) {
+                    String lowerTab = tab.toLowerCase(Locale.ROOT);
+                    if ("library".equals(lowerTab) || "offline".equals(lowerTab)) {
+                        return new String[] { "my library", "library", "offline" };
+                    }
+                    return new String[] { lowerTab };
+                }
+                return new String[] { "home", "trending", "feed" };
             default:
                 return new String[0];
         }

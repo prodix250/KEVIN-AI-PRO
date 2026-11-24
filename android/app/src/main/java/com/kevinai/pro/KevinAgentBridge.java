@@ -129,6 +129,7 @@ public class KevinAgentBridge {
                     : ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
             obj.put("hasMusicPermission", hasAudioPerm);
             obj.put("larkPlayerInstalled", findInstalledLarkPlayerPackage() != null);
+            obj.put("audiomackInstalled", findInstalledAudiomackPackage() != null);
             return obj.toString();
         } catch (Exception e) {
             return "{\"isAndroid\":true}";
@@ -1277,6 +1278,273 @@ public class KevinAgentBridge {
             summary.put("playlists", new JSONArray(KevinAgentPrefs.getLarkPlaylistsJson(activity)));
         } catch (Exception ignored) {}
         return summary.toString();
+    }
+
+    public String findInstalledAudiomackPackage() {
+        PackageManager pm = activity.getPackageManager();
+        String[] candidatePkgs = new String[] {
+                "com.audiomack",
+                "com.audiomack.lite"
+        };
+        for (String pkg : candidatePkgs) {
+            try {
+                pm.getPackageInfo(pkg, 0);
+                return pkg;
+            } catch (Exception ignored) {}
+            try {
+                if (pm.getLaunchIntentForPackage(pkg) != null) {
+                    return pkg;
+                }
+            } catch (Exception ignored) {}
+        }
+        try {
+            List<android.content.pm.ApplicationInfo> apps = pm.getInstalledApplications(0);
+            for (android.content.pm.ApplicationInfo app : apps) {
+                if (app.packageName != null) {
+                    String pkgLower = app.packageName.toLowerCase(Locale.ROOT);
+                    if (pkgLower.contains("audiomack")) {
+                        return app.packageName;
+                    }
+                    try {
+                        CharSequence label = pm.getApplicationLabel(app);
+                        if (label != null && label.toString().toLowerCase(Locale.ROOT).contains("audiomack")) {
+                            return app.packageName;
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private boolean launchAudiomackHome(String amPkg, String pendingActionJson, String webFallbackUrl) {
+        if (!TextUtils.isEmpty(pendingActionJson)) {
+            KevinAgentPrefs.armPendingAudiomackAction(activity, pendingActionJson, 28_000L);
+        }
+        if (amPkg != null) {
+            try {
+                Intent launchIntent = activity.getPackageManager().getLaunchIntentForPackage(amPkg);
+                if (launchIntent != null) {
+                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+                    activity.startActivity(launchIntent);
+                    return true;
+                }
+            } catch (Exception ignored) {}
+        }
+        if (!TextUtils.isEmpty(webFallbackUrl)) {
+            try {
+                Intent webIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(webFallbackUrl));
+                webIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(webIntent);
+                return true;
+            } catch (Exception ignored) {}
+        }
+        return false;
+    }
+
+    @JavascriptInterface
+    public boolean openAudiomack(String query, String action) {
+        try {
+            JSONObject req = new JSONObject();
+            req.put("query", query != null ? query : "");
+            req.put("action", !TextUtils.isEmpty(action) ? action : (TextUtils.isEmpty(query) ? "open" : "play"));
+            executeAudiomackAction(req.toString());
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public String executeAudiomackAction(String actionJson) {
+        JSONObject result = new JSONObject();
+        try {
+            JSONObject req = !TextUtils.isEmpty(actionJson) ? new JSONObject(actionJson) : new JSONObject();
+            String action = req.optString("action", "play").trim().toLowerCase(Locale.ROOT);
+            String query = req.optString("query", "").trim();
+            String songTitle = req.optString("songTitle", req.optString("song_title", "")).trim();
+            String artist = req.optString("artist", "").trim();
+            String playlistName = req.optString("playlistName", req.optString("playlist_name", "")).trim();
+            String tab = req.optString("tab", "").trim();
+            int volumePercent = req.optInt("volumePercent", req.optInt("volume_percent", -1));
+            long seekMs = req.optLong("seekMs", req.optInt("seek_seconds", 0) * 1000L);
+
+            String effectiveQuery = !TextUtils.isEmpty(query)
+                    ? query
+                    : ((!TextUtils.isEmpty(songTitle) ? songTitle : "")
+                            + (!TextUtils.isEmpty(artist) ? " " + artist : "")).trim();
+            String webFallbackUrl = !TextUtils.isEmpty(effectiveQuery)
+                    ? "https://audiomack.com/search?q=" + Uri.encode(effectiveQuery)
+                    : "https://audiomack.com";
+
+            String amPkg = findInstalledAudiomackPackage();
+            result.put("ok", true);
+            result.put("action", action);
+            result.put("audiomackInstalled", amPkg != null);
+            result.put("audiomackPackage", amPkg != null ? amPkg : "");
+            result.put("webFallbackUrl", webFallbackUrl);
+
+            if ("now_playing".equals(action)) {
+                JSONObject np = new JSONObject(KevinNotificationListenerService.getAudiomackNowPlayingJson(activity));
+                result.put("nowPlaying", np);
+                return result.toString();
+            }
+
+            if ("volume_up".equals(action) || "volume_down".equals(action) || "set_volume".equals(action)
+                    || "mute".equals(action) || "unmute".equals(action)) {
+                AudioManager am = (AudioManager) activity.getSystemService(Activity.AUDIO_SERVICE);
+                if (am != null) {
+                    int maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                    if ("volume_up".equals(action)) {
+                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI);
+                    } else if ("volume_down".equals(action)) {
+                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI);
+                    } else if ("mute".equals(action)) {
+                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI);
+                    } else if ("unmute".equals(action)) {
+                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_SHOW_UI);
+                    } else if ("set_volume".equals(action) && volumePercent >= 0) {
+                        int targetVol = Math.max(0, Math.min(maxVol, Math.round((volumePercent / 100.0f) * maxVol)));
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, AudioManager.FLAG_SHOW_UI);
+                    }
+                    int updatedVol = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+                    result.put("volumePercent", maxVol > 0 ? Math.round((updatedVol * 100.0f) / maxVol) : 0);
+                }
+                return result.toString();
+            }
+
+            if ("pause".equals(action) || "resume".equals(action) || "toggle".equals(action)
+                    || "stop".equals(action) || "next".equals(action) || "previous".equals(action)
+                    || "prev".equals(action) || "fast_forward".equals(action) || "rewind".equals(action)
+                    || "seek".equals(action)) {
+                boolean controlled = KevinNotificationListenerService.controlAudiomackMediaSession(activity, action, seekMs);
+                if (!controlled) {
+                    int keyCode = -1;
+                    switch (action) {
+                        case "pause": keyCode = KeyEvent.KEYCODE_MEDIA_PAUSE; break;
+                        case "resume": keyCode = KeyEvent.KEYCODE_MEDIA_PLAY; break;
+                        case "toggle": keyCode = KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE; break;
+                        case "stop": keyCode = KeyEvent.KEYCODE_MEDIA_STOP; break;
+                        case "next": keyCode = KeyEvent.KEYCODE_MEDIA_NEXT; break;
+                        case "previous":
+                        case "prev": keyCode = KeyEvent.KEYCODE_MEDIA_PREVIOUS; break;
+                        case "fast_forward": keyCode = KeyEvent.KEYCODE_MEDIA_FAST_FORWARD; break;
+                        case "rewind": keyCode = KeyEvent.KEYCODE_MEDIA_REWIND; break;
+                    }
+                    if (keyCode != -1) {
+                        controlled = dispatchMediaKey(keyCode);
+                    }
+                }
+                if (!controlled && amPkg != null) {
+                    JSONObject pending = new JSONObject();
+                    pending.put("action", action);
+                    final String finalPending = pending.toString();
+                    activity.runOnUiThread(() -> launchAudiomackHome(amPkg, finalPending, webFallbackUrl));
+                }
+                result.put("controlled", controlled);
+                result.put("nowPlaying", new JSONObject(KevinNotificationListenerService.getAudiomackNowPlayingJson(activity)));
+                return result.toString();
+            }
+
+            if ("list_playlists".equals(action)) {
+                JSONArray playlists = new JSONArray(KevinAgentPrefs.getAudiomackPlaylistsJson(activity));
+                result.put("playlists", playlists);
+                if (amPkg != null) {
+                    JSONObject pending = new JSONObject();
+                    pending.put("action", "list_playlists");
+                    final String finalPending = pending.toString();
+                    activity.runOnUiThread(() -> launchAudiomackHome(amPkg, finalPending, webFallbackUrl));
+                } else {
+                    activity.runOnUiThread(() -> launchAudiomackHome(null, "", "https://audiomack.com/my-library/playlists"));
+                }
+                return result.toString();
+            }
+
+            if ("create_playlist".equals(action) || "add_to_playlist".equals(action)) {
+                String pName = !TextUtils.isEmpty(playlistName) ? playlistName : (!TextUtils.isEmpty(query) ? query : "Kevin Mix");
+                JSONArray trackedSongs = new JSONArray();
+                if (!TextUtils.isEmpty(songTitle) || !TextUtils.isEmpty(effectiveQuery)) {
+                    JSONObject songEntry = new JSONObject();
+                    songEntry.put("title", !TextUtils.isEmpty(songTitle) ? songTitle : effectiveQuery);
+                    songEntry.put("artist", artist);
+                    trackedSongs.put(songEntry);
+                }
+                KevinAgentPrefs.saveAudiomackPlaylist(activity, pName, trackedSongs, "add_to_playlist".equals(action));
+                result.put("playlistName", pName);
+                result.put("playlists", new JSONArray(KevinAgentPrefs.getAudiomackPlaylistsJson(activity)));
+            }
+
+            if ("open".equals(action) || "open_app".equals(action)) {
+                activity.runOnUiThread(() -> launchAudiomackHome(amPkg, "", webFallbackUrl));
+                return result.toString();
+            }
+
+            if ("equalizer".equals(action) || "eq".equals(action)) {
+                activity.runOnUiThread(() -> {
+                    try {
+                        if (amPkg != null) {
+                            JSONObject pending = new JSONObject();
+                            pending.put("action", "equalizer");
+                            launchAudiomackHome(amPkg, pending.toString(), webFallbackUrl);
+                        } else {
+                            Intent eqIntent = new Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL);
+                            eqIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            activity.startActivity(eqIntent);
+                        }
+                    } catch (Exception ignored) {}
+                });
+                return result.toString();
+            }
+
+            if (amPkg == null) {
+                activity.runOnUiThread(() -> launchAudiomackHome(null, "", webFallbackUrl));
+                return result.toString();
+            }
+
+            // Build pending task for Audiomack Accessibility Automation (play, search, create_playlist, add_to_playlist, play_playlist, download, favorite, repost, follow, queue, add_to_queue, play_next, shuffle, repeat, sleep_timer, lyrics, share, open_tab)
+            JSONObject pending = new JSONObject();
+            pending.put("action", action);
+            pending.put("query", effectiveQuery);
+            pending.put("songTitle", songTitle);
+            pending.put("artist", artist);
+            pending.put("playlistName", playlistName);
+            pending.put("tab", tab);
+            final String finalPending = pending.toString();
+
+            activity.runOnUiThread(() -> {
+                // If user asked to search/play by query and audiomack deep link is supported, launch app & arm accessibility
+                if (("play".equals(action) || "play_song".equals(action) || "search".equals(action)) && !TextUtils.isEmpty(effectiveQuery)) {
+                    try {
+                        KevinAgentPrefs.armPendingAudiomackAction(activity, finalPending, 28_000L);
+                        Intent deepIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("audiomack://search?q=" + Uri.encode(effectiveQuery)));
+                        deepIntent.setPackage(amPkg);
+                        deepIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                        if (activity.getPackageManager().resolveActivity(deepIntent, 0) != null) {
+                            activity.startActivity(deepIntent);
+                            return;
+                        }
+                    } catch (Exception ignored) {}
+                }
+                launchAudiomackHome(amPkg, finalPending, webFallbackUrl);
+            });
+            return result.toString();
+        } catch (Exception e) {
+            try {
+                result.put("ok", false);
+                result.put("error", e.getMessage());
+            } catch (Exception ignored) {}
+            return result.toString();
+        }
+    }
+
+    @JavascriptInterface
+    public String getAudiomackNowPlayingJson() {
+        return KevinNotificationListenerService.getAudiomackNowPlayingJson(activity);
+    }
+
+    @JavascriptInterface
+    public String getAudiomackPlaylistsJson() {
+        return KevinAgentPrefs.getAudiomackPlaylistsJson(activity);
     }
 
     @JavascriptInterface

@@ -43,6 +43,7 @@ export interface NativeAgentStatus {
   speechRecognizerAvailable?: boolean;
   hasMusicPermission?: boolean;
   larkPlayerInstalled?: boolean;
+  audiomackInstalled?: boolean;
 }
 
 export interface DeviceSong {
@@ -142,6 +143,46 @@ export function getLarkNowPlaying(): Record<string, any> | null {
   if (bridge?.getLarkNowPlayingJson) {
     try {
       return JSON.parse(bridge.getLarkNowPlayingJson() || '{}');
+    } catch {}
+  }
+  return null;
+}
+
+export function executeAudiomackCommand(payload: Record<string, any>): Record<string, any> {
+  if (typeof window === 'undefined') return { ok: false };
+  const bridge = (window as any).KevinAgentBridge;
+  if (bridge?.executeAudiomackAction) {
+    try {
+      const raw = bridge.executeAudiomackAction(JSON.stringify(payload || {}));
+      const parsed = JSON.parse(raw || '{}');
+      if (parsed && typeof parsed === 'object') {
+        if (Array.isArray(parsed.playlists)) {
+          try {
+            window.localStorage.setItem('kevin_audiomack_playlists', JSON.stringify(parsed.playlists));
+          } catch {}
+        }
+        return parsed;
+      }
+    } catch {}
+  }
+  const q = String(payload?.query || payload?.songTitle || payload?.song_title || payload?.artist || '').trim();
+  const action = String(payload?.action || (q ? 'play' : 'open')).toLowerCase();
+  if (bridge?.openAudiomack) {
+    try {
+      const ok = bridge.openAudiomack(q, action);
+      return { ok: Boolean(ok), action };
+    } catch {}
+  }
+  const webUrl = q ? `https://audiomack.com/search?q=${encodeURIComponent(q)}` : 'https://audiomack.com';
+  return { ok: true, action, webFallbackUrl: webUrl };
+}
+
+export function getAudiomackNowPlaying(): Record<string, any> | null {
+  if (typeof window === 'undefined') return null;
+  const bridge = (window as any).KevinAgentBridge;
+  if (bridge?.getAudiomackNowPlayingJson) {
+    try {
+      return JSON.parse(bridge.getAudiomackNowPlayingJson() || '{}');
     } catch {}
   }
   return null;
@@ -829,6 +870,7 @@ export interface DeviceAction {
   playlistName?: string;
   songs?: DeviceSong[];
   larkResult?: Record<string, any>;
+  audiomackResult?: Record<string, any>;
   status?: 'executed' | 'needs_permission' | 'dialed_needs_permission' | 'choose_contact' | 'contact_not_found' | 'pending';
 }
 
@@ -926,6 +968,53 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
         if (Array.isArray(list)) action.songs = list;
       } catch {}
     }
+    action.status = 'executed';
+    return true;
+  }
+
+  if (action.name === 'open_audiomack') {
+    const amAction = String(action.args?.action || (action.playlistName ? 'create_playlist' : (action.args?.query || action.songTitle || action.artist ? 'play' : 'open'))).trim().toLowerCase();
+    const title = String(action.songTitle || action.args?.song_title || '').trim();
+    const artist = String(action.artist || action.args?.artist || '').trim();
+    const q = String(action.args?.query || [title, artist].filter(Boolean).join(' ') || '').trim();
+    const playlistName = String(action.playlistName || action.args?.playlist_name || '').trim();
+
+    if (bridge?.executeAudiomackAction) {
+      const amRes = executeAudiomackCommand({
+        action: amAction,
+        query: q,
+        songTitle: title,
+        artist,
+        playlistName,
+        tab: action.args?.tab,
+        volumePercent: action.args?.volume_percent,
+        seekSeconds: action.args?.seek_seconds,
+      });
+      action.audiomackResult = amRes;
+      if (amRes.playlistName && !action.playlistName) {
+        action.playlistName = String(amRes.playlistName);
+      }
+      if (!amRes.audiomackInstalled && amRes.webFallbackUrl && !bridge?.openAudiomack) {
+        const link = document.createElement('a');
+        link.href = String(amRes.webFallbackUrl);
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+      action.status = 'executed';
+      return true;
+    }
+
+    const fallbackUrl = action.url || action.fallbackUrl || (q ? `https://audiomack.com/search?q=${encodeURIComponent(q)}` : 'https://audiomack.com');
+    const link = document.createElement('a');
+    link.href = fallbackUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     action.status = 'executed';
     return true;
   }
@@ -1325,6 +1414,76 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
     return actionObj;
   }
 
+  if (name === "open_audiomack") {
+    const q = String(args.query || args.song_title || "").trim();
+    const songTitle = String(args.song_title || q).trim();
+    const artist = String(args.artist || "").trim();
+    const playlistName = String(args.playlist_name || "").trim();
+    const actionType = String(args.action || (playlistName ? "create_playlist" : (q || songTitle || artist ? "play" : "open"))).toLowerCase();
+    const effectiveQuery = q || [songTitle, artist].filter(Boolean).join(" ").trim();
+    const searchUrl = effectiveQuery
+      ? `https://audiomack.com/search?q=${encodeURIComponent(effectiveQuery)}`
+      : "https://audiomack.com";
+
+    const labelMap: Record<string, string> = {
+      open: 'Fungura Audiomack',
+      open_app: 'Fungura Audiomack',
+      search: `Audiomack: Shakisha "${effectiveQuery || 'umuziki'}"`,
+      pause: 'Audiomack: Hagarika indirimbo (Pause)',
+      resume: 'Audiomack: Komeza indirimbo (Play)',
+      toggle: 'Audiomack: Play / Pause',
+      stop: 'Audiomack: Hagarika burundu (Stop)',
+      next: 'Audiomack: Indirimbo ikurikira (Next)',
+      previous: 'Audiomack: Indirimbo ibanza (Previous)',
+      prev: 'Audiomack: Indirimbo ibanza (Previous)',
+      fast_forward: 'Audiomack: Imbere vuba (Forward)',
+      rewind: 'Audiomack: Subiza inyuma (Rewind)',
+      seek: 'Audiomack: Simbuka umwanya w\'indirimbo',
+      volume_up: 'Audiomack: Ongera ijwi (Volume Up)',
+      volume_down: 'Audiomack: Gabanya ijwi (Volume Down)',
+      set_volume: `Audiomack: Ijwi kuri ${args.volume_percent ?? 50}%`,
+      mute: 'Audiomack: Cecekesha (Mute)',
+      unmute: 'Audiomack: Subiza ijwi (Unmute)',
+      shuffle: 'Audiomack: Vanga indirimbo (Shuffle)',
+      repeat: 'Audiomack: Subiramo (Repeat)',
+      loop: 'Audiomack: Subiramo (Loop)',
+      download: `Audiomack: Download "${songTitle || effectiveQuery || 'indirimbo'}"`,
+      favorite: `Audiomack: Kunda "${songTitle || effectiveQuery || 'indirimbo'}"`,
+      like: `Audiomack: Kunda "${songTitle || effectiveQuery || 'indirimbo'}"`,
+      repost: `Audiomack: Repost "${songTitle || effectiveQuery || 'indirimbo'}"`,
+      follow: `Audiomack: Follow ${artist || effectiveQuery || 'umuhanzi'}`,
+      queue: 'Audiomack: Reba Queue',
+      add_to_queue: `Audiomack: Shyira "${songTitle || effectiveQuery}" muri Queue`,
+      play_next: `Audiomack: Curanga ikurikira "${songTitle || effectiveQuery}"`,
+      equalizer: 'Audiomack: Equalizer (EQ)',
+      sleep_timer: 'Audiomack: Sleep Timer',
+      lyrics: 'Audiomack: Reba Lyrics',
+      share: 'Audiomack: Sangiza (Share)',
+      list_playlists: 'Audiomack: Urutonde rwa Playlists',
+      play_playlist: `Audiomack: Curanga playlist "${playlistName || effectiveQuery}"`,
+      add_to_playlist: `Audiomack: Ongera muri playlist "${playlistName || 'Playlist'}"`,
+      create_playlist: `Audiomack: Kora playlist "${playlistName || 'Kevin Mix'}"`,
+      open_tab: `Audiomack: Fungura igice cya "${args.tab || effectiveQuery || 'Home'}"`,
+      now_playing: 'Audiomack: Indirimbo irimo gucurangwa',
+    };
+
+    label = labelMap[actionType] || `Audiomack: Curanga ${songTitle || effectiveQuery || 'indirimbo'}${artist ? ` - ${artist}` : ''}`;
+
+    const actionObj: DeviceAction = {
+      name,
+      args: { ...args, action: actionType },
+      label,
+      url: searchUrl,
+      fallbackUrl: searchUrl,
+      songTitle,
+      artist,
+      playlistName,
+      status: 'executed',
+    };
+    runDeviceAction(actionObj, false);
+    return actionObj;
+  }
+
   if (name === "open_youtube") {
     const q = query || "trending music";
     const resolvedVideoId = typeof args.videoId === 'string' && args.videoId.trim() ? args.videoId.trim() : undefined;
@@ -1468,6 +1627,51 @@ function actionConfirmation(action: DeviceAction): string {
       return `🎵 **Lark Player** yafunguwe! 🎧✨`;
     }
     return `🎵 Indirimbo **${action.songTitle || action.args?.query || 'yo muri telefone'}** irimo gucurangwa muri **Lark Player**! 🎧✨`;
+  }
+  if (action.name === 'open_audiomack') {
+    const act = String(action.args?.action || 'play').toLowerCase();
+    const ar = action.audiomackResult || {};
+    const target = action.songTitle || action.args?.query || action.artist || 'indirimbo';
+    if (act === 'create_playlist') {
+      return `🟠 Playlist **${action.playlistName || 'Nshya'}** yakozwe muri **Audiomack**! 🎶✨`;
+    }
+    if (act === 'add_to_playlist') {
+      return `➕ Indirimbo yongewe muri playlist **${action.playlistName || 'Playlist'}** muri **Audiomack**! 🎶`;
+    }
+    if (act === 'play_playlist') {
+      return `▶️ Playlist **${action.playlistName || action.args?.query || ''}** irimo gucurangwa muri **Audiomack**! 🎧`;
+    }
+    if (act === 'list_playlists') {
+      return `📋 Nafunguye igice cya **Playlists** muri **Audiomack**! 🎶`;
+    }
+    if (act === 'download') {
+      return `⬇️ **Audiomack** yafunguwe ngo i-downloade **${target}** offline!`;
+    }
+    if (act === 'favorite' || act === 'like') {
+      return `❤️ **${target}** yakunzwe (Liked) muri **Audiomack**!`;
+    }
+    if (act === 'repost') {
+      return `🔁 **${target}** yakorewe Repost muri **Audiomack**!`;
+    }
+    if (act === 'follow') {
+      return `➕ Wakurikiye (Follow) **${action.artist || target}** muri **Audiomack**!`;
+    }
+    if (act === 'now_playing') {
+      const np = ar.nowPlaying || {};
+      return np.title
+        ? `🎧 Ubu muri **Audiomack** harimo gucuranga: **${np.title}**${np.artist ? ` — ${np.artist}` : ''}!`
+        : `🎧 Nta ndirimbo ya **Audiomack** igaragara irimo gucurangwa ubu.`;
+    }
+    if (act === 'pause') return `⏸️ Indirimbo muri **Audiomack** yahagaritswe (Paused).`;
+    if (act === 'resume' || act === 'toggle') return `▶️ Indirimbo muri **Audiomack** irakomeje gucuranga! 🎶`;
+    if (act === 'stop') return `⏹️ **Audiomack** yahagaze.`;
+    if (act === 'next') return `⏭️ Nasimbukiye ku ndirimbo ikurikira muri **Audiomack**! 🎵`;
+    if (act === 'previous' || act === 'prev') return `⏮️ Nasubiye ku ndirimbo ibanza muri **Audiomack**! 🎵`;
+    if (act === 'shuffle') return `🔀 Indirimbo zirimo kuvangwa (Shuffle) muri **Audiomack**! 🎶`;
+    if (act === 'repeat' || act === 'loop') return `🔁 Repeat yashyizweho muri **Audiomack**!`;
+    if (act === 'search') return `🔍 Ndashakisha **${target}** muri **Audiomack**! 🎧`;
+    if (act === 'open' || act === 'open_app') return `🟠 **Audiomack** yafunguwe! 🎧✨`;
+    return `🟠 **Audiomack** irimo gushakisha no gucuranga **${target}**! 🎧✨`;
   }
   if (action.name === 'query_device_music') {
     const count = action.songs?.length || 0;
@@ -1768,6 +1972,26 @@ const getEndpoint = (path: string): string => {
 };
 
 const APK_DEVICE_ACTION_DECLARATIONS = [
+  {
+    name: 'open_audiomack',
+    description: "Full control over Audiomack: open app, search/play songs, artists, albums or playlists, create/add/play playlists, download for offline, favorite/like, repost, follow artists, queue/play next, playback controls (pause, resume, next, previous, stop, seek, shuffle, repeat), equalizer, sleep timer, lyrics, share, tabs, volume, and now playing.",
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        query: { type: 'STRING', description: 'Song title, artist, album, playlist name, or search query for Audiomack.' },
+        song_title: { type: 'STRING', description: 'Exact song title to search, play, download, like, or add.' },
+        artist: { type: 'STRING', description: 'Artist name to search, play, or follow.' },
+        playlist_name: { type: 'STRING', description: 'Playlist name to create, update, or play on Audiomack.' },
+        tab: { type: 'STRING', description: 'Optional Audiomack tab to open (home, feed, trending, search, library, playlists, downloads, favorites, offline).' },
+        volume_percent: { type: 'NUMBER', description: 'Volume percentage (0-100) when action is set_volume.' },
+        seek_seconds: { type: 'NUMBER', description: 'Position in seconds when action is seek.' },
+        action: {
+          type: 'STRING',
+          description: 'Action to perform in Audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite, like, repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab, volume_up, volume_down, set_volume, mute, unmute, now_playing.',
+        },
+      },
+    },
+  },
   {
     name: 'open_lark_player',
     description: "Full control over Lark Player: open app, play/search songs, create/edit/play/delete playlists, control playback (pause, resume, next, previous, stop, seek, shuffle, repeat), volume, equalizer, sleep timer, lyrics, queue, favorites, tabs, and now playing.",
@@ -2206,10 +2430,10 @@ function buildApkSystemInstruction(
 The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, or Kinyarwanda mixed with French/English words).
 - ALWAYS listen directly to the attached raw audio recording as your PRIMARY source of truth—even if a preliminary text transcript is also shown. If the preliminary transcript misheard any Kinyarwanda word, prefix, Rwandan name, or verb, trust what you actually hear in the raw audio!
 - Pay close attention to authentic Kinyarwanda phonetics, prefixes (na-, nta-, ndi-, nda-, nshaka-, mbwira-, mfasha-, sobanura-, hamagara-, uhamagare-, uncurangire-, wohereze-, fungura-, funga-), consonant clusters (cy, by, ry, ny, shy, pf, ts, mp, mb, nd, ng, nj, nk, bw, tw, rw), and Rwandan names. Never force Kinyarwanda sounds into random English words.
-- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.`
+- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_audiomack, open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to Lark Player and all local audio songs, playlists, artists, albums, and playback controls on the user's phone. When the user asks to open Lark Player, play a song/artist/album/all songs on Lark Player or local phone audio (e.g. 'fungura lark player', 'curanga ... kuri Lark Player', 'curanga indirimbo zo muri telefone', 'play on Lark'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately. You can perform ALL Lark Player actions via open_lark_player: open, play, play_all, shuffle_all, search, create_playlist (with optional songs array), add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing. When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
+    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER + AUDIOMACK ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to BOTH Lark Player (local phone audio) AND Audiomack (online/offline streaming). When the user asks to open Audiomack, search a song/artist/album, play, download, like/favorite, repost, follow, create/add/play a playlist, queue, or control playback on Audiomack (e.g. 'fungura audiomack', 'shakisha ... kuri audiomack', 'curanga ... kuri audiomack', 'play ... on audiomack'), ALWAYS call open_audiomack(query, song_title, artist, playlist_name, action) immediately. You can perform ALL Audiomack actions via open_audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite, like, repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab, volume_up, volume_down, set_volume, mute, unmute, now_playing. When the user asks to open Lark Player, play a song/artist/album/all songs on Lark Player or local phone audio (e.g. 'fungura lark player', 'curanga ... kuri Lark Player', 'curanga indirimbo zo muri telefone', 'play on Lark'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately. You can perform ALL Lark Player actions via open_lark_player: open, play, play_all, shuffle_all, search, create_playlist (with optional songs array), add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing. When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }
@@ -2662,7 +2886,7 @@ export async function sendMessageToGemini(
           .trim()
       : '';
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
-    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|ijwi|komeza|subiramo|ongeraho|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|ringtone|artists|albums|folders|now\s*playing|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
+    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|ijwi|komeza|subiramo|ongeraho|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|repost|follow|download|offline|trending|library|ringtone|artists|albums|folders|now\s*playing|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
     const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText

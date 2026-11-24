@@ -60,6 +60,17 @@
 
         <!-- Audiomack -->
         <package android:name="com.audiomack" />
+        <package android:name="com.audiomack.lite" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="audiomack" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data
+                android:scheme="https"
+                android:host="audiomack.com" />
+        </intent>
 
         <!-- Lark Player (Local Music & Player) -->
         <package android:name="com.dywx.larkplayer" />

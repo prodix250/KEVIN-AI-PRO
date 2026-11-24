@@ -6,4 +6,4 @@
     android:canRetrieveWindowContent="true"
     android:description="@string/kevin_accessibility_description"
     android:notificationTimeout="150"
-    android:packageNames="com.whatsapp,com.whatsapp.w4b,com.google.android.youtube,com.dywx.larkplayer,com.dywx.larkplayer.lite,com.dywx.larkplayer.music,com.gemini.larkplayer,com.larkplayer.music,com.larkplayer,com.lark.player,com.larkplayer.free" />
+    android:packageNames="com.whatsapp,com.whatsapp.w4b,com.google.android.youtube,com.dywx.larkplayer,com.dywx.larkplayer.lite,com.dywx.larkplayer.music,com.gemini.larkplayer,com.larkplayer.music,com.larkplayer,com.lark.player,com.larkplayer.free,com.audiomack,com.audiomack.lite" />

@@ -27,6 +27,10 @@ public final class KevinAgentPrefs {
     private static final String KEY_PENDING_LARK_ACTION_JSON = "pending_lark_action_json";
     private static final String KEY_PENDING_LARK_STEP = "pending_lark_step";
     private static final String KEY_LARK_PLAYLISTS_JSON = "lark_playlists_json";
+    private static final String KEY_PENDING_AUDIOMACK_UNTIL = "pending_audiomack_until";
+    private static final String KEY_PENDING_AUDIOMACK_ACTION_JSON = "pending_audiomack_action_json";
+    private static final String KEY_PENDING_AUDIOMACK_STEP = "pending_audiomack_step";
+    private static final String KEY_AUDIOMACK_PLAYLISTS_JSON = "audiomack_playlists_json";
 
     private KevinAgentPrefs() {}
 
@@ -450,5 +454,116 @@ public final class KevinAgentPrefs {
             }
         } catch (Exception ignored) {}
         return false;
+    }
+
+    public static void armPendingAudiomackAction(Context context, String actionJson, long durationMs) {
+        if (context == null) return;
+        prefs(context).edit()
+                .putString(KEY_PENDING_AUDIOMACK_ACTION_JSON, actionJson != null ? actionJson : "{}")
+                .putLong(KEY_PENDING_AUDIOMACK_UNTIL, System.currentTimeMillis() + Math.max(3000L, durationMs))
+                .putInt(KEY_PENDING_AUDIOMACK_STEP, 0)
+                .apply();
+    }
+
+    public static boolean isPendingAudiomackActionActive(Context context) {
+        if (context == null) return false;
+        long until = prefs(context).getLong(KEY_PENDING_AUDIOMACK_UNTIL, 0L);
+        return until > System.currentTimeMillis();
+    }
+
+    public static String getPendingAudiomackActionJson(Context context) {
+        if (!isPendingAudiomackActionActive(context)) return "";
+        return prefs(context).getString(KEY_PENDING_AUDIOMACK_ACTION_JSON, "");
+    }
+
+    public static void updatePendingAudiomackActionJson(Context context, String actionJson) {
+        if (context == null) return;
+        prefs(context).edit()
+                .putString(KEY_PENDING_AUDIOMACK_ACTION_JSON, actionJson != null ? actionJson : "{}")
+                .apply();
+    }
+
+    public static int incrementPendingAudiomackStep(Context context) {
+        if (context == null) return 0;
+        int next = prefs(context).getInt(KEY_PENDING_AUDIOMACK_STEP, 0) + 1;
+        prefs(context).edit().putInt(KEY_PENDING_AUDIOMACK_STEP, next).apply();
+        return next;
+    }
+
+    public static void clearPendingAudiomackAction(Context context) {
+        if (context == null) return;
+        prefs(context).edit()
+                .putLong(KEY_PENDING_AUDIOMACK_UNTIL, 0L)
+                .putInt(KEY_PENDING_AUDIOMACK_STEP, 0)
+                .remove(KEY_PENDING_AUDIOMACK_ACTION_JSON)
+                .apply();
+    }
+
+    public static synchronized void saveAudiomackPlaylist(Context context, String playlistName, org.json.JSONArray songsArray, boolean append) {
+        if (context == null || TextUtils.isEmpty(playlistName)) return;
+        String cleanName = playlistName.trim();
+        try {
+            org.json.JSONObject all = new org.json.JSONObject(prefs(context).getString(KEY_AUDIOMACK_PLAYLISTS_JSON, "{}"));
+            org.json.JSONObject existing = null;
+            String matchedKey = cleanName;
+            java.util.Iterator<String> keys = all.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                if (k.equalsIgnoreCase(cleanName)) {
+                    matchedKey = k;
+                    existing = all.optJSONObject(k);
+                    break;
+                }
+            }
+            org.json.JSONArray mergedSongs = new org.json.JSONArray();
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            if (append && existing != null) {
+                org.json.JSONArray oldSongs = existing.optJSONArray("songs");
+                if (oldSongs != null) {
+                    for (int i = 0; i < oldSongs.length(); i++) {
+                        org.json.JSONObject s = oldSongs.optJSONObject(i);
+                        if (s == null) continue;
+                        String key = s.optString("title", "").toLowerCase(java.util.Locale.ROOT);
+                        if (!TextUtils.isEmpty(key) && seen.add(key)) {
+                            mergedSongs.put(s);
+                        }
+                    }
+                }
+            }
+            if (songsArray != null) {
+                for (int i = 0; i < songsArray.length(); i++) {
+                    org.json.JSONObject s = songsArray.optJSONObject(i);
+                    if (s == null) continue;
+                    String key = s.optString("title", "").toLowerCase(java.util.Locale.ROOT);
+                    if (!TextUtils.isEmpty(key) && seen.add(key)) {
+                        mergedSongs.put(s);
+                    }
+                }
+            }
+            org.json.JSONObject entry = new org.json.JSONObject();
+            entry.put("name", matchedKey);
+            entry.put("updatedAt", System.currentTimeMillis());
+            entry.put("songs", mergedSongs);
+            all.put(matchedKey, entry);
+            prefs(context).edit().putString(KEY_AUDIOMACK_PLAYLISTS_JSON, all.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    public static synchronized String getAudiomackPlaylistsJson(Context context) {
+        if (context == null) return "[]";
+        try {
+            org.json.JSONObject all = new org.json.JSONObject(prefs(context).getString(KEY_AUDIOMACK_PLAYLISTS_JSON, "{}"));
+            org.json.JSONArray arr = new org.json.JSONArray();
+            java.util.Iterator<String> keys = all.keys();
+            while (keys.hasNext()) {
+                org.json.JSONObject item = all.optJSONObject(keys.next());
+                if (item != null) {
+                    arr.put(item);
+                }
+            }
+            return arr.toString();
+        } catch (Exception ignored) {
+            return "[]";
+        }
     }
 }
