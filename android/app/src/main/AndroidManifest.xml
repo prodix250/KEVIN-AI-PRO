@@ -62,16 +62,35 @@
         <package android:name="com.audiomack" />
 
         <!-- Lark Player (Local Music & Player) -->
+        <package android:name="com.dywx.larkplayer" />
+        <package android:name="com.dywx.larkplayer.lite" />
+        <package android:name="com.dywx.larkplayer.music" />
         <package android:name="com.gemini.larkplayer" />
         <package android:name="com.larkplayer.music" />
-        <package android:name="com.dywx.larkplayer" />
         <package android:name="com.larkplayer" />
+        <package android:name="com.lark.player" />
+        <package android:name="com.larkplayer.free" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_MUSIC" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="audio/*" />
         </intent>
         <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="audio/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND_MULTIPLE" />
+            <data android:mimeType="audio/*" />
+        </intent>
+        <intent>
             <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL" />
         </intent>
 
         <!-- Phone Calls -->

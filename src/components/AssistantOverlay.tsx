@@ -21,6 +21,7 @@ import {
   GroundingSource,
   playWhatsAppSound,
   playSongInLarkPlayer,
+  executeLarkPlayerCommand,
 } from '../services/geminiService';
 
 interface AssistantOverlayProps {
@@ -1051,7 +1052,20 @@ export default function AssistantOverlay({
                         <button
                           type="button"
                           onClick={() => {
-                            playSongInLarkPlayer(action.songTitle || action.args?.query || '', action.songTitle, action.artist);
+                            const act = String(action.args?.action || '').toLowerCase();
+                            const q = action.songTitle || action.args?.query || '';
+                            if (act && act !== 'play' && act !== 'list_songs') {
+                              executeLarkPlayerCommand({
+                                action: act,
+                                query: q,
+                                songTitle: action.songTitle,
+                                artist: action.artist,
+                                playlistName: action.playlistName,
+                                tab: action.args?.tab,
+                              });
+                            } else {
+                              playSongInLarkPlayer(q, action.songTitle, action.artist);
+                            }
                           }}
                           className="shrink-0 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] px-3 py-1 text-[11px] font-bold text-white cursor-pointer flex items-center gap-1"
                         >
@@ -1059,6 +1073,27 @@ export default function AssistantOverlay({
                         </button>
                       )}
                     </div>
+
+                    {(action.name === 'open_lark_player' || action.name === 'query_device_music') && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {[
+                          { cmd: 'previous', label: '⏮️' },
+                          { cmd: 'toggle', label: '⏯️' },
+                          { cmd: 'next', label: '⏭️' },
+                          { cmd: 'shuffle', label: '🔀' },
+                          { cmd: 'equalizer', label: '🎚️ EQ' },
+                        ].map((ctrl) => (
+                          <button
+                            key={ctrl.cmd}
+                            type="button"
+                            onClick={() => executeLarkPlayerCommand({ action: ctrl.cmd })}
+                            className="rounded-full bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] hover:border-[#00a884] px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer"
+                          >
+                            {ctrl.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     {(action.name === 'open_lark_player' || action.name === 'query_device_music') && action.songs && action.songs.length > 0 && (
                       <div className="space-y-1 max-h-36 overflow-y-auto pt-1">

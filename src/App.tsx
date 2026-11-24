@@ -8,7 +8,7 @@ import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settin
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, playWhatsAppSound, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource, playSongInLarkPlayer, getDeviceSongs, DeviceSong } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, playWhatsAppSound, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource, playSongInLarkPlayer, executeLarkPlayerCommand, getDeviceSongs, DeviceSong } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
@@ -2560,12 +2560,26 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => {
+                                const act = String(message.action!.args?.action || '').toLowerCase();
                                 const q = message.action!.songTitle || message.action!.args?.query || '';
-                                playSongInLarkPlayer(q, message.action!.songTitle, message.action!.artist);
+                                if (act && act !== 'play' && act !== 'list_songs') {
+                                  executeLarkPlayerCommand({
+                                    action: act,
+                                    query: q,
+                                    songTitle: message.action!.songTitle,
+                                    artist: message.action!.artist,
+                                    playlistName: message.action!.playlistName,
+                                    tab: message.action!.args?.tab,
+                                  });
+                                } else {
+                                  playSongInLarkPlayer(q, message.action!.songTitle, message.action!.artist);
+                                }
                                 showToastMessage(
-                                  message.action!.songTitle
-                                    ? `🎵 Curanga "${message.action!.songTitle}" muri Lark Player!`
-                                    : '🎵 Fungura Lark Player!'
+                                  message.action!.playlistName
+                                    ? `🎵 Fungura "${message.action!.playlistName}" muri Lark Player!`
+                                    : message.action!.songTitle
+                                      ? `🎵 Curanga "${message.action!.songTitle}" muri Lark Player!`
+                                      : '🎵 Fungura Lark Player!'
                                 );
                               }}
                               className="shrink-0 rounded-full bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] px-3.5 py-1.5 text-xs font-bold text-white cursor-pointer shadow-sm flex items-center gap-1.5"
@@ -2645,6 +2659,31 @@ export default function App() {
                             </button>
                           ) : null}
                         </div>
+
+                        {(message.action.name === 'open_lark_player' || message.action.name === 'query_device_music') && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            {[
+                              { cmd: 'previous', label: '⏮️ Prev' },
+                              { cmd: 'toggle', label: '⏯️ Play/Pause' },
+                              { cmd: 'next', label: '⏭️ Next' },
+                              { cmd: 'shuffle', label: '🔀 Shuffle' },
+                              { cmd: 'equalizer', label: '🎚️ EQ' },
+                              { cmd: 'list_playlists', label: '📋 Playlists' },
+                            ].map((ctrl) => (
+                              <button
+                                key={ctrl.cmd}
+                                type="button"
+                                onClick={() => {
+                                  executeLarkPlayerCommand({ action: ctrl.cmd });
+                                  showToastMessage(`🎵 Lark Player: ${ctrl.label}`);
+                                }}
+                                className="rounded-full bg-white dark:bg-[#111b21] hover:border-[#00a884] border border-gray-200 dark:border-[#2f3b43] px-2.5 py-1 text-[11px] font-semibold text-gray-700 dark:text-[#d1d7db] cursor-pointer"
+                              >
+                                {ctrl.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
 
                         {(message.action.name === 'open_lark_player' || message.action.name === 'query_device_music') && message.action.songs && message.action.songs.length > 0 && (
                           <div className="space-y-1.5 pt-1.5">

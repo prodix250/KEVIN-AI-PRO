@@ -3,8 +3,13 @@ package com.kevinai.pro;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.media.MediaMetadata;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
 import android.os.Bundle;
 import android.os.Parcelable;
 import android.service.notification.NotificationListenerService;
@@ -600,6 +605,112 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         } catch (PendingIntent.CanceledException e) {
             return false;
         }
+    }
+
+    public static MediaController getLarkMediaController(Context context) {
+        if (context == null) return null;
+        try {
+            MediaSessionManager msm = (MediaSessionManager) context.getSystemService(Context.MEDIA_SESSION_SERVICE);
+            if (msm == null) return null;
+            ComponentName cn = new ComponentName(context, KevinNotificationListenerService.class);
+            List<MediaController> controllers = msm.getActiveSessions(cn);
+            if (controllers == null || controllers.isEmpty()) return null;
+            for (MediaController mc : controllers) {
+                String pkg = mc.getPackageName();
+                if (pkg != null && pkg.toLowerCase(Locale.ROOT).contains("lark")) {
+                    return mc;
+                }
+            }
+            return controllers.get(0);
+        } catch (SecurityException ignored) {
+            return null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    public static boolean controlLarkMediaSession(Context context, String command, long seekMs) {
+        MediaController mc = getLarkMediaController(context);
+        if (mc == null) return false;
+        try {
+            MediaController.TransportControls tc = mc.getTransportControls();
+            if (tc == null) return false;
+            String cmd = command != null ? command.trim().toLowerCase(Locale.ROOT) : "";
+            switch (cmd) {
+                case "play":
+                case "resume":
+                    tc.play();
+                    return true;
+                case "pause":
+                    tc.pause();
+                    return true;
+                case "toggle":
+                case "play_pause": {
+                    PlaybackState ps = mc.getPlaybackState();
+                    if (ps != null && ps.getState() == PlaybackState.STATE_PLAYING) {
+                        tc.pause();
+                    } else {
+                        tc.play();
+                    }
+                    return true;
+                }
+                case "stop":
+                    tc.stop();
+                    return true;
+                case "next":
+                    tc.skipToNext();
+                    return true;
+                case "previous":
+                case "prev":
+                    tc.skipToPrevious();
+                    return true;
+                case "fast_forward":
+                case "forward":
+                    tc.fastForward();
+                    return true;
+                case "rewind":
+                    tc.rewind();
+                    return true;
+                case "seek":
+                    tc.seekTo(Math.max(0L, seekMs));
+                    return true;
+                default:
+                    return false;
+            }
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    public static String getLarkNowPlayingJson(Context context) {
+        JSONObject out = new JSONObject();
+        try {
+            MediaController mc = getLarkMediaController(context);
+            if (mc == null) {
+                out.put("active", false);
+                return out.toString();
+            }
+            out.put("active", true);
+            out.put("packageName", mc.getPackageName() != null ? mc.getPackageName() : "");
+            MediaMetadata meta = mc.getMetadata();
+            if (meta != null) {
+                String title = meta.getString(MediaMetadata.METADATA_KEY_TITLE);
+                String artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST);
+                String album = meta.getString(MediaMetadata.METADATA_KEY_ALBUM);
+                long duration = meta.getLong(MediaMetadata.METADATA_KEY_DURATION);
+                out.put("title", title != null ? title : "");
+                out.put("artist", artist != null ? artist : "");
+                out.put("album", album != null ? album : "");
+                out.put("durationMs", duration);
+            }
+            PlaybackState ps = mc.getPlaybackState();
+            if (ps != null) {
+                out.put("isPlaying", ps.getState() == PlaybackState.STATE_PLAYING);
+                out.put("positionMs", ps.getPosition());
+                out.put("state", ps.getState());
+            }
+        } catch (Exception ignored) {}
+        return out.toString();
     }
 
     @Override

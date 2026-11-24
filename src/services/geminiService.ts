@@ -83,6 +83,70 @@ export function playSongInLarkPlayer(songIdOrQuery: string, title?: string, arti
   return false;
 }
 
+export interface LarkPlaylistItem {
+  name: string;
+  updatedAt?: number;
+  songs: DeviceSong[];
+}
+
+export function executeLarkPlayerCommand(payload: Record<string, any>): Record<string, any> {
+  if (typeof window === 'undefined') return { ok: false };
+  const bridge = (window as any).KevinAgentBridge;
+  if (bridge?.executeLarkPlayerAction) {
+    try {
+      const raw = bridge.executeLarkPlayerAction(JSON.stringify(payload || {}));
+      const parsed = JSON.parse(raw || '{}');
+      if (parsed && typeof parsed === 'object') {
+        if (Array.isArray(parsed.playlists)) {
+          try {
+            window.localStorage.setItem('kevin_lark_playlists', JSON.stringify(parsed.playlists));
+          } catch {}
+        }
+        return parsed;
+      }
+    } catch {}
+  }
+  const action = String(payload?.action || 'play').toLowerCase();
+  if ((action === 'play' || action === 'play_song' || action === 'open') && bridge?.playInLarkPlayer) {
+    const ok = bridge.playInLarkPlayer(
+      String(payload?.query || payload?.songTitle || payload?.song_title || ''),
+      String(payload?.songTitle || payload?.song_title || ''),
+      String(payload?.artist || '')
+    );
+    return { ok: Boolean(ok), action };
+  }
+  return { ok: false, action };
+}
+
+export function getLarkPlaylists(): LarkPlaylistItem[] {
+  if (typeof window === 'undefined') return [];
+  const bridge = (window as any).KevinAgentBridge;
+  if (bridge?.getLarkPlaylistsJson) {
+    try {
+      const parsed = JSON.parse(bridge.getLarkPlaylistsJson() || '[]');
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  try {
+    const raw = window.localStorage.getItem('kevin_lark_playlists');
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getLarkNowPlaying(): Record<string, any> | null {
+  if (typeof window === 'undefined') return null;
+  const bridge = (window as any).KevinAgentBridge;
+  if (bridge?.getLarkNowPlayingJson) {
+    try {
+      return JSON.parse(bridge.getLarkNowPlayingJson() || '{}');
+    } catch {}
+  }
+  return null;
+}
+
 export interface AgentOutboxItem {
   id: string;
   channel: 'sms' | 'whatsapp' | 'whatsapp-autoreply' | 'call';
@@ -764,6 +828,7 @@ export interface DeviceAction {
   artist?: string;
   playlistName?: string;
   songs?: DeviceSong[];
+  larkResult?: Record<string, any>;
   status?: 'executed' | 'needs_permission' | 'dialed_needs_permission' | 'choose_contact' | 'contact_not_found' | 'pending';
 }
 
@@ -814,9 +879,35 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
   }
 
   if (action.name === 'open_lark_player') {
+    const larkAction = String(action.args?.action || (action.playlistName ? 'create_playlist' : 'play')).trim().toLowerCase();
     const songTarget = String(action.args?.song_uri || action.args?.song_id || action.args?.query || action.songTitle || '').trim();
     const title = String(action.songTitle || action.args?.song_title || action.args?.query || '').trim();
     const artist = String(action.artist || action.args?.artist || '').trim();
+    const playlistName = String(action.playlistName || action.args?.playlist_name || '').trim();
+
+    if (bridge?.executeLarkPlayerAction) {
+      const larkRes = executeLarkPlayerCommand({
+        action: larkAction,
+        query: String(action.args?.query || songTarget || '').trim(),
+        songTitle: title,
+        artist,
+        playlistName,
+        songs: Array.isArray(action.args?.songs) ? action.args.songs : undefined,
+        tab: action.args?.tab,
+        volumePercent: action.args?.volume_percent,
+        seekSeconds: action.args?.seek_seconds,
+      });
+      action.larkResult = larkRes;
+      if (Array.isArray(larkRes.songs) && larkRes.songs.length > 0) {
+        action.songs = larkRes.songs;
+      }
+      if (larkRes.playlistName && !action.playlistName) {
+        action.playlistName = String(larkRes.playlistName);
+      }
+      action.status = 'executed';
+      return true;
+    }
+
     if (bridge?.playInLarkPlayer) {
       bridge.playInLarkPlayer(songTarget, title, artist);
       action.status = 'executed';
@@ -1121,16 +1212,16 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
   }
 
   if (name === "open_lark_player") {
-    const q = String(args.query || args.song_title || "music").trim();
+    const q = String(args.query || args.song_title || "").trim();
     const songTitle = String(args.song_title || q).trim();
     const artist = String(args.artist || "").trim();
     const playlistName = String(args.playlist_name || "").trim();
-    const actionType = String(args.action || "play").toLowerCase();
+    const actionType = String(args.action || (playlistName ? "create_playlist" : "play")).toLowerCase();
 
     let matchedSongs: DeviceSong[] = [];
     if (typeof window !== 'undefined') {
       const bridge = (window as any).KevinAgentBridge;
-      if (bridge?.lookupDeviceMusicJson) {
+      if (bridge?.lookupDeviceMusicJson && ['play', 'play_song', 'search', 'create_playlist', 'add_to_playlist', 'list_songs'].includes(actionType)) {
         try {
           const raw = bridge.lookupDeviceMusicJson(q || artist || songTitle || '');
           const parsed = JSON.parse(raw);
@@ -1139,15 +1230,63 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
       }
     }
 
-    if (actionType === 'create_playlist' || playlistName) {
-      label = `Lark Player: Kora playlist "${playlistName || songTitle}" (${matchedSongs.length > 0 ? `${matchedSongs.length} indirimbo` : 'indirimbo'})`;
+    const labelMap: Record<string, string> = {
+      open: 'Fungura Lark Player',
+      open_app: 'Fungura Lark Player',
+      pause: 'Lark Player: Hagarika indirimbo (Pause)',
+      resume: 'Lark Player: Komeza indirimbo (Play)',
+      toggle: 'Lark Player: Play / Pause',
+      stop: 'Lark Player: Hagarika burundu (Stop)',
+      next: 'Lark Player: Indirimbo ikurikira (Next)',
+      previous: 'Lark Player: Indirimbo ibanza (Previous)',
+      prev: 'Lark Player: Indirimbo ibanza (Previous)',
+      fast_forward: 'Lark Player: Imbere vuba (Forward)',
+      rewind: 'Lark Player: Subiza inyuma (Rewind)',
+      seek: 'Lark Player: Simbuka umwanya w\'indirimbo',
+      volume_up: 'Lark Player: Ongera ijwi (Volume Up)',
+      volume_down: 'Lark Player: Gabanya ijwi (Volume Down)',
+      set_volume: `Lark Player: Ijwi kuri ${args.volume_percent ?? 50}%`,
+      mute: 'Lark Player: Cecekesha (Mute)',
+      unmute: 'Lark Player: Subiza ijwi (Unmute)',
+      shuffle: 'Lark Player: Vanga indirimbo (Shuffle)',
+      shuffle_all: 'Lark Player: Vanga indirimbo zose (Shuffle All)',
+      play_all: 'Lark Player: Curanga indirimbo zose',
+      repeat: 'Lark Player: Subiramo (Repeat)',
+      loop: 'Lark Player: Subiramo (Loop)',
+      favorite: 'Lark Player: Kunda indirimbo (Favorite)',
+      equalizer: 'Lark Player: Equalizer (EQ)',
+      sleep_timer: 'Lark Player: Sleep Timer',
+      lyrics: 'Lark Player: Reba Lyrics',
+      queue: 'Lark Player: Reba Queue (Playing Next)',
+      add_to_queue: `Lark Player: Shyira "${songTitle || q}" muri Queue`,
+      play_next: `Lark Player: Curanga ikurikira "${songTitle || q}"`,
+      now_playing: 'Lark Player: Indirimbo irimo gucurangwa',
+      list_playlists: 'Lark Player: Urutonde rwa Playlists',
+      list_artists: 'Lark Player: Abahanzi bo muri telefone',
+      list_albums: 'Lark Player: Albums zo muri telefone',
+      list_folders: 'Lark Player: Folders z\'indirimbo',
+      list_songs: `Lark Player: Indirimbo (${matchedSongs.length})`,
+      play_playlist: `Lark Player: Curanga playlist "${playlistName || q}"`,
+      delete_playlist: `Lark Player: Siba playlist "${playlistName || q}"`,
+      add_to_playlist: `Lark Player: Ongera muri playlist "${playlistName || 'Playlist'}"`,
+      open_tab: `Lark Player: Fungura igice cya "${args.tab || q || 'Music'}"`,
+      share: 'Lark Player: Sangiza indirimbo (Share)',
+      ringtone: 'Lark Player: Gira indirimbo Ringtone',
+      speed: 'Lark Player: Hindura umuvuduko (Speed)',
+      search: `Lark Player: Shakisha "${q || songTitle}"`,
+    };
+
+    if (actionType === 'create_playlist' || (playlistName && actionType === 'play' && !songTitle)) {
+      label = `Lark Player: Kora playlist "${playlistName || songTitle || 'Kevin Mix'}" (${matchedSongs.length > 0 ? `${matchedSongs.length} indirimbo` : 'indirimbo'})`;
+    } else if (labelMap[actionType]) {
+      label = labelMap[actionType];
     } else {
-      label = `Lark Player: Curanga ${songTitle}${artist ? ` - ${artist}` : ''}`;
+      label = `Lark Player: Curanga ${songTitle || q || 'indirimbo'}${artist ? ` - ${artist}` : ''}`;
     }
 
     const actionObj: DeviceAction = {
       name,
-      args,
+      args: { ...args, action: actionType },
       label,
       songTitle,
       artist,
@@ -1283,8 +1422,50 @@ function executeDeviceAction(name: string, args: Record<string, any>): DeviceAct
 
 function actionConfirmation(action: DeviceAction): string {
   if (action.name === 'open_lark_player') {
-    if (action.playlistName || action.args?.action === 'create_playlist') {
-      return `🎵 Playlist **${action.playlistName || 'Nshya'}** yateguwe muri **Lark Player** ikubiyemo indirimbo zatoranyijwe! 🎶✨`;
+    const act = String(action.args?.action || 'play').toLowerCase();
+    const lr = action.larkResult || {};
+    const songCount = action.songs?.length || 0;
+    if (act === 'create_playlist') {
+      return `🎵 Playlist **${action.playlistName || 'Nshya'}** yakozwe muri **Lark Player**${songCount > 0 ? ` ikubiyemo indirimbo **${songCount}**` : ''}! 🎶✨`;
+    }
+    if (act === 'add_to_playlist') {
+      return `➕ Indirimbo zongewe muri playlist **${action.playlistName || 'Playlist'}** muri **Lark Player**! 🎶`;
+    }
+    if (act === 'play_playlist') {
+      return `▶️ Playlist **${action.playlistName || action.args?.query || ''}** irimo gucurangwa muri **Lark Player**! 🎧`;
+    }
+    if (act === 'delete_playlist') {
+      return `🗑️ Playlist **${action.playlistName || action.args?.query || ''}** yasibwe!`;
+    }
+    if (act === 'list_playlists') {
+      const pls: any[] = Array.isArray(lr.playlists) ? lr.playlists : [];
+      return pls.length > 0
+        ? `📋 Playlists zibonetse muri **Lark Player**: ${pls.map((p: any) => `**${p.name}** (${p.songs?.length || 0})`).join(', ')} 🎶`
+        : `📋 Nafunguye igice cya **Playlists** muri **Lark Player**! 🎶`;
+    }
+    if (act === 'now_playing') {
+      const np = lr.nowPlaying || {};
+      return np.title
+        ? `🎧 Ubu muri **Lark Player** harimo gucuranga: **${np.title}**${np.artist ? ` — ${np.artist}` : ''}!`
+        : `🎧 Nta ndirimbo igaragara irimo gucurangwa ubu (cyangwa Notification Access ntirafungurwa).`;
+    }
+    if (act === 'pause') return `⏸️ Indirimbo muri **Lark Player** yahagaritswe (Paused).`;
+    if (act === 'resume' || act === 'toggle') return `▶️ Indirimbo muri **Lark Player** irakomeje gucuranga! 🎶`;
+    if (act === 'stop') return `⏹️ **Lark Player** yahagaze.`;
+    if (act === 'next') return `⏭️ Nasimbukiye ku ndirimbo ikurikira muri **Lark Player**! 🎵`;
+    if (act === 'previous' || act === 'prev') return `⏮️ Nasubiye ku ndirimbo ibanza muri **Lark Player**! 🎵`;
+    if (act === 'shuffle' || act === 'shuffle_all') return `🔀 Indirimbo zirimo kuvangwa (Shuffle) muri **Lark Player**! 🎶`;
+    if (act === 'repeat' || act === 'loop') return `🔁 Uburyo bwo gusubiramo (Repeat) bwashyizweho muri **Lark Player**!`;
+    if (act === 'equalizer') return `🎚️ Equalizer ya **Lark Player** yafunguwe!`;
+    if (act === 'sleep_timer') return `⏲️ Sleep Timer muri **Lark Player** yafunguwe!`;
+    if (act === 'lyrics') return `📝 Lyrics z'indirimbo zafunguwe muri **Lark Player**!`;
+    if (act === 'favorite') return `❤️ Indirimbo yashyizwe muri Favorites muri **Lark Player**!`;
+    if (act === 'volume_up' || act === 'volume_down' || act === 'set_volume' || act === 'mute' || act === 'unmute') {
+      const vol = typeof lr.volumePercent === 'number' ? ` (${lr.volumePercent}%)` : '';
+      return `🔊 Ijwi ry'umuziki ryahinduwe${vol}!`;
+    }
+    if (act === 'open' || act === 'open_app') {
+      return `🎵 **Lark Player** yafunguwe! 🎧✨`;
     }
     return `🎵 Indirimbo **${action.songTitle || action.args?.query || 'yo muri telefone'}** irimo gucurangwa muri **Lark Player**! 🎧✨`;
   }
@@ -1589,15 +1770,26 @@ const getEndpoint = (path: string): string => {
 const APK_DEVICE_ACTION_DECLARATIONS = [
   {
     name: 'open_lark_player',
-    description: "Play music directly in Lark Player or organize/create a playlist from local device songs.",
+    description: "Full control over Lark Player: open app, play/search songs, create/edit/play/delete playlists, control playback (pause, resume, next, previous, stop, seek, shuffle, repeat), volume, equalizer, sleep timer, lyrics, queue, favorites, tabs, and now playing.",
     parameters: {
       type: 'OBJECT',
       properties: {
-        query: { type: 'STRING', description: 'Song title, artist, album, or genre to play in Lark Player.' },
-        song_title: { type: 'STRING', description: 'Exact song title to play.' },
-        artist: { type: 'STRING', description: 'Artist name of the song.' },
-        playlist_name: { type: 'STRING', description: 'Optional name of the playlist to create or play.' },
-        action: { type: 'STRING', description: 'Action to perform in Lark Player (e.g. play, search, create_playlist, list_songs).' },
+        query: { type: 'STRING', description: 'Song title, artist, album, playlist name, or search query for Lark Player.' },
+        song_title: { type: 'STRING', description: 'Exact song title to play or add.' },
+        artist: { type: 'STRING', description: 'Artist name of the song or playlist.' },
+        playlist_name: { type: 'STRING', description: 'Playlist name to create, update, play, or delete.' },
+        songs: {
+          type: 'ARRAY',
+          items: { type: 'STRING' },
+          description: 'Optional list of song titles/queries to include when creating or updating a playlist.',
+        },
+        tab: { type: 'STRING', description: 'Optional Lark Player tab to open (songs, playlists, artists, albums, folders, videos, downloads, settings).' },
+        volume_percent: { type: 'NUMBER', description: 'Volume percentage (0-100) when action is set_volume.' },
+        seek_seconds: { type: 'NUMBER', description: 'Position in seconds when action is seek.' },
+        action: {
+          type: 'STRING',
+          description: 'Action to perform in Lark Player: open, play, play_all, shuffle_all, search, create_playlist, add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing.',
+        },
       },
     },
   },
@@ -2017,7 +2209,7 @@ The user sent a recorded voice message in audio format (most commonly spoken in 
 - CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to Lark Player and all local audio songs stored on the user's phone. When the user asks to play a song on Lark Player or local phone audio (e.g. 'curanga ... kuri Lark Player', 'curanga indirimbo zo muri telefone', 'play on Lark'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately. When asked to list local songs or organize/create a playlist, call query_device_music(query) or open_lark_player(query, song_title, artist, playlist_name, 'create_playlist'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
+    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to Lark Player and all local audio songs, playlists, artists, albums, and playback controls on the user's phone. When the user asks to open Lark Player, play a song/artist/album/all songs on Lark Player or local phone audio (e.g. 'fungura lark player', 'curanga ... kuri Lark Player', 'curanga indirimbo zo muri telefone', 'play on Lark'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately. You can perform ALL Lark Player actions via open_lark_player: open, play, play_all, shuffle_all, search, create_playlist (with optional songs array), add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing. When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }
@@ -2470,7 +2662,7 @@ export async function sendMessageToGemini(
           .trim()
       : '';
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
-    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
+    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|ijwi|komeza|subiramo|ongeraho|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|ringtone|artists|albums|folders|now\s*playing|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
     const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText

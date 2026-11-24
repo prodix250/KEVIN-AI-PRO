@@ -66,6 +66,9 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                 if (tryClickFirstYouTubeResult(root)) {
                     KevinAgentPrefs.clearPendingYouTubePlay(this);
                 }
+            } else if (isLarkPlayerPackage(pkg)
+                    && KevinAgentPrefs.isPendingLarkActionActive(this)) {
+                handleLarkPlayerAction(root, pkg);
             }
         } finally {
             root.recycle();
@@ -464,6 +467,456 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                 }
                 current = current.getParent();
                 depth++;
+            }
+        }
+        return false;
+    }
+
+    private boolean isLarkPlayerPackage(String pkg) {
+        if (TextUtils.isEmpty(pkg)) return false;
+        String lower = pkg.toLowerCase(Locale.ROOT);
+        return lower.contains("larkplayer") || lower.equals("com.lark.player");
+    }
+
+    private void handleLarkPlayerAction(AccessibilityNodeInfo root, String pkg) {
+        long now = System.currentTimeMillis();
+        if (now - lastNavigationAt < 650L) {
+            return;
+        }
+        String actionJson = KevinAgentPrefs.getPendingLarkActionJson(this);
+        if (TextUtils.isEmpty(actionJson)) {
+            KevinAgentPrefs.clearPendingLarkAction(this);
+            return;
+        }
+
+        int step = KevinAgentPrefs.incrementPendingLarkStep(this);
+        if (step > 20) {
+            KevinAgentPrefs.clearPendingLarkAction(this);
+            return;
+        }
+
+        try {
+            org.json.JSONObject task = new org.json.JSONObject(actionJson);
+            String action = task.optString("action", "play").toLowerCase(Locale.ROOT);
+            String query = task.optString("query", "").trim();
+            String songTitle = task.optString("songTitle", "").trim();
+            String artist = task.optString("artist", "").trim();
+            String playlistName = task.optString("playlistName", "").trim();
+            String tab = task.optString("tab", "").trim();
+            boolean alreadySearched = task.optBoolean("_searched", false);
+            boolean playlistNamed = task.optBoolean("_playlistNamed", false);
+            boolean playlistCreated = task.optBoolean("_playlistCreated", false);
+
+            // Dismiss any non-blocking promo/skip/permission popups if present
+            if (clickNodeByKeywords(root, new String[] { "skip", "not now", "later", "no thanks", "dismiss" }, false)) {
+                lastNavigationAt = now;
+                return;
+            }
+
+            if ("open".equals(action) || "open_app".equals(action)) {
+                KevinAgentPrefs.clearPendingLarkAction(this);
+                return;
+            }
+
+            if ("play".equals(action) || "play_song".equals(action) || "search".equals(action)) {
+                String targetText = !TextUtils.isEmpty(songTitle) ? songTitle : query;
+                if (TextUtils.isEmpty(targetText)) {
+                    // Play all / first song
+                    if (clickNodeByKeywords(root, new String[] { "shuffle all", "play all", "play" }, false)) {
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                        lastNavigationAt = now;
+                    }
+                    return;
+                }
+
+                // 1) If already searched, try clicking matching song result
+                if (alreadySearched) {
+                    if (clickBestMatchingSongNode(root, targetText, artist)) {
+                        lastNavigationAt = now;
+                        if ("search".equals(action)) {
+                            KevinAgentPrefs.clearPendingLarkAction(this);
+                        } else {
+                            task.put("_clickedResult", true);
+                            KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+                        }
+                        return;
+                    }
+                }
+
+                // 2) If an EditText search box is visible and we haven't typed yet, type query
+                AccessibilityNodeInfo searchBox = findEditableNode(root);
+                if (searchBox != null && !alreadySearched) {
+                    Bundle args = new Bundle();
+                    args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, targetText);
+                    searchBox.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                    if (searchBox.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                        task.put("_searched", true);
+                        KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+                        lastNavigationAt = now;
+                        // Also try clicking IME/search confirm button if present
+                        clickNodeByKeywords(root, new String[] { "search", "done", "go" }, true);
+                        return;
+                    }
+                }
+
+                // 3) If song is already visible right on the current list, click it directly!
+                if (!task.optBoolean("_clickedResult", false) && clickBestMatchingSongNode(root, targetText, artist)) {
+                    lastNavigationAt = now;
+                    KevinAgentPrefs.clearPendingLarkAction(this);
+                    return;
+                }
+
+                // 4) Otherwise tap the Search icon/bar in Lark Player to open search
+                if (!alreadySearched && clickSearchTrigger(root, pkg)) {
+                    lastNavigationAt = now;
+                    return;
+                }
+
+                // 5) If we already clicked a result and a Play button is shown, click Play
+                if (task.optBoolean("_clickedResult", false)) {
+                    if (clickNodeByKeywords(root, new String[] { "play", "curanga", "pause" }, true)) {
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                        lastNavigationAt = now;
+                    } else if (step >= 6) {
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                    }
+                }
+                return;
+            }
+
+            if ("play_all".equals(action) || "shuffle_all".equals(action) || "shuffle".equals(action)) {
+                if (clickNodeByKeywords(root, new String[] { "shuffle all", "shuffle", "play all", "play" }, true)) {
+                    KevinAgentPrefs.clearPendingLarkAction(this);
+                    lastNavigationAt = now;
+                    return;
+                }
+                clickNodeByKeywords(root, new String[] { "songs", "music", "tracks", "local" }, false);
+                lastNavigationAt = now;
+                return;
+            }
+
+            if ("create_playlist".equals(action) || "add_to_playlist".equals(action)) {
+                String pName = !TextUtils.isEmpty(playlistName) ? playlistName : (!TextUtils.isEmpty(query) ? query : "Kevin Mix");
+
+                // Step A: If a name EditText dialog is currently open, type playlistName & confirm
+                if (!playlistNamed) {
+                    AccessibilityNodeInfo input = findEditableNode(root);
+                    if (input != null) {
+                        Bundle args = new Bundle();
+                        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, pName);
+                        input.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                        if (input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                            task.put("_playlistNamed", true);
+                            KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+                            lastNavigationAt = now;
+                            mainHandler.postDelayed(() -> {
+                                AccessibilityNodeInfo fresh = getRootInActiveWindow();
+                                if (fresh != null) {
+                                    try {
+                                        clickNodeByKeywords(fresh, new String[] { "ok", "create", "save", "confirm", "done", "add" }, false);
+                                    } finally {
+                                        fresh.recycle();
+                                    }
+                                }
+                            }, 280L);
+                            return;
+                        }
+                    }
+                }
+
+                // Step B: If playlist was named and song selection screen is open, pick matching songs & confirm
+                if (playlistNamed && !playlistCreated) {
+                    org.json.JSONArray songTitles = task.optJSONArray("songTitles");
+                    int clicked = 0;
+                    if (songTitles != null && songTitles.length() > 0) {
+                        for (int i = 0; i < Math.min(songTitles.length(), 8); i++) {
+                            String title = songTitles.optString(i, "");
+                            if (!TextUtils.isEmpty(title) && clickBestMatchingSongNode(root, title, "")) {
+                                clicked++;
+                            }
+                        }
+                    }
+                    if (clicked > 0 || clickNodeByKeywords(root, new String[] { "add", "done", "save", "ok", "confirm" }, false)) {
+                        task.put("_playlistCreated", true);
+                        KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+                        lastNavigationAt = now;
+                        if (clicked == 0) {
+                            KevinAgentPrefs.clearPendingLarkAction(this);
+                        }
+                        return;
+                    }
+                }
+
+                if (playlistCreated) {
+                    clickNodeByKeywords(root, new String[] { "add", "done", "save", "ok", "confirm" }, false);
+                    KevinAgentPrefs.clearPendingLarkAction(this);
+                    lastNavigationAt = now;
+                    return;
+                }
+
+                // Step C: If "add_to_playlist" and target playlist exists on screen, click it
+                if ("add_to_playlist".equals(action) && !TextUtils.isEmpty(pName)) {
+                    if (clickExactOrContainsText(root, pName)) {
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                        lastNavigationAt = now;
+                        return;
+                    }
+                }
+
+                // Step D: Click New Playlist / Create / + button, or navigate to Playlists tab first
+                if (clickNodeByKeywords(root, new String[] { "new playlist", "create playlist", "create new", "new", "add playlist" }, true)) {
+                    lastNavigationAt = now;
+                    return;
+                }
+                if (clickNodeByKeywords(root, new String[] { "playlists", "playlist" }, false)) {
+                    lastNavigationAt = now;
+                    return;
+                }
+                return;
+            }
+
+            if ("play_playlist".equals(action)) {
+                String pName = !TextUtils.isEmpty(playlistName) ? playlistName : query;
+                if (!task.optBoolean("_openedPlaylist", false) && !TextUtils.isEmpty(pName)) {
+                    if (clickExactOrContainsText(root, pName)) {
+                        task.put("_openedPlaylist", true);
+                        KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+                        lastNavigationAt = now;
+                        return;
+                    }
+                }
+                if (task.optBoolean("_openedPlaylist", false)) {
+                    if (clickNodeByKeywords(root, new String[] { "play all", "shuffle", "play" }, true)) {
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                        lastNavigationAt = now;
+                        return;
+                    }
+                }
+                clickNodeByKeywords(root, new String[] { "playlists", "playlist" }, false);
+                lastNavigationAt = now;
+                return;
+            }
+
+            // Generic Lark Player UI feature actions (pause, resume, next, previous, repeat, favorite, equalizer, sleep_timer, lyrics, queue, open_tab, etc.)
+            String[] targetKeywords = resolveLarkActionKeywords(action, tab);
+            if (targetKeywords.length > 0 && clickNodeByKeywords(root, targetKeywords, true)) {
+                KevinAgentPrefs.clearPendingLarkAction(this);
+                lastNavigationAt = now;
+                return;
+            }
+
+            // If a feature (like sleep timer, equalizer, lyrics, repeat) is inside the player screen or menu, try opening mini-player or menu
+            if (step <= 3) {
+                if (clickNodeByKeywords(root, new String[] { "more", "menu", "options", "now playing", "player" }, true)) {
+                    lastNavigationAt = now;
+                    return;
+                }
+            }
+            if (step >= 5) {
+                KevinAgentPrefs.clearPendingLarkAction(this);
+            }
+        } catch (Exception ignored) {
+            KevinAgentPrefs.clearPendingLarkAction(this);
+        }
+    }
+
+    private String[] resolveLarkActionKeywords(String action, String tab) {
+        switch (action) {
+            case "pause":
+                return new String[] { "pause" };
+            case "resume":
+            case "toggle":
+                return new String[] { "play", "pause" };
+            case "next":
+                return new String[] { "next", "skip next", "forward" };
+            case "previous":
+            case "prev":
+                return new String[] { "previous", "prev", "skip previous" };
+            case "repeat":
+            case "loop":
+                return new String[] { "repeat", "loop", "cycle" };
+            case "favorite":
+            case "like":
+                return new String[] { "favorite", "favourite", "like", "heart", "love" };
+            case "equalizer":
+            case "eq":
+                return new String[] { "equalizer", "eq", "sound effect", "audio effect" };
+            case "sleep_timer":
+            case "timer":
+                return new String[] { "sleep timer", "sleep", "timer" };
+            case "lyrics":
+                return new String[] { "lyrics", "lyric" };
+            case "queue":
+            case "add_to_queue":
+                return new String[] { "queue", "playing queue", "add to queue", "up next" };
+            case "play_next":
+                return new String[] { "play next" };
+            case "share":
+                return new String[] { "share" };
+            case "ringtone":
+                return new String[] { "ringtone", "set as ringtone" };
+            case "speed":
+                return new String[] { "speed", "playback speed" };
+            case "list_playlists":
+                return new String[] { "playlists", "playlist" };
+            case "list_artists":
+                return new String[] { "artists", "artist" };
+            case "list_albums":
+                return new String[] { "albums", "album" };
+            case "list_folders":
+                return new String[] { "folders", "folder" };
+            case "list_songs":
+                return new String[] { "songs", "tracks", "music" };
+            case "open_tab":
+                if (!TextUtils.isEmpty(tab)) {
+                    return new String[] { tab.toLowerCase(Locale.ROOT) };
+                }
+                return new String[] { "music", "songs" };
+            default:
+                return new String[0];
+        }
+    }
+
+    private AccessibilityNodeInfo findEditableNode(AccessibilityNodeInfo root) {
+        if (root == null) return null;
+        CharSequence cls = root.getClassName();
+        if (cls != null && cls.toString().contains("EditText") && root.isEnabled()) {
+            return root;
+        }
+        int count = root.getChildCount();
+        for (int i = 0; i < count; i++) {
+            AccessibilityNodeInfo child = root.getChild(i);
+            if (child != null) {
+                AccessibilityNodeInfo found = findEditableNode(child);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private boolean clickSearchTrigger(AccessibilityNodeInfo root, String pkg) {
+        String[] candidateIds = new String[] {
+                pkg + ":id/search",
+                pkg + ":id/iv_search",
+                pkg + ":id/btn_search",
+                pkg + ":id/search_bar",
+                pkg + ":id/search_layout",
+                pkg + ":id/tv_search",
+                pkg + ":id/action_search"
+        };
+        for (String id : candidateIds) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
+            if (clickFirstClickable(nodes)) return true;
+        }
+        return clickNodeByKeywords(root, new String[] { "search", "shakisha", "find" }, true);
+    }
+
+    private boolean clickExactOrContainsText(AccessibilityNodeInfo root, String target) {
+        if (root == null || TextUtils.isEmpty(target)) return false;
+        String lowerTarget = target.trim().toLowerCase(Locale.ROOT);
+        List<AccessibilityNodeInfo> matched = root.findAccessibilityNodeInfosByText(target);
+        if (clickFirstClickable(matched)) return true;
+        return clickNodeByKeywords(root, new String[] { lowerTarget }, false);
+    }
+
+    private boolean clickBestMatchingSongNode(AccessibilityNodeInfo root, String queryOrTitle, String artist) {
+        if (root == null || TextUtils.isEmpty(queryOrTitle)) return false;
+        String combined = (queryOrTitle + " " + (artist != null ? artist : "")).trim().toLowerCase(Locale.ROOT);
+        String[] rawTokens = combined.split("\\s+");
+        List<String> tokens = new ArrayList<>();
+        for (String t : rawTokens) {
+            String clean = t.replaceAll("[^\\p{L}\\p{N}]", "");
+            if (clean.length() >= 2
+                    && !clean.equals("by")
+                    && !clean.equals("ya")
+                    && !clean.equals("za")
+                    && !clean.equals("indirimbo")
+                    && !clean.equals("song")
+                    && !clean.equals("curanga")
+                    && !clean.equals("play")
+                    && !clean.equals("lark")) {
+                tokens.add(clean);
+            }
+        }
+        if (tokens.isEmpty()) return false;
+
+        AccessibilityNodeInfo bestNode = null;
+        int bestScore = 0;
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 400) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            CharSequence cls = node.getClassName();
+            boolean isEdit = cls != null && cls.toString().contains("EditText");
+            if (!isEdit) {
+                String txt = node.getText() != null ? node.getText().toString().trim().toLowerCase(Locale.ROOT) : "";
+                if (!TextUtils.isEmpty(txt) && txt.length() >= 2 && txt.length() <= 160) {
+                    int score = 0;
+                    for (String tok : tokens) {
+                        if (txt.contains(tok)) score += 2;
+                    }
+                    if (txt.contains(queryOrTitle.toLowerCase(Locale.ROOT))) score += 5;
+                    if (score > bestScore) {
+                        AccessibilityNodeInfo clickable = climbToClickableParent(node, 5);
+                        if (clickable != null) {
+                            bestScore = score;
+                            bestNode = clickable;
+                        }
+                    }
+                }
+            }
+            int count = node.getChildCount();
+            for (int i = 0; i < count; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
+            }
+        }
+
+        if (bestNode != null && bestScore >= 2) {
+            return bestNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        }
+        return false;
+    }
+
+    private boolean clickNodeByKeywords(AccessibilityNodeInfo root, String[] keywords, boolean checkViewId) {
+        if (root == null || keywords == null || keywords.length == 0) return false;
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 400) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            CharSequence cls = node.getClassName();
+            boolean isEdit = cls != null && cls.toString().contains("EditText");
+            if (!isEdit) {
+                String text = node.getText() != null ? node.getText().toString().trim().toLowerCase(Locale.ROOT) : "";
+                String desc = node.getContentDescription() != null ? node.getContentDescription().toString().trim().toLowerCase(Locale.ROOT) : "";
+                String viewId = checkViewId && node.getViewIdResourceName() != null
+                        ? node.getViewIdResourceName().toLowerCase(Locale.ROOT)
+                        : "";
+                for (String kw : keywords) {
+                    if (TextUtils.isEmpty(kw)) continue;
+                    boolean matched = text.equals(kw)
+                            || desc.equals(kw)
+                            || (text.length() <= 40 && text.contains(kw))
+                            || (desc.length() <= 40 && desc.contains(kw))
+                            || (!TextUtils.isEmpty(viewId) && viewId.contains(kw));
+                    if (matched) {
+                        AccessibilityNodeInfo clickable = climbToClickableParent(node, 4);
+                        if (clickable != null && clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            int count = node.getChildCount();
+            for (int i = 0; i < count; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
             }
         }
         return false;

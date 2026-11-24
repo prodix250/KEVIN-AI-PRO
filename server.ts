@@ -110,10 +110,11 @@ You are a full autonomous agent with direct permission-backed control over apps 
 - Direct WhatsApp Sending: When the user explicitly asks to send or reply on WhatsApp (e.g., 'ohereza kuri whatsapp ya...', 'subiza kuri whatsapp...'), ALWAYS call open_whatsapp(phone_number, message, contact_name) immediately. For phone numbers in Rwanda, ensure the country code +250 is used (e.g. +250788123456 or 250788123456 instead of 0788123456) so WhatsApp can deliver the message immediately without missing country code errors. In the 'message' parameter, write ONLY ONE single natural human message matching the user's/recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions.
 - WhatsApp Auto-Reply Mode: When the user asks you to enable, disable, stop, or pause WhatsApp auto-reply for a specific duration (e.g., 'ujye unsubiriza kuri whatsapp', 'hagarika gusubiza kuri whatsapp iminota 30', 'pause whatsapp auto-reply for 1 hour', 'funga auto reply'), ALWAYS call configure_whatsapp_autoreply(enabled, reply_style, pause_minutes).
 - Check All WhatsApp Chats & Reply to Unreplied Messages: When the user asks you to check their WhatsApp chats and reply to unread/unreplied messages (e.g., 'reba muri whatsapp zanjye usubize ubutumwa budasubije', 'check all whatsapp chats and reply'), ALWAYS call scan_whatsapp_chats().
-- Lark Player & Local Phone Music:
-  * You have 100% full autonomous access to Lark Player and all local audio songs stored on the user's phone.
-  * When the user asks to play a song on Lark Player or local phone audio (e.g., 'curanga ... kuri Lark Player', 'play ... on Lark Player', 'curanga indirimbo zo muri telefone', 'curangira kuri lark'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately.
-  * When the user asks you to check, list, find local songs, or organize/create a playlist of songs on their phone (e.g., 'reba indirimbo ziri muri telefone', 'nkorera playlist y'indirimbo za...', 'shyira indirimbo ku murongo muri Lark Player'), call query_device_music(query) or open_lark_player(query, song_title, artist, playlist_name, 'create_playlist').
+- Lark Player & Local Phone Music (100% Full Control):
+  * You have 100% full autonomous access to Lark Player and all local audio songs, playlists, artists, albums, and playback controls on the user's phone.
+  * When the user asks to open Lark Player, play a song/artist/album/all songs on Lark Player or local phone audio (e.g., 'fungura lark player', 'curanga ... kuri Lark Player', 'play ... on Lark Player', 'curanga indirimbo zo muri telefone'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately.
+  * You can do EVERYTHING inside Lark Player via open_lark_player: play/search songs, pause/resume/toggle/stop/next/previous/seek, volume_up/volume_down/set_volume/mute/unmute, create_playlist (with optional songs array), add_to_playlist, play_playlist, delete_playlist, list_playlists/list_artists/list_albums/list_folders/list_songs, shuffle/play_all/shuffle_all, repeat/loop, favorite/like, equalizer, sleep_timer, lyrics, queue/add_to_queue/play_next, open_tab (songs/playlists/artists/albums/folders/videos/downloads/settings), share, ringtone, speed, and now_playing.
+  * When the user asks to list local songs or browse library, call query_device_music(query) or open_lark_player(..., action='list_songs').
 - Calls & Other Apps: Use make_call, open_audiomack, open_camera, or open_app ONLY when explicitly requested by the user (never guess or fabricate targets when uncertain).`;
 
 const deviceActionDeclarations: FunctionDeclaration[] = [
@@ -139,15 +140,35 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: "open_lark_player",
-    description: "Play music directly in Lark Player or organize/create a playlist from local device songs.",
+    description: "Full control over Lark Player: open app, play/search songs, create/edit/play/delete playlists, control playback (pause, resume, next, previous, stop, seek, shuffle, repeat), volume, equalizer, sleep timer, lyrics, queue, favorites, tabs, and now playing.",
     parametersJsonSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Song title, artist, album, or genre to play in Lark Player." },
-        song_title: { type: "string", description: "Exact song title to play." },
-        artist: { type: "string", description: "Artist name of the song." },
-        playlist_name: { type: "string", description: "Optional name of the playlist to create or play." },
-        action: { type: "string", enum: ["play", "search", "create_playlist", "list_songs"], description: "Action to perform in Lark Player (default: play)." }
+        query: { type: "string", description: "Song title, artist, album, playlist name, or search query for Lark Player." },
+        song_title: { type: "string", description: "Exact song title to play or add." },
+        artist: { type: "string", description: "Artist name of the song or playlist." },
+        playlist_name: { type: "string", description: "Playlist name to create, update, play, or delete." },
+        songs: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional list of song titles/queries to include when creating or updating a playlist."
+        },
+        tab: { type: "string", description: "Optional Lark Player tab to open (songs, playlists, artists, albums, folders, videos, downloads, settings)." },
+        volume_percent: { type: "number", description: "Volume percentage (0-100) when action is set_volume." },
+        seek_seconds: { type: "number", description: "Position in seconds when action is seek." },
+        action: {
+          type: "string",
+          enum: [
+            "open", "play", "play_all", "shuffle_all", "search",
+            "create_playlist", "add_to_playlist", "play_playlist", "delete_playlist",
+            "list_songs", "list_playlists", "list_artists", "list_albums", "list_folders",
+            "pause", "resume", "toggle", "stop", "next", "previous", "fast_forward", "rewind", "seek",
+            "volume_up", "volume_down", "set_volume", "mute", "unmute",
+            "shuffle", "repeat", "favorite", "equalizer", "sleep_timer", "lyrics",
+            "queue", "add_to_queue", "play_next", "open_tab", "share", "ringtone", "speed", "now_playing"
+          ],
+          description: "Action to perform in Lark Player (default: play)."
+        }
       }
     }
   },
@@ -1122,7 +1143,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       let lastErr: unknown = null;
       const chatModelErrors: string[] = [];
       let streamStarted = false;
-      const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
+      const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|ijwi|komeza|subiramo|ongeraho|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|ringtone|artists|albums|folders|now\s*playing|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
       const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
       const shouldTryWebSearch = Boolean(
         latestUserText
