@@ -815,4 +815,18 @@ public class KevinAgentBridge {
             }
         }
     }
+
+    @JavascriptInterface
+    public void playBeep() {
+        activity.runOnUiThread(() -> {
+            try {
+                android.media.ToneGenerator tg = new android.media.ToneGenerator(
+                        android.media.AudioManager.STREAM_NOTIFICATION,
+                        90
+                );
+                tg.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 120);
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(tg::release, 200L);
+            } catch (Exception ignored) {}
+        });
+    }
 }

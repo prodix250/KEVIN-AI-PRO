@@ -725,6 +725,16 @@ export interface DeviceAction {
 export function playWhatsAppSound(type: 'pop' | 'send' | 'receive' = 'pop') {
   if (typeof window === 'undefined') return;
   try {
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.playBeep) {
+      bridge.playBeep();
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     if (AudioCtx) {
       const ctx = new AudioCtx();
