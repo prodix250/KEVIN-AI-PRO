@@ -584,23 +584,206 @@ public class KevinAgentBridge {
             } catch (Exception ignored) {}
         }
         try {
+            Intent mainLauncher = new Intent(Intent.ACTION_MAIN);
+            mainLauncher.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<android.content.pm.ResolveInfo> infos = pm.queryIntentActivities(mainLauncher, 0);
+            for (android.content.pm.ResolveInfo info : infos) {
+                if (info.activityInfo == null || info.activityInfo.packageName == null) continue;
+                String pLower = info.activityInfo.packageName.toLowerCase(Locale.ROOT);
+                if (pLower.contains("larkplayer") || pLower.equals("com.lark.player") || pLower.contains("lark.player")) {
+                    return info.activityInfo.packageName;
+                }
+                try {
+                    CharSequence label = info.loadLabel(pm);
+                    if (label != null && label.toString().toLowerCase(Locale.ROOT).contains("lark")) {
+                        String l = label.toString().toLowerCase(Locale.ROOT);
+                        if (l.contains("lark player") || l.contains("larkplayer")) {
+                            return info.activityInfo.packageName;
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        try {
             List<android.content.pm.ApplicationInfo> apps = pm.getInstalledApplications(0);
             for (android.content.pm.ApplicationInfo app : apps) {
                 if (app.packageName != null) {
                     String pkgLower = app.packageName.toLowerCase(Locale.ROOT);
-                    if (pkgLower.contains("larkplayer") || pkgLower.equals("com.lark.player")) {
+                    if (pkgLower.contains("larkplayer") || pkgLower.equals("com.lark.player") || pkgLower.contains("lark.player")) {
                         return app.packageName;
                     }
                     try {
                         CharSequence label = pm.getApplicationLabel(app);
-                        if (label != null && label.toString().toLowerCase(Locale.ROOT).contains("lark player")) {
-                            return app.packageName;
+                        if (label != null) {
+                            String l = label.toString().toLowerCase(Locale.ROOT);
+                            if (l.contains("lark player") || l.contains("larkplayer")) {
+                                return app.packageName;
+                            }
                         }
                     } catch (Exception ignored) {}
                 }
             }
         } catch (Exception ignored) {}
         return null;
+    }
+
+    private boolean startActivitySafely(Intent intent) {
+        if (intent == null) return false;
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            activity.startActivity(intent);
+            return true;
+        } catch (Exception ignored) {
+            try {
+                activity.getApplicationContext().startActivity(intent);
+                return true;
+            } catch (Exception ignored2) {
+                return false;
+            }
+        }
+    }
+
+    private Intent buildPackageLaunchIntent(String pkg) {
+        if (TextUtils.isEmpty(pkg)) return null;
+        PackageManager pm = activity.getPackageManager();
+        try {
+            Intent launchIntent = pm.getLaunchIntentForPackage(pkg);
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+                return launchIntent;
+            }
+        } catch (Exception ignored) {}
+        try {
+            Intent q = new Intent(Intent.ACTION_MAIN);
+            q.addCategory(Intent.CATEGORY_LAUNCHER);
+            q.setPackage(pkg);
+            List<android.content.pm.ResolveInfo> list = pm.queryIntentActivities(q, 0);
+            if (list != null && !list.isEmpty() && list.get(0).activityInfo != null) {
+                Intent explicit = new Intent(Intent.ACTION_MAIN);
+                explicit.addCategory(Intent.CATEGORY_LAUNCHER);
+                explicit.setComponent(new ComponentName(pkg, list.get(0).activityInfo.name));
+                explicit.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+                return explicit;
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    public String findInstalledAppPackageByName(String appName) {
+        if (TextUtils.isEmpty(appName)) return null;
+        String lower = appName.trim().toLowerCase(Locale.ROOT);
+        String compact = lower.replaceAll("[^\\p{L}\\p{N}]", "");
+        if (compact.contains("larkplayer") || lower.contains("lark player") || lower.equals("lark")) {
+            return findInstalledLarkPlayerPackage();
+        }
+        if (compact.contains("audiomack") || lower.contains("audio mack")) {
+            return findInstalledAudiomackPackage();
+        }
+        PackageManager pm = activity.getPackageManager();
+        String[] aliasPkgs = null;
+        if (lower.contains("whatsapp")) {
+            aliasPkgs = new String[] { "com.whatsapp", "com.whatsapp.w4b" };
+        } else if (lower.contains("youtube")) {
+            aliasPkgs = new String[] { "com.google.android.youtube" };
+        } else if (lower.contains("instagram")) {
+            aliasPkgs = new String[] { "com.instagram.android" };
+        } else if (lower.contains("tiktok")) {
+            aliasPkgs = new String[] { "com.zhiliaoapp.musically", "com.ss.android.ugc.trill" };
+        } else if (lower.contains("spotify")) {
+            aliasPkgs = new String[] { "com.spotify.music" };
+        } else if (lower.contains("facebook")) {
+            aliasPkgs = new String[] { "com.facebook.katana", "com.facebook.lite" };
+        } else if (lower.contains("maps")) {
+            aliasPkgs = new String[] { "com.google.android.apps.maps" };
+        } else if (lower.contains("chrome")) {
+            aliasPkgs = new String[] { "com.android.chrome" };
+        }
+        if (aliasPkgs != null) {
+            for (String pkg : aliasPkgs) {
+                if (buildPackageLaunchIntent(pkg) != null) return pkg;
+            }
+        }
+        try {
+            Intent mainLauncher = new Intent(Intent.ACTION_MAIN);
+            mainLauncher.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<android.content.pm.ResolveInfo> infos = pm.queryIntentActivities(mainLauncher, 0);
+            for (android.content.pm.ResolveInfo info : infos) {
+                if (info.activityInfo == null || info.activityInfo.packageName == null) continue;
+                String pkg = info.activityInfo.packageName;
+                CharSequence lbl = info.loadLabel(pm);
+                String lblLower = lbl != null ? lbl.toString().toLowerCase(Locale.ROOT) : "";
+                String lblCompact = lblLower.replaceAll("[^\\p{L}\\p{N}]", "");
+                if ((!TextUtils.isEmpty(lblLower) && (lblLower.equals(lower) || lblLower.contains(lower) || lblCompact.contains(compact)))
+                        || pkg.toLowerCase(Locale.ROOT).contains(compact)) {
+                    return pkg;
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    @JavascriptInterface
+    public String openApp(String appName) {
+        JSONObject result = new JSONObject();
+        try {
+            String rawName = appName != null ? appName.trim() : "";
+            String lower = rawName.toLowerCase(Locale.ROOT);
+            String compact = lower.replaceAll("[^\\p{L}\\p{N}]", "");
+            result.put("appName", rawName);
+
+            if (compact.contains("larkplayer") || lower.contains("lark player") || lower.equals("lark")) {
+                JSONObject larkRes = new JSONObject(executeLarkPlayerAction("{\"action\":\"open\"}"));
+                result.put("ok", true);
+                result.put("launched", larkRes.optBoolean("larkInstalled", false));
+                result.put("packageName", larkRes.optString("larkPackage", ""));
+                return result.toString();
+            }
+            if (compact.contains("audiomack") || lower.contains("audio mack")) {
+                JSONObject amRes = new JSONObject(executeAudiomackAction("{\"action\":\"open\"}"));
+                result.put("ok", true);
+                result.put("launched", true);
+                result.put("packageName", amRes.optString("audiomackPackage", ""));
+                return result.toString();
+            }
+            if (lower.contains("setting")) {
+                final boolean[] okFlag = new boolean[] { false };
+                activity.runOnUiThread(() -> {
+                    Intent i = new Intent(Settings.ACTION_SETTINGS);
+                    okFlag[0] = startActivitySafely(i);
+                });
+                result.put("ok", true);
+                result.put("launched", true);
+                result.put("packageName", "com.android.settings");
+                return result.toString();
+            }
+            if (lower.contains("camera") || lower.contains("kamera")) {
+                activity.runOnUiThread(() -> startActivitySafely(new Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)));
+                result.put("ok", true);
+                result.put("launched", true);
+                return result.toString();
+            }
+
+            String targetPkg = findInstalledAppPackageByName(rawName);
+            result.put("packageName", targetPkg != null ? targetPkg : "");
+            if (targetPkg != null) {
+                Intent launchIntent = buildPackageLaunchIntent(targetPkg);
+                if (launchIntent != null) {
+                    activity.runOnUiThread(() -> startActivitySafely(launchIntent));
+                    result.put("ok", true);
+                    result.put("launched", true);
+                    return result.toString();
+                }
+            }
+            result.put("ok", false);
+            result.put("launched", false);
+        } catch (Exception e) {
+            try {
+                result.put("ok", false);
+                result.put("launched", false);
+                result.put("error", e.getMessage());
+            } catch (Exception ignored) {}
+        }
+        return result.toString();
     }
 
     private List<String> tokenizeMusicQuery(String query) {
@@ -760,36 +943,25 @@ public class KevinAgentBridge {
 
     private boolean launchLarkPlayerHome(String larkPkg, String pendingActionJson) {
         if (!TextUtils.isEmpty(pendingActionJson)) {
-            KevinAgentPrefs.armPendingLarkAction(activity, pendingActionJson, 25_000L);
+            KevinAgentPrefs.armPendingLarkAction(activity, pendingActionJson, 28_000L);
         }
         if (larkPkg != null) {
-            try {
-                Intent launchIntent = activity.getPackageManager().getLaunchIntentForPackage(larkPkg);
-                if (launchIntent != null) {
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                    activity.startActivity(launchIntent);
-                    return true;
-                }
-            } catch (Exception ignored) {}
-        }
-        try {
-            Intent genericIntent = new Intent(Intent.ACTION_MAIN);
-            genericIntent.addCategory(Intent.CATEGORY_APP_MUSIC);
-            genericIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            if (larkPkg != null) {
-                genericIntent.setPackage(larkPkg);
+            Intent launchIntent = buildPackageLaunchIntent(larkPkg);
+            if (launchIntent != null && startActivitySafely(launchIntent)) {
+                return true;
             }
-            activity.startActivity(genericIntent);
+        }
+        Intent genericPkgIntent = new Intent(Intent.ACTION_MAIN);
+        genericPkgIntent.addCategory(Intent.CATEGORY_APP_MUSIC);
+        if (larkPkg != null) {
+            genericPkgIntent.setPackage(larkPkg);
+        }
+        if (startActivitySafely(genericPkgIntent)) {
             return true;
-        } catch (Exception ignored) {}
-        try {
-            Intent genericIntent = new Intent(Intent.ACTION_MAIN);
-            genericIntent.addCategory(Intent.CATEGORY_APP_MUSIC);
-            genericIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            activity.startActivity(genericIntent);
-            return true;
-        } catch (Exception ignored) {}
-        return false;
+        }
+        Intent genericMusicIntent = new Intent(Intent.ACTION_MAIN);
+        genericMusicIntent.addCategory(Intent.CATEGORY_APP_MUSIC);
+        return startActivitySafely(genericMusicIntent);
     }
 
     private boolean dispatchMediaKey(int keyCode) {
@@ -860,9 +1032,6 @@ public class KevinAgentBridge {
 
     @JavascriptInterface
     public boolean playInLarkPlayer(String songIdOrQuery, String songTitle, String artist) {
-        if (!hasAudioStoragePermission()) {
-            requestAgentPermissions();
-        }
         activity.runOnUiThread(() -> {
             try {
                 String larkPkg = findInstalledLarkPlayerPackage();
@@ -873,7 +1042,7 @@ public class KevinAgentBridge {
 
                 if (!TextUtils.isEmpty(songIdOrQuery) && songIdOrQuery.startsWith("content://")) {
                     songContentUri = Uri.parse(songIdOrQuery);
-                } else {
+                } else if (hasAudioStoragePermission()) {
                     String combinedSearch = (!TextUtils.isEmpty(resolvedTitle) ? resolvedTitle : (songIdOrQuery != null ? songIdOrQuery : ""))
                             + (!TextUtils.isEmpty(resolvedArtist) ? " " + resolvedArtist : "");
                     JSONArray matches = queryMatchingSongsArray(combinedSearch.trim(), 5);
@@ -914,8 +1083,9 @@ public class KevinAgentBridge {
                         try {
                             if (pm.resolveActivity(playIntent, 0) != null) {
                                 KevinAgentPrefs.clearPendingLarkAction(activity);
-                                activity.startActivity(playIntent);
-                                return;
+                                if (startActivitySafely(playIntent)) {
+                                    return;
+                                }
                             }
                         } catch (Exception ignored) {}
                     }
@@ -932,7 +1102,7 @@ public class KevinAgentBridge {
                         searchIntent.putExtra(android.provider.MediaStore.EXTRA_MEDIA_TITLE, resolvedTitle);
                     }
                     searchIntent.putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*");
-                    searchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    searchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                     if (larkPkg != null) {
                         searchIntent.setPackage(larkPkg);
                     }
@@ -943,9 +1113,10 @@ public class KevinAgentBridge {
                             task.put("query", queryToSearch);
                             task.put("songTitle", resolvedTitle);
                             task.put("artist", resolvedArtist);
-                            KevinAgentPrefs.armPendingLarkAction(activity, task.toString(), 22_000L);
-                            activity.startActivity(searchIntent);
-                            return;
+                            KevinAgentPrefs.armPendingLarkAction(activity, task.toString(), 25_000L);
+                            if (startActivitySafely(searchIntent)) {
+                                return;
+                            }
                         }
                     } catch (Exception ignored) {}
                 }
@@ -982,9 +1153,9 @@ public class KevinAgentBridge {
             result.put("larkInstalled", larkPkg != null);
             result.put("larkPackage", larkPkg != null ? larkPkg : "");
             result.put("hasMusicPermission", hasPerm);
+            result.put("hasAccessibility", isAccessibilityEnabled());
 
-            if (!hasPerm && ("play".equals(action) || "create_playlist".equals(action) || "add_to_playlist".equals(action)
-                    || "list_songs".equals(action) || "list_artists".equals(action) || "list_albums".equals(action)
+            if (!hasPerm && ("list_songs".equals(action) || "list_artists".equals(action) || "list_albums".equals(action)
                     || "list_folders".equals(action))) {
                 requestAgentPermissions();
             }
@@ -1298,6 +1469,27 @@ public class KevinAgentBridge {
             } catch (Exception ignored) {}
         }
         try {
+            Intent mainLauncher = new Intent(Intent.ACTION_MAIN);
+            mainLauncher.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<android.content.pm.ResolveInfo> infos = pm.queryIntentActivities(mainLauncher, 0);
+            for (android.content.pm.ResolveInfo info : infos) {
+                if (info.activityInfo == null || info.activityInfo.packageName == null) continue;
+                String pLower = info.activityInfo.packageName.toLowerCase(Locale.ROOT);
+                if (pLower.contains("audiomack")) {
+                    return info.activityInfo.packageName;
+                }
+                try {
+                    CharSequence label = info.loadLabel(pm);
+                    if (label != null) {
+                        String l = label.toString().toLowerCase(Locale.ROOT);
+                        if (l.contains("audiomack") || l.contains("audio mack")) {
+                            return info.activityInfo.packageName;
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        try {
             List<android.content.pm.ApplicationInfo> apps = pm.getInstalledApplications(0);
             for (android.content.pm.ApplicationInfo app : apps) {
                 if (app.packageName != null) {
@@ -1307,8 +1499,11 @@ public class KevinAgentBridge {
                     }
                     try {
                         CharSequence label = pm.getApplicationLabel(app);
-                        if (label != null && label.toString().toLowerCase(Locale.ROOT).contains("audiomack")) {
-                            return app.packageName;
+                        if (label != null) {
+                            String l = label.toString().toLowerCase(Locale.ROOT);
+                            if (l.contains("audiomack") || l.contains("audio mack")) {
+                                return app.packageName;
+                            }
                         }
                     } catch (Exception ignored) {}
                 }
@@ -1322,22 +1517,14 @@ public class KevinAgentBridge {
             KevinAgentPrefs.armPendingAudiomackAction(activity, pendingActionJson, 28_000L);
         }
         if (amPkg != null) {
-            try {
-                Intent launchIntent = activity.getPackageManager().getLaunchIntentForPackage(amPkg);
-                if (launchIntent != null) {
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                    activity.startActivity(launchIntent);
-                    return true;
-                }
-            } catch (Exception ignored) {}
+            Intent launchIntent = buildPackageLaunchIntent(amPkg);
+            if (launchIntent != null && startActivitySafely(launchIntent)) {
+                return true;
+            }
         }
         if (!TextUtils.isEmpty(webFallbackUrl)) {
-            try {
-                Intent webIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(webFallbackUrl));
-                webIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                activity.startActivity(webIntent);
-                return true;
-            } catch (Exception ignored) {}
+            Intent webIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(webFallbackUrl));
+            return startActivitySafely(webIntent);
         }
         return false;
     }
@@ -1382,6 +1569,7 @@ public class KevinAgentBridge {
             result.put("action", action);
             result.put("audiomackInstalled", amPkg != null);
             result.put("audiomackPackage", amPkg != null ? amPkg : "");
+            result.put("hasAccessibility", isAccessibilityEnabled());
             result.put("webFallbackUrl", webFallbackUrl);
 
             if ("now_playing".equals(action)) {
@@ -1511,22 +1699,8 @@ public class KevinAgentBridge {
             pending.put("tab", tab);
             final String finalPending = pending.toString();
 
-            activity.runOnUiThread(() -> {
-                // If user asked to search/play by query and audiomack deep link is supported, launch app & arm accessibility
-                if (("play".equals(action) || "play_song".equals(action) || "search".equals(action)) && !TextUtils.isEmpty(effectiveQuery)) {
-                    try {
-                        KevinAgentPrefs.armPendingAudiomackAction(activity, finalPending, 28_000L);
-                        Intent deepIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("audiomack://search?q=" + Uri.encode(effectiveQuery)));
-                        deepIntent.setPackage(amPkg);
-                        deepIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                        if (activity.getPackageManager().resolveActivity(deepIntent, 0) != null) {
-                            activity.startActivity(deepIntent);
-                            return;
-                        }
-                    } catch (Exception ignored) {}
-                }
-                launchAudiomackHome(amPkg, finalPending, webFallbackUrl);
-            });
+            KevinAgentPrefs.armPendingAudiomackAction(activity, finalPending, 28_000L);
+            activity.runOnUiThread(() -> launchAudiomackHome(amPkg, finalPending, webFallbackUrl));
             return result.toString();
         } catch (Exception e) {
             try {

@@ -1190,6 +1190,40 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
     return false;
   }
 
+  if (action.name === 'open_app') {
+    const rawApp = String(action.args?.app_name || action.label || '').replace(/^Fungura\s+/i, '').trim();
+    const lowerApp = rawApp.toLowerCase();
+    if (lowerApp.includes('lark')) {
+      return runDeviceAction({ ...action, name: 'open_lark_player', args: { action: 'open' } }, forceExecute);
+    }
+    if (lowerApp.includes('audiomack') || lowerApp.includes('audio mack')) {
+      return runDeviceAction({ ...action, name: 'open_audiomack', args: { action: 'open' } }, forceExecute);
+    }
+    if (bridge?.openApp && rawApp) {
+      try {
+        const parsed = JSON.parse(bridge.openApp(rawApp) || '{}') as { launched?: boolean };
+        if (parsed?.launched) {
+          action.status = 'executed';
+          return true;
+        }
+      } catch {}
+    }
+    const appFallback = action.fallbackUrl || action.url;
+    if (appFallback) {
+      const link = document.createElement('a');
+      link.href = appFallback;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      action.status = 'executed';
+      return true;
+    }
+    action.status = 'executed';
+    return true;
+  }
+
   const intentUrl = action.intentUrl;
   const fallbackUrl = action.fallbackUrl || action.url;
   if (!intentUrl && !fallbackUrl) return false;
@@ -2107,6 +2141,17 @@ const APK_DEVICE_ACTION_DECLARATIONS = [
       properties: {},
     },
   },
+  {
+    name: 'open_app',
+    description: 'Open any installed app on the device requested by name (e.g. Instagram, TikTok, Spotify, Maps, Settings, Facebook, Chrome, etc.).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        app_name: { type: 'STRING', description: 'Exact app name to open.' },
+      },
+      required: ['app_name'],
+    },
+  },
 ];
 
 async function resolveYouTubeVideoForApk(query: string): Promise<{ videoId: string; title: string; channel: string } | null> {
@@ -2433,7 +2478,7 @@ The user sent a recorded voice message in audio format (most commonly spoken in 
 - CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_audiomack, open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
-    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER + AUDIOMACK ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to BOTH Lark Player (local phone audio) AND Audiomack (online/offline streaming). When the user asks to open Audiomack, search a song/artist/album, play, download, like/favorite, repost, follow, create/add/play a playlist, queue, or control playback on Audiomack (e.g. 'fungura audiomack', 'shakisha ... kuri audiomack', 'curanga ... kuri audiomack', 'play ... on audiomack'), ALWAYS call open_audiomack(query, song_title, artist, playlist_name, action) immediately. You can perform ALL Audiomack actions via open_audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite, like, repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab, volume_up, volume_down, set_volume, mute, unmute, now_playing. When the user asks to open Lark Player, play a song/artist/album/all songs on Lark Player or local phone audio (e.g. 'fungura lark player', 'curanga ... kuri Lark Player', 'curanga indirimbo zo muri telefone', 'play on Lark'), ALWAYS call open_lark_player(query, song_title, artist, playlist_name, action) immediately. You can perform ALL Lark Player actions via open_lark_player: open, play, play_all, shuffle_all, search, create_playlist (with optional songs array), add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing. When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
+    `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER + AUDIOMACK + APP LAUNCH ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to BOTH Lark Player (local phone audio) AND Audiomack (online/offline streaming), plus opening any installed app via open_app. CRITICAL TOOL CALL RULE: Whenever the user tells you to open Lark Player or Audiomack (even written as "audio mack"), play/search a song, create/play/manage a playlist, or open any app, you MUST ALWAYS emit the matching functionCall tool immediately (open_audiomack, open_lark_player, query_device_music, open_app, open_youtube, open_camera, make_call, send_sms, open_whatsapp) — NEVER just reply in text claiming you opened the app without calling the tool! You can perform ALL Audiomack actions via open_audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite, like, repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, sleep_timer, lyrics, share, open_tab, volume_up, volume_down, set_volume, mute, unmute, now_playing. You can perform ALL Lark Player actions via open_lark_player: open, play, play_all, shuffle_all, search, create_playlist (with optional songs array), add_to_playlist, play_playlist, delete_playlist, list_songs, list_playlists, list_artists, list_albums, list_folders, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, volume_up, volume_down, set_volume, mute, unmute, shuffle, repeat, favorite, equalizer, sleep_timer, lyrics, queue, add_to_queue, play_next, open_tab, share, ringtone, speed, now_playing. When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext,
   ].filter(Boolean).join('\n\n');
 }
@@ -2723,6 +2768,135 @@ export async function generateWhatsAppAutoReply(
   }
 }
 
+function inferFallbackDeviceAction(rawInput: string): { name: string; args: Record<string, any> } | null {
+  if (!rawInput || typeof rawInput !== 'string') return null;
+  if (rawInput.startsWith('Uyu mukoresha yoherereje ubutumwa bw\'amajwi')) return null;
+
+  let text = rawInput.trim();
+  const sttMatch = text.match(/^\[PRELIMINARY STT DRAFT[^\]]*\]:\s*"([\s\S]*)"$/i);
+  if (sttMatch) {
+    text = sttMatch[1].trim();
+  }
+  if (!text) return null;
+
+  const lower = text.toLowerCase();
+  const hasAppVerb = /(?:fungur|fungir|curang|shakish|nshakir|kora|ongera|shyira|hagarik|komeza|subiramo|vanga|umvir|erekan|reb|siba)|\b(open|launch|start|play|search|find|create|make|add|download|like|favorite|repost|follow|pause|resume|stop|next|prev|previous|shuffle|repeat|loop|equalizer|eq|sleep|lyrics|queue|list|show|delete|now\s*playing)\b/i.test(lower);
+  if (!hasAppVerb) return null;
+
+  const cleanMusicQuery = (src: string, extraStripPattern?: RegExp): string => {
+    let cleaned = src
+      .replace(/\[PRELIMINARY STT DRAFT[^\]]*\]:/gi, ' ')
+      .replace(/(?:audio\s*mack|audiomack|lark\s*player|larkplayer|\blark\b)/gi, ' ')
+      .replace(/\b(?:please|nyamuneka|ubu|nonaha|kevin|hey|hi|mfasha|unshakire|nshakira|shakisha|nshaka|mfungurira|fungurira|fungura|open|launch|start|play|curanga|uncurangire|ndumva|umva|kuri|muri|on|in|from|indirimbo|yitwa|song|music|track|playlist|yitwa|named|called|kora|create|make|add|ongera|download|like|favorite|repost|follow|search|for|the|ya|za|rya|wa)\b/gi, ' ');
+    if (extraStripPattern) {
+      cleaned = cleaned.replace(extraStripPattern, ' ');
+    }
+    return cleaned.replace(/["'“”?!.,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  };
+
+  const extractPlaylistName = (src: string): string => {
+    const named = src.match(/(?:yitwa|named|called|name\s*is)\s+["']?([^"'\n,.!?]{2,40})["']?/i);
+    if (named?.[1]) return named[1].trim();
+    const quoted = src.match(/["']([^"']{2,40})["']/);
+    if (quoted?.[1]) return quoted[1].trim();
+    const afterPlaylist = src.match(/playlist\s+(?:ya|za|of|for)?\s*([^.!?\n]{2,35})/i);
+    if (afterPlaylist?.[1]) {
+      const cleaned = afterPlaylist[1].replace(/\b(?:kuri|muri|on|in|audiomack|audio\s*mack|lark\s*player|larkplayer|lark)\b.*$/i, '').trim();
+      if (cleaned.length >= 2) return cleaned;
+    }
+    return 'Kevin Mix';
+  };
+
+  const detectMusicSubAction = (srcLower: string, hasQuery: boolean): string => {
+    if (/\b(?:delete|siba|remove)\b.*playlist/i.test(srcLower)) return 'delete_playlist';
+    if (/(?:kora|tangira|\bcreate\b|\bmake\b|\bnew\b).*playlist/i.test(srcLower)) return 'create_playlist';
+    if (/(?:ongera|shyira|\badd\b).*playlist/i.test(srcLower)) return 'add_to_playlist';
+    if (/(?:curanga|\bplay\b|fungur).*playlist/i.test(srcLower)) return 'play_playlist';
+    if (/(?:urutonde|reb|erekan|\blist\b|\bshow\b).*playlist/i.test(srcLower)) return 'list_playlists';
+    if (/\bdownload\b|manura/i.test(srcLower)) return 'download';
+    if (/\b(?:favorite|favourite|like|kunda)\b/i.test(srcLower)) return 'favorite';
+    if (/\brepost\b/i.test(srcLower)) return 'repost';
+    if (/\bfollow\b|kurikira/i.test(srcLower)) return 'follow';
+    if (/\b(?:pause|hagarika)\b/i.test(srcLower)) return 'pause';
+    if (/\b(?:resume|komeza|subukura)\b/i.test(srcLower)) return 'resume';
+    if (/\bstop\b/i.test(srcLower)) return 'stop';
+    if (/\b(?:next|ikurikira|simbuka)\b/i.test(srcLower)) return 'next';
+    if (/\b(?:previous|prev|ibanza)\b/i.test(srcLower)) return 'previous';
+    if (/\b(?:shuffle\s*all)\b/i.test(srcLower)) return 'shuffle_all';
+    if (/\bshuffle\b|vanga/i.test(srcLower)) return 'shuffle';
+    if (/\b(?:repeat|loop)\b|subiramo/i.test(srcLower)) return 'repeat';
+    if (/\b(?:equalizer|eq)\b/i.test(srcLower)) return 'equalizer';
+    if (/\b(?:sleep\s*timer)\b/i.test(srcLower)) return 'sleep_timer';
+    if (/\blyrics\b/i.test(srcLower)) return 'lyrics';
+    if (/\b(?:queue|up\s*next)\b/i.test(srcLower)) return 'queue';
+    if (/\bnow\s*playing\b/i.test(srcLower)) return 'now_playing';
+    if (/(?:shakish|nshakir|\bsearch\b|\bfind\b)/i.test(srcLower) && !/(?:curang|\bplay\b)/i.test(srcLower)) return hasQuery ? 'search' : 'open';
+    if (/(?:curang|\bplay\b|umvir)/i.test(srcLower)) return hasQuery ? 'play' : 'play_all';
+    return hasQuery ? 'play' : 'open';
+  };
+
+  if (/audiomack|audio\s+mack/i.test(lower)) {
+    const q = cleanMusicQuery(text);
+    let act = detectMusicSubAction(lower, q.length > 0);
+    if (act === 'play_all') act = 'play';
+    const args: Record<string, any> = { action: act };
+    if (q) args.query = q;
+    if (act === 'create_playlist' || act === 'add_to_playlist' || act === 'play_playlist') {
+      args.playlist_name = extractPlaylistName(text);
+    } else if (q && (act === 'play' || act === 'search' || act === 'download' || act === 'favorite')) {
+      args.song_title = q;
+    }
+    return { name: 'open_audiomack', args };
+  }
+
+  if (/lark\s*player|larkplayer|\blark\b/i.test(lower)) {
+    const q = cleanMusicQuery(text);
+    const act = detectMusicSubAction(lower, q.length > 0);
+    const args: Record<string, any> = { action: act };
+    if (q) args.query = q;
+    if (act === 'create_playlist' || act === 'add_to_playlist' || act === 'play_playlist' || act === 'delete_playlist') {
+      args.playlist_name = extractPlaylistName(text);
+    } else if (q && (act === 'play' || act === 'search')) {
+      args.song_title = q;
+    }
+    return { name: 'open_lark_player', args };
+  }
+
+  if (/(?:kora|tangira|\bcreate\b|\bmake\b)\s+(?:a\s+|new\s+)?playlist\b/i.test(lower) && !/\b(?:youtube|spotify)\b/i.test(lower)) {
+    const q = cleanMusicQuery(text);
+    return {
+      name: 'open_lark_player',
+      args: {
+        action: 'create_playlist',
+        playlist_name: extractPlaylistName(text),
+        ...(q ? { query: q } : {}),
+      },
+    };
+  }
+
+  if (/(?:curanga|play)\s+(?:indirimbo\s+(?:zo\s+)?muri\s+telefone|local\s+music|my\s+songs|all\s+songs)/i.test(lower)) {
+    return { name: 'open_lark_player', args: { action: 'play_all' } };
+  }
+
+  const openMatch = text.match(/^(?:(?:hey|hi|ok|please|nyamuneka|kevin)[,\s]+)*(?:mfungurira|fungurira|fungura|open|launch|start)\s+(?:app\s+(?:ya\s+)?|porogaramu\s+(?:ya\s+)?)?([A-Za-z0-9\s._-]{2,32})/i);
+  if (openMatch?.[1]) {
+    const rawTarget = openMatch[1]
+      .replace(/\b(?:please|nyamuneka|ubu|nonaha|na|kandi|ugacuranga|ucurange|ngo|play)\b[\s\S]*$/i, '')
+      .trim();
+    const targetLower = rawTarget.toLowerCase();
+    if (targetLower && !targetLower.includes('auto') && !targetLower.includes('google search')) {
+      if (targetLower.includes('camera') || targetLower.includes('kamera')) {
+        return { name: 'open_camera', args: {} };
+      }
+      if (!targetLower.includes('whatsapp') && !targetLower.includes('youtube')) {
+        return { name: 'open_app', args: { app_name: rawTarget } };
+      }
+    }
+  }
+
+  return null;
+}
+
 export async function sendMessageToGemini(
   history: { sender: 'user' | 'kevin'; text: string; image?: string }[],
   latestMessage: string,
@@ -2886,7 +3060,7 @@ export async function sendMessageToGemini(
           .trim()
       : '';
     const apkSystemInstruction = buildApkSystemInstruction(userName, includeAudioFlag, savedContacts, perms, latestUserText);
-    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|ijwi|komeza|subiramo|ongeraho|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|repost|follow|download|offline|trending|library|ringtone|artists|albums|folders|now\s*playing|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
+    const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|umuzik|miziki|ijwi|komeza|subiramo|ongeraho|fungur|fungir|shakish|nshakir|mpamagar|umvir|urutonde|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audio\s*mack|audiomack|lark\s*player|larkplayer|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|repost|follow|download|offline|trending|library|ringtone|artists|albums|folders|now\s*playing|kamera|camera|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|facebook|chrome|settings|subiza|unread)\b/i.test(latestUserText);
     const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
     const shouldTryWebSearch = Boolean(
       latestUserText
@@ -2974,7 +3148,7 @@ export async function sendMessageToGemini(
               if (useTools) {
                 if (phase === 'search') {
                   payloadBody.tools = [{ google_search: {} }];
-                } else if (phase === 'device' && (isExplicitDeviceCommand || includeAudioFlag)) {
+                } else if (phase === 'device') {
                   payloadBody.tools = [{ functionDeclarations: APK_DEVICE_ACTION_DECLARATIONS }];
                 }
               }
@@ -3000,7 +3174,7 @@ export async function sendMessageToGemini(
             let clearTimer: (() => void) | null = null;
             try {
               const canStream = typeof ReadableStream !== 'undefined' && typeof TextDecoder !== 'undefined';
-              const wantsTools = phase === 'search' || (phase === 'device' && (isExplicitDeviceCommand || includeAudioFlag));
+              const wantsTools = phase === 'search' || phase === 'device';
               let useTools = wantsTools;
               let useThinking = true;
 
@@ -3218,6 +3392,12 @@ export async function sendMessageToGemini(
               }
 
               const streamedActions: DeviceAction[] = [];
+              if (phase === 'device' && pendingFunctionCalls.length === 0) {
+                const fallbackCall = inferFallbackDeviceAction(latestUserText);
+                if (fallbackCall) {
+                  pendingFunctionCalls.push(fallbackCall);
+                }
+              }
               for (const fc of pendingFunctionCalls) {
                 const fcName = fc.name;
                 const fcArgs = fc.args;

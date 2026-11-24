@@ -42,6 +42,12 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <queries>
+        <!-- Allow discovering and launching any installed user app (Android 11+) -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+
         <!-- YouTube -->
         <intent>
             <action android:name="android.intent.action.VIEW" />

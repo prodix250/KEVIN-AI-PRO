@@ -3,6 +3,7 @@ package com.kevinai.pro;
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
 import android.graphics.Rect;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -493,7 +494,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         }
 
         int step = KevinAgentPrefs.incrementPendingLarkStep(this);
-        if (step > 20) {
+        if (step > 28) {
             KevinAgentPrefs.clearPendingLarkAction(this);
             return;
         }
@@ -510,8 +511,8 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             boolean playlistNamed = task.optBoolean("_playlistNamed", false);
             boolean playlistCreated = task.optBoolean("_playlistCreated", false);
 
-            // Dismiss any non-blocking promo/skip/permission popups if present
-            if (clickNodeByKeywords(root, new String[] { "skip", "not now", "later", "no thanks", "dismiss" }, false)) {
+            // Dismiss any non-blocking promo/skip/permission popups safely (exact match so we never click "Play Later" or "Skip Next")
+            if (clickExactPromoDismissButton(root)) {
                 lastNavigationAt = now;
                 return;
             }
@@ -546,7 +547,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                     }
                 }
 
-                // 2) If an EditText search box is visible and we haven't typed yet, type query
+                // 2) If an EditText search box is visible and we haven't typed yet, type query and submit IME search
                 AccessibilityNodeInfo searchBox = findEditableNode(root);
                 if (searchBox != null && !alreadySearched) {
                     Bundle args = new Bundle();
@@ -556,8 +557,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                         task.put("_searched", true);
                         KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
                         lastNavigationAt = now;
-                        // Also try clicking IME/search confirm button if present
-                        clickNodeByKeywords(root, new String[] { "search", "done", "go" }, true);
+                        submitSearchNode(searchBox, root);
                         return;
                     }
                 }
@@ -580,7 +580,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                     if (clickNodeByKeywords(root, new String[] { "play", "curanga", "pause" }, true)) {
                         KevinAgentPrefs.clearPendingLarkAction(this);
                         lastNavigationAt = now;
-                    } else if (step >= 6) {
+                    } else if (step >= 10) {
                         KevinAgentPrefs.clearPendingLarkAction(this);
                     }
                 }
@@ -627,8 +627,15 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                     }
                 }
 
-                // Step B: If playlist was named and song selection screen is open, pick matching songs & confirm
+                // Step B: If playlist was named and "Add songs" button OR song selection list is open
                 if (playlistNamed && !playlistCreated) {
+                    if (!task.optBoolean("_openedAddSongs", false)
+                            && clickNodeByKeywords(root, new String[] { "add songs", "add music", "add audio", "add tracks" }, false)) {
+                        task.put("_openedAddSongs", true);
+                        KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+                        lastNavigationAt = now;
+                        return;
+                    }
                     org.json.JSONArray songTitles = task.optJSONArray("songTitles");
                     int clicked = 0;
                     if (songTitles != null && songTitles.length() > 0) {
@@ -639,19 +646,33 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                             }
                         }
                     }
-                    if (clicked > 0 || clickNodeByKeywords(root, new String[] { "add", "done", "save", "ok", "confirm" }, false)) {
+                    if (clicked > 0) {
                         task.put("_playlistCreated", true);
                         KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
                         lastNavigationAt = now;
-                        if (clicked == 0) {
-                            KevinAgentPrefs.clearPendingLarkAction(this);
-                        }
+                        mainHandler.postDelayed(() -> {
+                            AccessibilityNodeInfo fresh = getRootInActiveWindow();
+                            if (fresh != null) {
+                                try {
+                                    clickNodeByKeywords(fresh, new String[] { "done", "save", "ok", "confirm", "add" }, false);
+                                } finally {
+                                    fresh.recycle();
+                                }
+                            }
+                        }, 260L);
+                        return;
+                    }
+                    if (clickNodeByKeywords(root, new String[] { "done", "save", "ok", "confirm", "create" }, false)) {
+                        task.put("_playlistCreated", true);
+                        KevinAgentPrefs.updatePendingLarkActionJson(this, task.toString());
+                        KevinAgentPrefs.clearPendingLarkAction(this);
+                        lastNavigationAt = now;
                         return;
                     }
                 }
 
                 if (playlistCreated) {
-                    clickNodeByKeywords(root, new String[] { "add", "done", "save", "ok", "confirm" }, false);
+                    clickNodeByKeywords(root, new String[] { "done", "save", "ok", "confirm", "add" }, false);
                     KevinAgentPrefs.clearPendingLarkAction(this);
                     lastNavigationAt = now;
                     return;
@@ -667,7 +688,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                 }
 
                 // Step D: Click New Playlist / Create / + button, or navigate to Playlists tab first
-                if (clickNodeByKeywords(root, new String[] { "new playlist", "create playlist", "create new", "new", "add playlist" }, true)) {
+                if (clickNodeByKeywords(root, new String[] { "new playlist", "create playlist", "create new", "add playlist", "iv_add", "btn_add", "fab", "+" }, true)) {
                     lastNavigationAt = now;
                     return;
                 }
@@ -797,7 +818,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         }
 
         int step = KevinAgentPrefs.incrementPendingAudiomackStep(this);
-        if (step > 24) {
+        if (step > 30) {
             KevinAgentPrefs.clearPendingAudiomackAction(this);
             return;
         }
@@ -814,8 +835,8 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             boolean clickedResult = task.optBoolean("_clickedResult", false);
             boolean secondaryDone = task.optBoolean("_secondaryDone", false);
 
-            // Dismiss Audiomack onboarding/upgrade/promo dialogs if present
-            if (clickNodeByKeywords(root, new String[] { "skip", "not now", "maybe later", "no thanks", "dismiss", "close ad" }, false)) {
+            // Dismiss Audiomack onboarding/upgrade/promo dialogs safely (exact text match)
+            if (clickExactPromoDismissButton(root)) {
                 lastNavigationAt = now;
                 return;
             }
@@ -854,7 +875,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                         task.put("_searched", true);
                         KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
                         lastNavigationAt = now;
-                        clickNodeByKeywords(root, new String[] { "search", "done", "go" }, true);
+                        submitSearchNode(searchBox, root);
                         return;
                     }
                 }
@@ -863,10 +884,6 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                     task.put("_clickedResult", true);
                     KevinAgentPrefs.updatePendingAudiomackActionJson(this, task.toString());
                     lastNavigationAt = now;
-                    if ("search".equals(action) || "play".equals(action) || "play_song".equals(action)) {
-                        // Allow one more pass if a Play button shows up on track page
-                        return;
-                    }
                     return;
                 }
 
@@ -884,7 +901,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                         lastNavigationAt = now;
                         return;
                     }
-                    if (step >= 7) {
+                    if (step >= 10) {
                         KevinAgentPrefs.clearPendingAudiomackAction(this);
                     }
                     return;
@@ -938,7 +955,7 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                         return;
                     }
                 }
-                if (clickNodeByKeywords(root, new String[] { "add to playlist", "new playlist", "create playlist", "create new" }, true)) {
+                if (clickNodeByKeywords(root, new String[] { "add to playlist", "new playlist", "create playlist", "create new", "iv_add", "btn_add", "fab", "+" }, true)) {
                     lastNavigationAt = now;
                     return;
                 }
@@ -1058,10 +1075,54 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         }
     }
 
+    private void submitSearchNode(AccessibilityNodeInfo searchBox, AccessibilityNodeInfo root) {
+        if (searchBox != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                searchBox.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId());
+            } catch (Exception ignored) {}
+        }
+        clickNodeByKeywords(root, new String[] { "search", "done", "go" }, true);
+    }
+
+    private boolean clickExactPromoDismissButton(AccessibilityNodeInfo root) {
+        if (root == null) return false;
+        String[] exactTerms = new String[] {
+                "skip", "skip ad", "not now", "maybe later", "no thanks", "no, thanks", "dismiss", "close ad"
+        };
+        java.util.ArrayDeque<AccessibilityNodeInfo> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        int visited = 0;
+        while (!queue.isEmpty() && visited < 300) {
+            AccessibilityNodeInfo node = queue.poll();
+            visited++;
+            if (node == null) continue;
+            CharSequence cls = node.getClassName();
+            boolean isEdit = cls != null && cls.toString().contains("EditText");
+            if (!isEdit) {
+                String text = node.getText() != null ? node.getText().toString().trim().toLowerCase(Locale.ROOT) : "";
+                String desc = node.getContentDescription() != null ? node.getContentDescription().toString().trim().toLowerCase(Locale.ROOT) : "";
+                for (String term : exactTerms) {
+                    if (text.equals(term) || desc.equals(term)) {
+                        AccessibilityNodeInfo clickable = climbToClickableParent(node, 4);
+                        if (clickable != null && clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            int count = node.getChildCount();
+            for (int i = 0; i < count; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) queue.add(child);
+            }
+        }
+        return false;
+    }
+
     private AccessibilityNodeInfo findEditableNode(AccessibilityNodeInfo root) {
         if (root == null) return null;
         CharSequence cls = root.getClassName();
-        if (cls != null && cls.toString().contains("EditText") && root.isEnabled()) {
+        if (root.isEnabled() && (root.isEditable() || (cls != null && cls.toString().contains("EditText")))) {
             return root;
         }
         int count = root.getChildCount();
@@ -1083,7 +1144,16 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
                 pkg + ":id/search_bar",
                 pkg + ":id/search_layout",
                 pkg + ":id/tv_search",
-                pkg + ":id/action_search"
+                pkg + ":id/action_search",
+                pkg + ":id/search_src_text",
+                pkg + ":id/menu_search",
+                pkg + ":id/et_search",
+                pkg + ":id/search_container",
+                pkg + ":id/search_tab",
+                pkg + ":id/navigation_search",
+                pkg + ":id/tab_search",
+                pkg + ":id/search_icon",
+                pkg + ":id/search_button"
         };
         for (String id : candidateIds) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);

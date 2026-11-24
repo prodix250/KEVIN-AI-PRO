@@ -274,7 +274,7 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: "open_app",
-    description: "Open a specific local device app explicitly requested by name (such as Instagram, TikTok, Spotify, Settings, or Maps). NEVER call this for Google Search or to answer news, sports, or factual questions.",
+    description: "Open any local device app explicitly requested by name (such as Instagram, TikTok, Spotify, Settings, Maps, Facebook, Chrome, etc.). NEVER call this for Google Search or to answer news, sports, or factual questions.",
     parametersJsonSchema: {
       type: "object",
       properties: { app_name: { type: "string" } },
@@ -282,6 +282,132 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
     }
   },
 ];
+
+function inferServerFallbackDeviceAction(rawInput: string): { name: string; args: Record<string, any> } | null {
+  if (!rawInput || typeof rawInput !== 'string') return null;
+  if (rawInput.startsWith("Uyu mukoresha yoherereje ubutumwa bw'amajwi")) return null;
+
+  let text = rawInput.trim();
+  const sttMatch = text.match(/^\[PRELIMINARY STT DRAFT[^\]]*\]:\s*"([\s\S]*)"$/i);
+  if (sttMatch) {
+    text = sttMatch[1].trim();
+  }
+  if (!text) return null;
+
+  const lower = text.toLowerCase();
+  const hasAppVerb = /(?:fungur|fungir|curang|shakish|nshakir|kora|ongera|shyira|hagarik|komeza|subiramo|vanga|umvir|erekan|reb|siba)|\b(open|launch|start|play|search|find|create|make|add|download|like|favorite|repost|follow|pause|resume|stop|next|prev|previous|shuffle|repeat|loop|equalizer|eq|sleep|lyrics|queue|list|show|delete|now\s*playing)\b/i.test(lower);
+  if (!hasAppVerb) return null;
+
+  const cleanMusicQuery = (src: string): string => src
+    .replace(/\[PRELIMINARY STT DRAFT[^\]]*\]:/gi, ' ')
+    .replace(/(?:audio\s*mack|audiomack|lark\s*player|larkplayer|\blark\b)/gi, ' ')
+    .replace(/\b(?:please|nyamuneka|ubu|nonaha|kevin|hey|hi|mfasha|unshakire|nshakira|shakisha|nshaka|mfungurira|fungurira|fungura|open|launch|start|play|curanga|uncurangire|ndumva|umva|kuri|muri|on|in|from|indirimbo|yitwa|song|music|track|playlist|named|called|kora|create|make|add|ongera|download|like|favorite|repost|follow|search|for|the|ya|za|rya|wa)\b/gi, ' ')
+    .replace(/["'“”?!.,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const extractPlaylistName = (src: string): string => {
+    const named = src.match(/(?:yitwa|named|called|name\s*is)\s+["']?([^"'\n,.!?]{2,40})["']?/i);
+    if (named?.[1]) return named[1].trim();
+    const quoted = src.match(/["']([^"']{2,40})["']/);
+    if (quoted?.[1]) return quoted[1].trim();
+    const afterPlaylist = src.match(/playlist\s+(?:ya|za|of|for)?\s*([^.!?\n]{2,35})/i);
+    if (afterPlaylist?.[1]) {
+      const cleaned = afterPlaylist[1].replace(/\b(?:kuri|muri|on|in|audiomack|audio\s*mack|lark\s*player|larkplayer|lark)\b.*$/i, '').trim();
+      if (cleaned.length >= 2) return cleaned;
+    }
+    return 'Kevin Mix';
+  };
+
+  const detectMusicSubAction = (srcLower: string, hasQuery: boolean): string => {
+    if (/\b(?:delete|siba|remove)\b.*playlist/i.test(srcLower)) return 'delete_playlist';
+    if (/(?:kora|tangira|\bcreate\b|\bmake\b|\bnew\b).*playlist/i.test(srcLower)) return 'create_playlist';
+    if (/(?:ongera|shyira|\badd\b).*playlist/i.test(srcLower)) return 'add_to_playlist';
+    if (/(?:curanga|\bplay\b|fungur).*playlist/i.test(srcLower)) return 'play_playlist';
+    if (/(?:urutonde|reb|erekan|\blist\b|\bshow\b).*playlist/i.test(srcLower)) return 'list_playlists';
+    if (/\bdownload\b|manura/i.test(srcLower)) return 'download';
+    if (/\b(?:favorite|favourite|like|kunda)\b/i.test(srcLower)) return 'favorite';
+    if (/\brepost\b/i.test(srcLower)) return 'repost';
+    if (/\bfollow\b|kurikira/i.test(srcLower)) return 'follow';
+    if (/\b(?:pause|hagarika)\b/i.test(srcLower)) return 'pause';
+    if (/\b(?:resume|komeza|subukura)\b/i.test(srcLower)) return 'resume';
+    if (/\bstop\b/i.test(srcLower)) return 'stop';
+    if (/\b(?:next|ikurikira|simbuka)\b/i.test(srcLower)) return 'next';
+    if (/\b(?:previous|prev|ibanza)\b/i.test(srcLower)) return 'previous';
+    if (/\b(?:shuffle\s*all)\b/i.test(srcLower)) return 'shuffle_all';
+    if (/\bshuffle\b|vanga/i.test(srcLower)) return 'shuffle';
+    if (/\b(?:repeat|loop)\b|subiramo/i.test(srcLower)) return 'repeat';
+    if (/\b(?:equalizer|eq)\b/i.test(srcLower)) return 'equalizer';
+    if (/\b(?:sleep\s*timer)\b/i.test(srcLower)) return 'sleep_timer';
+    if (/\blyrics\b/i.test(srcLower)) return 'lyrics';
+    if (/\b(?:queue|up\s*next)\b/i.test(srcLower)) return 'queue';
+    if (/\bnow\s*playing\b/i.test(srcLower)) return 'now_playing';
+    if (/(?:shakish|nshakir|\bsearch\b|\bfind\b)/i.test(srcLower) && !/(?:curang|\bplay\b)/i.test(srcLower)) return hasQuery ? 'search' : 'open';
+    if (/(?:curang|\bplay\b|umvir)/i.test(srcLower)) return hasQuery ? 'play' : 'play_all';
+    return hasQuery ? 'play' : 'open';
+  };
+
+  if (/audiomack|audio\s+mack/i.test(lower)) {
+    const q = cleanMusicQuery(text);
+    let act = detectMusicSubAction(lower, q.length > 0);
+    if (act === 'play_all') act = 'play';
+    const args: Record<string, any> = { action: act };
+    if (q) args.query = q;
+    if (act === 'create_playlist' || act === 'add_to_playlist' || act === 'play_playlist') {
+      args.playlist_name = extractPlaylistName(text);
+    } else if (q && (act === 'play' || act === 'search' || act === 'download' || act === 'favorite')) {
+      args.song_title = q;
+    }
+    return { name: 'open_audiomack', args };
+  }
+
+  if (/lark\s*player|larkplayer|\blark\b/i.test(lower)) {
+    const q = cleanMusicQuery(text);
+    const act = detectMusicSubAction(lower, q.length > 0);
+    const args: Record<string, any> = { action: act };
+    if (q) args.query = q;
+    if (act === 'create_playlist' || act === 'add_to_playlist' || act === 'play_playlist' || act === 'delete_playlist') {
+      args.playlist_name = extractPlaylistName(text);
+    } else if (q && (act === 'play' || act === 'search')) {
+      args.song_title = q;
+    }
+    return { name: 'open_lark_player', args };
+  }
+
+  if (/(?:kora|tangira|\bcreate\b|\bmake\b)\s+(?:a\s+|new\s+)?playlist\b/i.test(lower) && !/\b(?:youtube|spotify)\b/i.test(lower)) {
+    const q = cleanMusicQuery(text);
+    return {
+      name: 'open_lark_player',
+      args: {
+        action: 'create_playlist',
+        playlist_name: extractPlaylistName(text),
+        ...(q ? { query: q } : {}),
+      },
+    };
+  }
+
+  if (/(?:curanga|play)\s+(?:indirimbo\s+(?:zo\s+)?muri\s+telefone|local\s+music|my\s+songs|all\s+songs)/i.test(lower)) {
+    return { name: 'open_lark_player', args: { action: 'play_all' } };
+  }
+
+  const openMatch = text.match(/^(?:(?:hey|hi|ok|please|nyamuneka|kevin)[,\s]+)*(?:mfungurira|fungurira|fungura|open|launch|start)\s+(?:app\s+(?:ya\s+)?|porogaramu\s+(?:ya\s+)?)?([A-Za-z0-9\s._-]{2,32})/i);
+  if (openMatch?.[1]) {
+    const rawTarget = openMatch[1]
+      .replace(/\b(?:please|nyamuneka|ubu|nonaha|na|kandi|ugacuranga|ucurange|ngo|play)\b[\s\S]*$/i, '')
+      .trim();
+    const targetLower = rawTarget.toLowerCase();
+    if (targetLower && !targetLower.includes('auto') && !targetLower.includes('google search')) {
+      if (targetLower.includes('camera') || targetLower.includes('kamera')) {
+        return { name: 'open_camera', args: {} };
+      }
+      if (!targetLower.includes('whatsapp') && !targetLower.includes('youtube')) {
+        return { name: 'open_app', args: { app_name: rawTarget } };
+      }
+    }
+  }
+
+  return null;
+}
 
 function getServerApiKeys(customKeys?: string | string[]): string[] {
   const customList = Array.isArray(customKeys)
@@ -1167,7 +1293,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       let lastErr: unknown = null;
       const chatModelErrors: string[] = [];
       let streamStarted = false;
-      const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|ijwi|komeza|subiramo|ongeraho|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audiomack|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|repost|follow|download|offline|trending|library|ringtone|artists|albums|folders|now\s*playing|kamera|camera|fungura|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|subiza|unread)\b/i.test(latestUserText);
+      const isExplicitDeviceCommand = /(?:hamagar|terefon|oherez|curang|subiriz|budasubij|indirimbo|muzika|umuzik|miziki|ijwi|komeza|subiramo|ongeraho|fungur|fungir|shakish|nshakir|mpamagar|umvir|urutonde|auto[\s_-]*reply)|\b(call|dial|sms|send|whatsapp|youtube|play|song|music|audio\s*mack|audiomack|lark\s*player|larkplayer|lark|playlist|shuffle|repeat|loop|equalizer|eq|sleep\s*timer|lyrics|queue|next|previous|prev|volume|mute|unmute|favorite|repost|follow|download|offline|trending|library|ringtone|artists|albums|folders|now\s*playing|kamera|camera|funga|hagarika|pause|stop|resume|subukura|open|instagram|tiktok|spotify|maps|facebook|chrome|settings|subiza|unread)\b/i.test(latestUserText);
       const isAmakuruGreeting = /^(?:amakuru\s*(?:ki|yawe|yanyu|meza|ni\s*meza|gute)?|bite\s*(?:se)?|muraho|mwaramutse|mwiriwe)[\s?!.,]*$/i.test(latestUserText);
       const shouldTryWebSearch = Boolean(
         latestUserText
@@ -1326,6 +1452,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                 }
               }
               let accumulatedText = '';
+              let emittedFunctionCallCount = 0;
               try {
                 const bufferedSearchChunks: Array<{ functionCalls: any[]; textChunk?: string }> = [];
 
@@ -1356,6 +1483,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
 
                   for await (const chunk of responseStream) {
                     const functionCalls = (chunk as any).functionCalls || [];
+                    emittedFunctionCallCount += functionCalls.length;
                     const candidate = (chunk as any).candidates?.[0];
                     const gm = candidate?.groundingMetadata || (chunk as any).groundingMetadata;
                     const gChunks = gm?.groundingChunks || [];
@@ -1386,6 +1514,13 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
                   await consumeStream('device');
                   if (!streamStarted && !accumulatedText.trim()) {
                     await consumeStream('none');
+                  }
+                  if (emittedFunctionCallCount === 0) {
+                    const fallbackCall = inferServerFallbackDeviceAction(latestUserText);
+                    if (fallbackCall) {
+                      emittedFunctionCallCount++;
+                      await writePayloadChunk([fallbackCall]);
+                    }
                   }
                 }
 
