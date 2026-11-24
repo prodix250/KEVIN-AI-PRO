@@ -722,6 +722,44 @@ export interface DeviceAction {
   status?: 'executed' | 'needs_permission' | 'dialed_needs_permission' | 'choose_contact' | 'contact_not_found' | 'pending';
 }
 
+export function playWhatsAppSound(type: 'pop' | 'send' | 'receive' = 'pop') {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') {
+      void ctx.resume();
+    }
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    if (type === 'receive') {
+      osc.frequency.setValueAtTime(750, now);
+      osc.frequency.exponentialRampToValueAtTime(320, now + 0.08);
+    } else {
+      osc.frequency.setValueAtTime(520, now);
+      osc.frequency.exponentialRampToValueAtTime(680, now + 0.06);
+    }
+
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + (type === 'receive' ? 0.09 : 0.07));
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + (type === 'receive' ? 0.09 : 0.07));
+    setTimeout(() => {
+      try { void ctx.close(); } catch {}
+    }, 150);
+  } catch {
+    // ignore
+  }
+}
+
 export function runDeviceAction(action: DeviceAction, forceExecute = false): boolean {
   const bridge = (window as any).KevinAgentBridge;
   const perms = getAgentPermissions();
@@ -793,6 +831,7 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
     const phone = formatWhatsAppPhoneNumber(rawPhone);
     const msg = action.messageText || action.args?.message || '';
     if (!isLikelyPhoneNumber(phone)) return false;
+    playWhatsAppSound('send');
     if (bridge?.sendWhatsApp) {
       bridge.sendWhatsApp(phone, msg);
     } else {

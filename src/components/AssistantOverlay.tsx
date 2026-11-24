@@ -19,6 +19,7 @@ import {
   sanitizePhoneNumber,
   formatWhatsAppPhoneNumber,
   GroundingSource,
+  playWhatsAppSound,
 } from '../services/geminiService';
 
 interface AssistantOverlayProps {
@@ -693,6 +694,7 @@ export default function AssistantOverlay({
       if (response) {
         setReplyText(response);
       }
+      playWhatsAppSound('receive');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Habaye ikibazo mu gusubiza.');
     } finally {

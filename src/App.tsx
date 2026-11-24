@@ -8,7 +8,7 @@ import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settin
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, playWhatsAppSound, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
@@ -693,6 +693,7 @@ export default function App() {
     const handleWaReplied = (e: Event) => {
       const detail = (e as CustomEvent<{ sender: string; incoming: string; reply: string }>).detail;
       if (!detail) return;
+      playWhatsAppSound('receive');
       appendAgentOutbox({
         channel: 'whatsapp-autoreply',
         recipient: detail.sender || 'WhatsApp Contact',
@@ -1672,6 +1673,7 @@ export default function App() {
           return updatedMessages;
         });
       });
+      playWhatsAppSound('receive');
       // Automatically generate and attach professional document if requested or export-oriented
       const lowerText = textToSend.toLowerCase();
       const isImageRequest = isImageGenerationRequest(textToSend);
@@ -2408,7 +2410,15 @@ export default function App() {
                 <span className="text-5xl absolute -top-1 -right-2 animate-wave">👋</span>
               </div>
             </div>
-            <h1 className="text-2xl font-bold mb-3 text-gray-800 dark:text-[#e9edef]">Muraho! Ndi Kevin AI.</h1>
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: 'easeOut' }}
+            >
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-black mb-4 text-gray-900 dark:text-white tracking-tight">
+                Happy {new Date().toLocaleDateString('en-US', { weekday: 'long' })} {userName || localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || 'Kevin'}!
+              </h1>
+            </motion.div>
             <p className="text-gray-600 dark:text-[#8696a0] mb-10 max-w-md leading-relaxed" dangerouslySetInnerHTML={{ __html: "<span class='text-amber-600 dark:text-amber-500 font-bold'>Uwumukiza Kevin</span> ni we wandemye. Ubu ushobora kumbaza ikibazo icyo ari cyose, niteguye guhita nkugufasha?" }}></p>
             <div className="grid grid-cols-2 gap-2.5 sm:gap-3 w-full max-w-md mx-auto">
               {[
