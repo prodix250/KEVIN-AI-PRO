@@ -16,6 +16,7 @@ import { downloadAIImage, downloadDocumentFile } from './utils/download';
 import { getNewsCustomInstructions, initDailyNewsDelivery, NEWS_PENDING_TOAST_EVENT, saveNewsCustomInstructions } from './services/dailyNewsService';
 import type { DailyNewsBriefing } from './services/dailyNewsConfig';
 import { KEVIN_TTS_VOICE_OPTIONS, KevinTtsVoiceType, speakReplyText, stopReplySpeech } from './services/ttsService';
+import { ChatScrollIndicator } from './components/ChatScrollIndicator';
 
 const THEME_LIGHT_DEFAULT_MIGRATION_KEY = 'kevin_ai_theme_light_default_migrated';
 
@@ -2735,7 +2736,8 @@ export default function App() {
       </AnimatePresence>
 
       {/* Chat Area */}
-      <main ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 relative">
+      <div className="relative flex-1 min-h-0 flex flex-col">
+      <main ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 relative chat-scroll-area">
         {(messages.length === 0 || (messages.length === 1 && messages[0].sender === 'kevin' && messages[0].text.includes("Hello! I'm Kevin AI"))) ? (
           <div className="flex flex-col items-center justify-center min-h-[80%] text-center py-10 px-4">
             <div className="mb-6 animate-float">
@@ -3313,6 +3315,8 @@ export default function App() {
           </div>
         )}
       </main>
+      <ChatScrollIndicator containerRef={chatContainerRef} />
+      </div>
 
       {/* Input Area */}
       <footer className="p-2.5 bg-[#F0F2F5] dark:bg-[#202c33] dark:border-t dark:border-[#222e35] flex flex-col gap-2 sticky bottom-0 relative">
