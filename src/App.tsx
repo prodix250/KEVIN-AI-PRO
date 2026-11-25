@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown, Pause, Play, RotateCcw, Square, Loader2, Newspaper } from 'lucide-react';
+import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown, Pause, Play, RotateCcw, Square, Loader2, Newspaper, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
@@ -635,6 +635,17 @@ export default function App() {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [keysPool, setKeysPool] = useState<GeminiKeysPool>(() => getGeminiKeysPool());
   const [savedApiKeyStatus, setSavedApiKeyStatus] = useState<string | null>(null);
+  const [visibleApiKeys, setVisibleApiKeys] = useState<Record<keyof GeminiKeysPool, boolean>>({
+    primary: false,
+    backup1: false,
+    backup2: false,
+    backup3: false,
+    backup4: false,
+  });
+
+  const toggleApiKeyVisibility = (field: keyof GeminiKeysPool) => {
+    setVisibleApiKeys((prev) => ({ ...prev, [field]: !prev[field] }));
+  };
 
   const handleSaveKeysPool = () => {
     setGeminiKeysPool(keysPool);
@@ -3951,65 +3962,120 @@ export default function App() {
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
                     1. Primary API Key:
                   </label>
-                  <input 
-                    type="password"
-                    value={keysPool.primary}
-                    onChange={(e) => setKeysPool(prev => ({ ...prev, primary: e.target.value }))}
-                    placeholder="Shyiramo Primary API Key hano..."
-                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
-                  />
+                  <div className="relative">
+                    <input 
+                      type={visibleApiKeys.primary ? 'text' : 'password'}
+                      value={keysPool.primary}
+                      onChange={(e) => setKeysPool(prev => ({ ...prev, primary: e.target.value }))}
+                      placeholder="Shyiramo Primary API Key hano..."
+                      className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] pl-3.5 pr-10 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => toggleApiKeyVisibility('primary')}
+                      title={visibleApiKeys.primary ? 'Hisha API Key' : 'Reba API Key'}
+                      aria-label={visibleApiKeys.primary ? 'Hide Primary API Key' : 'Show Primary API Key'}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer"
+                    >
+                      {visibleApiKeys.primary ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
                     2. Backup Key 1:
                   </label>
-                  <input 
-                    type="password"
-                    value={keysPool.backup1}
-                    onChange={(e) => setKeysPool(prev => ({ ...prev, backup1: e.target.value }))}
-                    placeholder="Shyiramo Backup Key 1 hano..."
-                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
-                  />
+                  <div className="relative">
+                    <input 
+                      type={visibleApiKeys.backup1 ? 'text' : 'password'}
+                      value={keysPool.backup1}
+                      onChange={(e) => setKeysPool(prev => ({ ...prev, backup1: e.target.value }))}
+                      placeholder="Shyiramo Backup Key 1 hano..."
+                      className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] pl-3.5 pr-10 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => toggleApiKeyVisibility('backup1')}
+                      title={visibleApiKeys.backup1 ? 'Hisha API Key' : 'Reba API Key'}
+                      aria-label={visibleApiKeys.backup1 ? 'Hide Backup Key 1' : 'Show Backup Key 1'}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer"
+                    >
+                      {visibleApiKeys.backup1 ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
                     3. Backup Key 2:
                   </label>
-                  <input 
-                    type="password"
-                    value={keysPool.backup2}
-                    onChange={(e) => setKeysPool(prev => ({ ...prev, backup2: e.target.value }))}
-                    placeholder="Shyiramo Backup Key 2 hano..."
-                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
-                  />
+                  <div className="relative">
+                    <input 
+                      type={visibleApiKeys.backup2 ? 'text' : 'password'}
+                      value={keysPool.backup2}
+                      onChange={(e) => setKeysPool(prev => ({ ...prev, backup2: e.target.value }))}
+                      placeholder="Shyiramo Backup Key 2 hano..."
+                      className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] pl-3.5 pr-10 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => toggleApiKeyVisibility('backup2')}
+                      title={visibleApiKeys.backup2 ? 'Hisha API Key' : 'Reba API Key'}
+                      aria-label={visibleApiKeys.backup2 ? 'Hide Backup Key 2' : 'Show Backup Key 2'}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer"
+                    >
+                      {visibleApiKeys.backup2 ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
                     4. Backup Key 3:
                   </label>
-                  <input 
-                    type="password"
-                    value={keysPool.backup3}
-                    onChange={(e) => setKeysPool(prev => ({ ...prev, backup3: e.target.value }))}
-                    placeholder="Shyiramo Backup Key 3 hano..."
-                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
-                  />
+                  <div className="relative">
+                    <input 
+                      type={visibleApiKeys.backup3 ? 'text' : 'password'}
+                      value={keysPool.backup3}
+                      onChange={(e) => setKeysPool(prev => ({ ...prev, backup3: e.target.value }))}
+                      placeholder="Shyiramo Backup Key 3 hano..."
+                      className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] pl-3.5 pr-10 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => toggleApiKeyVisibility('backup3')}
+                      title={visibleApiKeys.backup3 ? 'Hisha API Key' : 'Reba API Key'}
+                      aria-label={visibleApiKeys.backup3 ? 'Hide Backup Key 3' : 'Show Backup Key 3'}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer"
+                    >
+                      {visibleApiKeys.backup3 ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
                     5. Backup Key 4:
                   </label>
-                  <input 
-                    type="password"
-                    value={keysPool.backup4}
-                    onChange={(e) => setKeysPool(prev => ({ ...prev, backup4: e.target.value }))}
-                    placeholder="Shyiramo Backup Key 4 hano..."
-                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
-                  />
+                  <div className="relative">
+                    <input 
+                      type={visibleApiKeys.backup4 ? 'text' : 'password'}
+                      value={keysPool.backup4}
+                      onChange={(e) => setKeysPool(prev => ({ ...prev, backup4: e.target.value }))}
+                      placeholder="Shyiramo Backup Key 4 hano..."
+                      className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] pl-3.5 pr-10 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-xs font-mono tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => toggleApiKeyVisibility('backup4')}
+                      title={visibleApiKeys.backup4 ? 'Hisha API Key' : 'Reba API Key'}
+                      aria-label={visibleApiKeys.backup4 ? 'Hide Backup Key 4' : 'Show Backup Key 4'}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer"
+                    >
+                      {visibleApiKeys.backup4 ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
 
                 <p className="text-[11px] text-gray-500 dark:text-[#8696a0] flex items-center justify-between">

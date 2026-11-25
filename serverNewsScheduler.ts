@@ -39,40 +39,83 @@ function normalizeNewsCustomInstructions(raw?: string): string {
 
 function getNewsCustomSignature(cleanCustom: string): string {
   if (!cleanCustom) return 'default';
-  return crypto.createHash('sha256').update(cleanCustom).digest('hex').slice(0, 12);
+  return crypto.createHash('sha256').update(`v3:${cleanCustom}`).digest('hex').slice(0, 12);
 }
 
 function makeBriefingCacheKey(slotId: string, customSig: string): string {
   return customSig === 'default' ? slotId : `${slotId}__${customSig}`;
 }
 
+function isSportsHeadline(title: string): boolean {
+  return /\b(nba|nfl|mlb|nhl|ncaa|ivy\s*league|uefa|fifa|premier league|champions league|la liga|bundesliga|serie a|football|soccer|basketball|baseball|tennis|golf|cricket|rugby|boxing|ufc|f1|formula 1|playoffs|quarterback|touchdown|goalkeeper|striker|coach|transfer)\b/i.test(title);
+}
+
 function buildCustomNewsRssUrl(cleanCustom: string): string | null {
   if (!cleanCustom) return null;
+  const kinyarwandaTopicMap: Record<string, string> = {
+    ikoranabuhanga: 'technology',
+    telefone: 'smartphone',
+    telefoni: 'smartphone',
+    amaterefoni: 'smartphone',
+    mudasobwa: 'computer',
+    imikino: 'sports',
+    siporo: 'sports',
+    umupira: 'football',
+    amaguru: 'football',
+    ubukungu: 'economy',
+    ubuzima: 'health',
+    politiki: 'politics',
+    ubwenge: 'AI',
+    ubukorano: 'AI',
+    imodoka: 'automotive',
+    ingufu: 'energy',
+    amashanyarazi: 'energy',
+    ubucuruzi: 'business',
+    amafaranga: 'finance',
+  };
+
   const stopWords = new Set([
-    'amakuru', 'jya', 'wibanda', 'wibande', 'cyane', 'kuri', 'ku', 'mu', 'muri', 'na', 'no', 'n',
-    'nshaka', 'ko', 'uzajya', 'umpa', 'mpere', 'unyohereze', 'nyohereza', 'gusa', 'kandi', 'ariko',
-    'nk', 'nka', 'ayo', 'aya', 'ibyo', 'ibi', 'bivugwa', 'mashya', 'agezweho', 'neza', 'uko',
-    'wandika', 'wandike', 'incamake', 'muzi', 'kwisi', 'isi', 'yose', 'y', 'ya', 'wa', 'ba', 'za',
-    'news', 'focus', 'about', 'only', 'please', 'write', 'send', 'always', 'give', 'tell', 'want',
-    'update', 'updates', 'latest', 'fresh', 'today', 'report', 'briefing', 'summary', 'format',
-    'bullet', 'points', 'short', 'detailed', 'style', 'tone', 'more', 'most', 'very', 'just', 'with',
-    'from', 'into', 'that', 'this', 'the', 'and', 'for', 'you', 'your', 'are', 'have', 'will',
+    'amakuru', 'jya', 'wibanda', 'wibande', 'wibanza', 'cyane', 'kuri', 'ku', 'mu', 'muri', 'na', 'no', 'n',
+    'nshaka', 'ndifuza', 'shaka', 'ko', 'uzajya', 'ajya', 'zajya', 'izajya', 'umpa', 'mpere', 'unyohereze',
+    'nyohereza', 'ohereza', 'gusa', 'kandi', 'ariko', 'cyangwa', 'yerekeye', 'yerekeyeho', 'bijyanye', 'birebana',
+    'ibyerekeye', 'byerekeye', 'byiriwe', 'byavugwaga', 'yiriwe', 'yavugwaga', 'avugwa', 'bivugwa', 'zasohotse',
+    'yasohotse', 'basohoye', 'asohoka', 'mashya', 'masha', 'amashya', 'agezweho', 'bigezweho', 'neza', 'uko',
+    'wandika', 'wandike', 'incamake', 'muzi', 'kwisi', 'isi', 'yose', 'y', 'ya', 'wa', 'ba', 'za', 'rya', 'bya',
+    'nk', 'nka', 'ayo', 'aya', 'ibyo', 'ibi', 'ibishya', 'ibintu', 'mbwira', 'umbwire', 'ushyire', 'uburyo',
+    'ubwoko', 'nkuko', 'kubona', 'kumenya', 'ziza', 'yiza', 'meza', 'byose', 'hose', 'kose', 'hano', 'noneho',
+    'ubu', 'ejo', 'ijoro', 'munsi', 'umunsi', 'amanywa', 'mugitondo', 'nimugoroba', 'isaha', 'amasaha', 'ryari',
+    'igihe', 'buri', 'byinshi', 'imibare', 'amanota', 'yihariye', 'cyari', 'yari', 'ari', 'aba', 'iyo', 'aho',
+    'news', 'focus', 'about', 'only', 'please', 'write', 'send', 'always', 'give', 'tell', 'want', 'prefer',
+    'update', 'updates', 'latest', 'fresh', 'today', 'report', 'briefing', 'summary', 'format', 'topic', 'topics',
+    'bullet', 'points', 'short', 'detailed', 'style', 'tone', 'more', 'most', 'very', 'just', 'with', 'related',
+    'from', 'into', 'that', 'this', 'the', 'and', 'for', 'you', 'your', 'are', 'have', 'will', 'new', 'using',
   ]);
-  const tokens = cleanCustom
+
+  const rawTokens = cleanCustom
     .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
     .split(/\s+/)
     .map((w) => w.trim())
-    .filter((w) => w.length >= 3 && !stopWords.has(w.toLowerCase()));
+    .filter((w) => w.length >= 2);
 
   const uniqueTokens: string[] = [];
   const seen = new Set<string>();
-  for (const t of tokens) {
-    const low = t.toLowerCase();
-    if (!seen.has(low)) {
-      seen.add(low);
-      uniqueTokens.push(t);
+  for (const rawTok of rawTokens) {
+    const low = rawTok.toLowerCase();
+    if (stopWords.has(low)) continue;
+    const mapped = kinyarwandaTopicMap[low] || rawTok;
+    if (mapped.length < 2) continue;
+    // Skip unknown non-ASCII/long Kinyarwanda words that weren't in the topic map to avoid random fuzzy matches
+    const isMappedTopic = Boolean(kinyarwandaTopicMap[low]);
+    const isShortAcronym = /^(ai|uk|us|eu|ev|5g|f1)$/i.test(mapped);
+    if (!isMappedTopic && !isShortAcronym && mapped.length < 3) continue;
+    if (!isMappedTopic && /^(kug|kub|kumen|kwib|guha|gush|bya|iby|muri|uko|iyo)/.test(low)) continue;
+
+    const dedupKey = mapped.toLowerCase();
+    if (!seen.has(dedupKey)) {
+      seen.add(dedupKey);
+      uniqueTokens.push(mapped);
     }
-    if (uniqueTokens.length >= 7) break;
+    if (uniqueTokens.length >= 6) break;
   }
   if (uniqueTokens.length === 0) return null;
   const query = `(${uniqueTokens.map((t) => encodeURIComponent(t)).join('+OR+')})+when:1d`;
@@ -222,30 +265,35 @@ async function fetchFreshRssForSlot(
     ...baseFeedUrls.map((u) => fetchRssUrl(u)),
   ]);
 
-  const merged = [...customItems, ...baseArrays.flat()];
+  const baseRaw = baseArrays.flat();
   const seenKeys = new Set<string>();
   const morningUsed = slotKey === 'evening_tech' ? (usedMorningUrlsByDate.get(kigaliDate) || new Set<string>()) : new Set<string>();
+  const customAsksSports = Boolean(
+    cleanCustomNews && /\b(sport|sports|siporo|imikino|football|soccer|umupira|arsenal|chelsea|liverpool|barcelona|madrid|bayern|psg|nba|mlb|nfl|uefa|premier|champions)\b/i.test(cleanCustomNews)
+  );
+  const isTechSlot = slotKey === 'morning_tech' || slotKey === 'evening_tech';
 
-  const fresh: RssArticleItem[] = [];
-  for (const item of merged) {
-    if (item.pubMs < minPubMs) continue;
-    if (!item.fromCustomQuery && (slotKey === 'noon_world' || slotKey === 'afternoon_sports_analysis') && isTechOrAiArticle(item.title)) continue;
-    if (slotKey === 'evening_tech' && morningUsed.has(item.url)) continue;
+  const filterList = (list: RssArticleItem[], isCustom: boolean): RssArticleItem[] => {
+    const kept: RssArticleItem[] = [];
+    for (const item of list) {
+      if (item.pubMs < minPubMs) continue;
+      if (!isCustom && (slotKey === 'noon_world' || slotKey === 'afternoon_sports_analysis') && isTechOrAiArticle(item.title)) continue;
+      if (isCustom && isTechSlot && !customAsksSports && isSportsHeadline(item.title) && !isTechOrAiArticle(item.title)) continue;
+      if (slotKey === 'evening_tech' && morningUsed.has(item.url)) continue;
 
-    const normTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 48);
-    if (!normTitle || seenKeys.has(normTitle) || seenKeys.has(item.url)) continue;
-    seenKeys.add(normTitle);
-    seenKeys.add(item.url);
-    fresh.push(item);
-  }
-
-  fresh.sort((a, b) => {
-    if (Boolean(a.fromCustomQuery) !== Boolean(b.fromCustomQuery)) {
-      return a.fromCustomQuery ? -1 : 1;
+      const normTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 48);
+      if (!normTitle || seenKeys.has(normTitle) || seenKeys.has(item.url)) continue;
+      seenKeys.add(normTitle);
+      seenKeys.add(item.url);
+      kept.push(item);
     }
-    return b.pubMs - a.pubMs;
-  });
-  return fresh.slice(0, 12);
+    kept.sort((a, b) => b.pubMs - a.pubMs);
+    return kept;
+  };
+
+  const keptCustom = filterList(customItems, true).slice(0, 4);
+  const keptBase = filterList(baseRaw, false).slice(0, 12 - keptCustom.length);
+  return [...keptCustom, ...keptBase].slice(0, 12);
 }
 
 function buildBriefingPreview(text: string): string {
@@ -288,21 +336,24 @@ function buildNewsGenerationPrompt(
     : '(No pre-fetched RSS rows; rely strictly on verified Google Search results from the last 14 hours only.)';
 
   const customInstructionsBlock = cleanCustomNews
-    ? `\n\nUSER'S CUSTOM INSTRUCTION NEWS (HIGHEST PRIORITY PREFERENCES):
+    ? `\n\nUSER'S CUSTOM INSTRUCTION NEWS (PREFERENCES):
 """
 ${cleanCustomNews}
 """
-- Prioritize topics, teams, countries, industries, or formatting/tone requested in the user's Custom Instruction News above whenever genuinely fresh news from the last 12 to 18 hours exists.
-- Still respect the current slot context while honoring the user's preferred focus and presentation style.`
+- Prioritize topics, companies, teams, or formatting/tone requested above ONLY when verified fresh articles about them actually exist in the sources below or live search results.
+- STRICT TRUTHFULNESS: NEVER lie, fabricate, exaggerate, or force-fit a story to satisfy a custom preference. Only state facts explicitly confirmed in the verified sources.
+- CRITICAL: NEVER output a message saying "Nta makuru mashya ahari / yihariye" ("no news available") as long as there are verified fresh articles for this time slot!
+- If today's fresh stories cover other major verified developments in this time slot (e.g., Nvidia, Meta, Apple, AI, sports, world news) rather than one specific custom keyword, STILL report 4 to 6 real, well-verified breaking news items from the provided sources in the user's preferred style.`
     : '';
 
   const systemInstruction = `You are Kevin AI, Rwanda's intelligent WhatsApp-style assistant created by Uwumukiza Kevin.
 You are sending a scheduled daily news WhatsApp briefing in authentic, natural, grammatically fluent Rwandan Kinyarwanda (Ikinyarwanda cy'umwimerere).
-STRICT FRESHNESS RULE:
+STRICT FRESHNESS & TRUTHFULNESS RULE (AMAKURU Y'UKURI AHAGAZEHO NEZA):
 - Current Rwanda time is ${displayDateRw} (${kigaliDate}) at ${nowKigaliTime} (Africa/Kigali).
-- ONLY report genuinely BREAKING / FRESH news from the last 12 to 16 hours. NEVER include old news from days, weeks, or years ago.
-- Base every fact ONLY on the verified live articles / Google Search grounding results provided. Never invent news or scores.
-- Format like a clean, scannable WhatsApp briefing with 4 to 6 crisp bullet items (bold headline + 1-2 short clear sentences explaining what happened), friendly emojis, and warm Rwandan tone.${customInstructionsBlock}`;
+- ONLY report genuinely BREAKING / FRESH, REAL news from the last 12 to 16 hours. NEVER include old news from days, weeks, or years ago.
+- ZERO HALLUCINATION / NTUKABESHYE: Base EVERY single fact, name, score, figure, date, and claim STRICTLY on the verified live articles / Google Search grounding results provided. NEVER invent, guess, extrapolate, or fabricate any news, quotes, releases, or numbers. If a detail is not explicitly confirmed in the verified sources, DO NOT include it.
+- Give solid, accurate, well-grounded news only ("amakuru y'ukuri nyayo ahagazeho neza").
+- Format like a clean, scannable WhatsApp briefing with 4 to 6 crisp bullet items (bold headline + 1-2 short clear sentences explaining verified facts), friendly emojis, and warm Rwandan tone.${customInstructionsBlock}`;
 
   if (slotKey === 'morning_tech') {
     return {
@@ -412,7 +463,7 @@ export async function generateOrGetBriefingForSlot(
       cleanCustomNews
     );
     const effectiveUserPrompt = cleanCustomNews
-      ? `${userPrompt}\n\nAMABWIRIZA YIHARIYE Y'UMUKORESHA (CUSTOM INSTRUCTION NEWS — KURIKIZA IBI):\n${cleanCustomNews}`
+      ? `${userPrompt}\n\nAMABWIRIZA YIHARIYE Y'UMUKORESHA (CUSTOM INSTRUCTION NEWS — Icyitonderwa: niba hari inkuru z'ukuri zihuje n'ibyo yasabye uzishyire imbere, NTUKABESHYE cyangwa ngo uhimbe inkuru udafiteho gihamya. Nanone NTUKAVUGE ngo nta makuru ahari igihe hari inkuru nyinshi z'ukuri zigezweho muri iri tangazo — andika inkuru 4 kugeza kuri 6 z'ukuri kandi zihagazeho neza mu buryo yasabye):\n${cleanCustomNews}`
       : userPrompt;
 
     const rssSources = rssItems.map((it) => ({
@@ -421,7 +472,7 @@ export async function generateOrGetBriefingForSlot(
     }));
 
     const modelsToTry = ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
-    const useSearchFirst = Boolean(cleanCustomNews) || rssItems.length < 3;
+    const useSearchFirst = rssItems.length < 3;
     const modes: Array<'search' | 'rss'> = useSearchFirst ? ['search', 'rss'] : ['rss', 'search'];
 
     for (const mode of modes) {
@@ -458,6 +509,13 @@ export async function generateOrGetBriefingForSlot(
 
             const text = (res.text || '').trim();
             if (!text || text.length < 40) continue;
+            if (
+              rssItems.length >= 3 &&
+              text.length < 520 &&
+              /nta makuru (mashya|yihariye|abonetse|ahari)/i.test(text)
+            ) {
+              continue;
+            }
 
             const collectedSources: Array<{ title: string; url: string }> = [];
             const seenUrls = new Set<string>();
