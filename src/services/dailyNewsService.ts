@@ -33,6 +33,10 @@ export function markSlotIdDelivered(slotId: string): void {
       const updated = [...current.slice(-60), slotId];
       window.localStorage.setItem(DELIVERED_NEWS_SLOTS_KEY, JSON.stringify(updated));
     }
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.syncDeliveredSlotId) {
+      bridge.syncDeliveredSlotId(slotId);
+    }
   } catch {}
 }
 
@@ -153,17 +157,78 @@ export async function fetchAndDeliverDueNewsBriefings(
   return deliveredCount;
 }
 
+export const NATIVE_NEWS_EVENT = 'kevinNewsBriefingNativeReceived';
+
+export function consumeNativePendingBriefings(
+  onDeliverBriefing: (briefing: DailyNewsBriefing) => void
+): number {
+  if (typeof window === 'undefined') return 0;
+  let count = 0;
+  try {
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.consumePendingNewsBriefingsJson) {
+      const raw = bridge.consumePendingNewsBriefingsJson();
+      if (raw && raw !== '[]' && raw !== '{}') {
+        const parsed = JSON.parse(raw);
+        const list: DailyNewsBriefing[] = Array.isArray(parsed) ? parsed : [parsed];
+        for (const b of list) {
+          if (b && b.slotId && b.body) {
+            markSlotIdDelivered(b.slotId);
+            onDeliverBriefing(b);
+            count++;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[DailyNews] consumeNativePendingBriefings error:', err);
+  }
+  return count;
+}
+
 export function initDailyNewsDelivery(
   onDeliverBriefing: (briefing: DailyNewsBriefing) => void
 ): () => void {
   if (typeof window === 'undefined') return () => {};
 
+  // Sync any slot IDs already delivered natively in Android prefs
+  try {
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.getDeliveredNewsSlotIdsJson) {
+      const nativeDeliveredRaw = bridge.getDeliveredNewsSlotIdsJson();
+      const nativeDelivered: string[] = JSON.parse(nativeDeliveredRaw || '[]');
+      for (const id of nativeDelivered) {
+        if (id) markSlotIdDelivered(id);
+      }
+    }
+  } catch {}
+
+  // Check if any news briefings arrived while app was closed or outside
+  consumeNativePendingBriefings(onDeliverBriefing);
+
   const executeSync = () => {
+    consumeNativePendingBriefings(onDeliverBriefing);
     void fetchAndDeliverDueNewsBriefings(onDeliverBriefing);
   };
 
   // Immediate check on boot
   const initialTimer = setTimeout(executeSync, 1200);
+
+  // When native Android service dispatches a briefing
+  const onNativeNews = (e: Event) => {
+    try {
+      const detail = (e as CustomEvent<DailyNewsBriefing | DailyNewsBriefing[]>).detail;
+      if (!detail) return;
+      const list = Array.isArray(detail) ? detail : [detail];
+      for (const b of list) {
+        if (b && b.slotId && b.body) {
+          markSlotIdDelivered(b.slotId);
+          onDeliverBriefing(b);
+        }
+      }
+    } catch {}
+  };
+  window.addEventListener(NATIVE_NEWS_EVENT, onNativeNews);
 
   // When internet comes back / user turns on bundle
   const onOnline = () => {
@@ -179,6 +244,7 @@ export function initDailyNewsDelivery(
     }
   };
   document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('focus', onVisibility);
 
   // Periodic heartbeat every 25 seconds
   const interval = setInterval(executeSync, 25000);
@@ -186,7 +252,9 @@ export function initDailyNewsDelivery(
   return () => {
     clearTimeout(initialTimer);
     clearInterval(interval);
+    window.removeEventListener(NATIVE_NEWS_EVENT, onNativeNews);
     window.removeEventListener('online', onOnline);
     document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('focus', onVisibility);
   };
 }

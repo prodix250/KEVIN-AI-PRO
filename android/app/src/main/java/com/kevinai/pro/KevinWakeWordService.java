@@ -250,6 +250,7 @@ public class KevinWakeWordService extends Service {
         }
 
         ensureForegroundStarted();
+        DailyNewsManager.checkAndDeliverNewsAsync(this);
 
         if (ACTION_PAUSE.equals(action)) {
             isPaused = true;

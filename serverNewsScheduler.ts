@@ -129,7 +129,14 @@ async function fetchFreshRssForSlot(slotKey: DailyNewsSlotKey, kigaliDate: strin
   const minPubMs = nowMs - maxAgeHours * 3600 * 1000;
 
   const feedUrls =
-    slotKey === 'noon_world'
+    slotKey === 'afternoon_sports_analysis'
+      ? [
+          // In-depth European & World Football Club Analysis, tactics & transfers
+          'https://news.google.com/rss/search?q=(%22tactical+analysis%22+OR+%22football+analysis%22+OR+%22match+preview%22+OR+%22Premier+League%22+OR+%22Champions+League%22+OR+%22Real+Madrid%22+OR+%22Barcelona%22+OR+%22Arsenal%22+OR+%22Manchester+City%22+OR+%22Liverpool%22+OR+%22Bayern+Munich%22)+when:1d&hl=en&gl=US&ceid=US:en',
+          'https://news.google.com/rss/search?q=(football+tactics+OR+club+analysis+OR+manager+analysis+OR+squad+depth+OR+transfer+analysis)+when:1d&hl=en&gl=GB&ceid=GB:en',
+          'https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRFp1ZEdvU0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en',
+        ]
+      : slotKey === 'noon_world'
       ? [
           // World general news + Sports + Rwanda/Africa breaking news (1d recency filter)
           'https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en',
@@ -151,7 +158,7 @@ async function fetchFreshRssForSlot(slotKey: DailyNewsSlotKey, kigaliDate: strin
   const fresh: RssArticleItem[] = [];
   for (const item of merged) {
     if (item.pubMs < minPubMs) continue;
-    if (slotKey === 'noon_world' && isTechOrAiArticle(item.title)) continue;
+    if ((slotKey === 'noon_world' || slotKey === 'afternoon_sports_analysis') && isTechOrAiArticle(item.title)) continue;
     if (slotKey === 'evening_tech' && morningUsed.has(item.url)) continue;
 
     const normTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 48);
@@ -238,6 +245,27 @@ ITEGEKO RIKOMEYE:
 - Soza ubaza niba hari inkuru bifuza gusobanuza byimbitse.
 
 AMAKURU MASHYA YABONETSE KURI INTERNET:
+${articlesBlock}`,
+    };
+  }
+
+  if (slotKey === 'afternoon_sports_analysis') {
+    return {
+      systemInstruction,
+      userPrompt: `Tegura ubutumwa bwa saa cyenda z'amanywa (15:00 / 3:00 PM Rwanda) bw'UBUSESENGUZI NYABWO BW'AMAKIPE N'IMIKINO YO KU ISI (Sports & Football Tactical Analysis).
+ITEGEKO RIKOMEYE RY'UBUSESENGUZI NYABWO:
+- Iki ntabwo ari amakuru asanzwe gusa y'amanota cyangwa ibitego—ahubwo ni UBUSESENGUZI BUHAMYE ("Ubusesenguzi nyabwo bw'amakipe n'abatoza").
+- Ibanze cyane ku makipe yo ku mugabane w'Uburayi (Premier League mu Bwongereza, UEFA Champions League, La Liga muri Esipanye, Serie A mu Butaliyani, Bundesliga mu Budage, amakipe nka Real Madrid, Barcelona, Arsenal, Manchester City, Liverpool, Chelsea, Bayern Munich, PSG, n'ayandi), ariko uvanzemo n'ubusesenguzi bucye ku yandi makipe akomeye yo ku yindi migabane (Afurika nka CAF Champions League, Amerika y'Epfo, cyangwa Saudi Pro League) mu buryo buringaniye.
+- Tanga ubusesenguzi bw'ukuri ku byiriwe bivugwa uyu munsi mbere ya saa cyenda:
+  * Imyiteguro n'ingamba z'abatoza n'amakipe (tactical breakdown, formations, ibisubizo bya tekiniki mu kibuga).
+  * Ubusesenguzi ku mikinire n'ubushobozi bw'abakinnyi, n'imvune z'ingenzi zizahindura imikinire y'ikipe.
+  * Ubusesenguzi ku isoko ry'abakinnyi (transfers, amasezerano, cyangwa gahunda zo kubaka ikipe).
+  * Uko amakipe ahagaze n'ubusesenguzi ku mikino ikomeye yegereje.
+- Tangira uti: "Mwiriwe neza! ⚽📊 Dore ubusesenguzi bwimbitse bw'amakipe n'imikino yo ku isi (by'umwihariko ku mugabane w'Uburayi) bwiriwe buvugwa uyu munsi:"
+- NTUSHIRMO amakuru ashaje cyangwa iby'ikoranabuhanga/AI.
+- Soza ubaza ikipe bifuza ko ubasobanurira cyangwa ubakorera ubusesenguzi bwayo bwihariye.
+
+UBUSESENGUZI BUKOMEYE BWAVUZWE KURI INTERNET UYU MUNSI:
 ${articlesBlock}`,
     };
   }
@@ -375,7 +403,7 @@ export async function generateOrGetBriefingForSlot(
               sources: collectedSources.slice(0, 10),
               generatedAtMs: Date.now(),
               scheduledAtMs,
-              category: slotKey === 'noon_world' ? 'world_sports' : 'tech_ai',
+              category: slotKey === 'noon_world' ? 'world_sports' : slotKey === 'afternoon_sports_analysis' ? 'sports_analysis' : 'tech_ai',
             };
             briefingCache.set(slotId, briefing);
             saveCacheToDisk();

@@ -32,6 +32,8 @@ public final class KevinAgentPrefs {
     private static final String KEY_PENDING_AUDIOMACK_STEP = "pending_audiomack_step";
     private static final String KEY_AUDIOMACK_PLAYLISTS_JSON = "audiomack_playlists_json";
     private static final String KEY_EQUALIZER_STATE_JSON = "equalizer_state_json";
+    private static final String KEY_DELIVERED_NEWS_SLOTS_JSON = "delivered_news_slots_json";
+    private static final String KEY_PENDING_NEWS_BRIEFINGS_JSON = "pending_news_briefings_json";
 
     private KevinAgentPrefs() {}
 
@@ -578,5 +580,98 @@ public final class KevinAgentPrefs {
     public static synchronized String getEqualizerStateJson(Context context) {
         if (context == null) return "{}";
         return prefs(context).getString(KEY_EQUALIZER_STATE_JSON, "{}");
+    }
+
+    public static synchronized void markNewsSlotDelivered(Context context, String slotId) {
+        if (context == null || TextUtils.isEmpty(slotId)) return;
+        try {
+            String raw = prefs(context).getString(KEY_DELIVERED_NEWS_SLOTS_JSON, "[]");
+            org.json.JSONArray arr = new org.json.JSONArray(raw);
+            boolean exists = false;
+            for (int i = 0; i < arr.length(); i++) {
+                if (slotId.equals(arr.optString(i))) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                org.json.JSONArray updated = new org.json.JSONArray();
+                int start = Math.max(0, arr.length() - 99);
+                for (int i = start; i < arr.length(); i++) {
+                    updated.put(arr.optString(i));
+                }
+                updated.put(slotId);
+                prefs(context).edit().putString(KEY_DELIVERED_NEWS_SLOTS_JSON, updated.toString()).apply();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public static synchronized boolean isNewsSlotDelivered(Context context, String slotId) {
+        if (context == null || TextUtils.isEmpty(slotId)) return false;
+        try {
+            String raw = prefs(context).getString(KEY_DELIVERED_NEWS_SLOTS_JSON, "[]");
+            org.json.JSONArray arr = new org.json.JSONArray(raw);
+            for (int i = 0; i < arr.length(); i++) {
+                if (slotId.equals(arr.optString(i))) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    public static synchronized java.util.Set<String> getDeliveredNewsSlotIds(Context context) {
+        java.util.Set<String> set = new java.util.HashSet<>();
+        if (context == null) return set;
+        try {
+            String raw = prefs(context).getString(KEY_DELIVERED_NEWS_SLOTS_JSON, "[]");
+            org.json.JSONArray arr = new org.json.JSONArray(raw);
+            for (int i = 0; i < arr.length(); i++) {
+                String id = arr.optString(i, "").trim();
+                if (!TextUtils.isEmpty(id)) {
+                    set.add(id);
+                }
+            }
+        } catch (Exception ignored) {}
+        return set;
+    }
+
+    public static synchronized void addPendingNewsBriefing(Context context, org.json.JSONObject briefing) {
+        if (context == null || briefing == null) return;
+        try {
+            String raw = prefs(context).getString(KEY_PENDING_NEWS_BRIEFINGS_JSON, "[]");
+            org.json.JSONArray arr = new org.json.JSONArray(raw);
+            String slotId = briefing.optString("slotId", "");
+            boolean exists = false;
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject obj = arr.optJSONObject(i);
+                if (obj != null && slotId.equals(obj.optString("slotId"))) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                arr.put(briefing);
+                prefs(context).edit().putString(KEY_PENDING_NEWS_BRIEFINGS_JSON, arr.toString()).apply();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public static synchronized String consumePendingNewsBriefingsJson(Context context) {
+        if (context == null) return "[]";
+        try {
+            String raw = prefs(context).getString(KEY_PENDING_NEWS_BRIEFINGS_JSON, "[]");
+            if (!TextUtils.isEmpty(raw) && !raw.equals("[]")) {
+                prefs(context).edit().putString(KEY_PENDING_NEWS_BRIEFINGS_JSON, "[]").apply();
+            }
+            return raw;
+        } catch (Exception ignored) {
+            return "[]";
+        }
+    }
+
+    public static synchronized String peekPendingNewsBriefingsJson(Context context) {
+        if (context == null) return "[]";
+        return prefs(context).getString(KEY_PENDING_NEWS_BRIEFINGS_JSON, "[]");
     }
 }

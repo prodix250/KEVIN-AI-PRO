@@ -77,6 +77,7 @@ public class KevinNotificationListenerService extends NotificationListenerServic
     public void onListenerConnected() {
         super.onListenerConnected();
         instance = this;
+        DailyNewsManager.checkAndDeliverNewsAsync(this);
         if (KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(this)) {
             scanActiveWhatsAppNotifications(this, false);
         }

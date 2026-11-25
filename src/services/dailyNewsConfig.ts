@@ -1,4 +1,4 @@
-export type DailyNewsSlotKey = 'morning_tech' | 'noon_world' | 'evening_tech';
+export type DailyNewsSlotKey = 'morning_tech' | 'noon_world' | 'afternoon_sports_analysis' | 'evening_tech';
 
 export interface DailyNewsSlotMeta {
   key: DailyNewsSlotKey;
@@ -21,7 +21,7 @@ export interface DailyNewsBriefing {
   sources: Array<{ title: string; url: string }>;
   generatedAtMs: number;
   scheduledAtMs: number;
-  category: 'tech_ai' | 'world_sports';
+  category: 'tech_ai' | 'world_sports' | 'sports_analysis';
 }
 
 export const DAILY_NEWS_SLOTS: DailyNewsSlotMeta[] = [
@@ -42,6 +42,15 @@ export const DAILY_NEWS_SLOTS: DailyNewsSlotMeta[] = [
     titleRw: "Amakuru y'Isi & Imikino (Saa Sita)",
     categoryLabel: 'Isi & Sport',
     emoji: '🌍⚽',
+  },
+  {
+    key: 'afternoon_sports_analysis',
+    hourKigali: 15,
+    minuteKigali: 0,
+    scheduledLabel: '15:00',
+    titleRw: "Ubusesenguzi bw'Amakipe & Imikino yo ku Isi (Saa Cyenda)",
+    categoryLabel: 'Ubusesenguzi bwa Siporo',
+    emoji: '⚽📊',
   },
   {
     key: 'evening_tech',

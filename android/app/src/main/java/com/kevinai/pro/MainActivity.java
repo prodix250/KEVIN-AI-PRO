@@ -49,6 +49,8 @@ public class MainActivity extends BridgeActivity {
                         );
                     } else if (KevinWakeWordService.ACTION_WAKE_WORD_IN_APP.equals(action)) {
                         dispatchInAppWakeWord(intent.getStringExtra(KevinWakeWordService.EXTRA_WAKE_COMMAND));
+                    } else if (DailyNewsManager.ACTION_NEWS_BRIEFING_DELIVERED.equals(action)) {
+                        dispatchNewsBriefingDelivered(intent.getStringExtra(DailyNewsManager.EXTRA_BRIEFING_JSON));
                     }
                 }
             };
@@ -99,6 +101,7 @@ public class MainActivity extends BridgeActivity {
         filter.addAction(ScreenCaptureService.ACTION_STOP);
         filter.addAction(KevinNotificationListenerService.ACTION_WHATSAPP_REPLIED);
         filter.addAction(KevinWakeWordService.ACTION_WAKE_WORD_IN_APP);
+        filter.addAction(DailyNewsManager.ACTION_NEWS_BRIEFING_DELIVERED);
         ContextCompat.registerReceiver(
                 this,
                 screenCaptureReceiver,
@@ -107,6 +110,15 @@ public class MainActivity extends BridgeActivity {
         );
 
         KevinWakeWordService.syncWithPreferences(this);
+        DailyNewsManager.init(this);
+        handleNewsIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleNewsIntent(intent);
     }
 
     @Override
@@ -114,6 +126,8 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         KevinWakeWordService.setMainVisible(true);
         KevinWakeWordService.syncWithPreferences(this);
+        DailyNewsManager.checkAndDeliverNewsAsync(this);
+        dispatchPendingNativeBriefings();
     }
 
     @Override
@@ -265,6 +279,48 @@ public class MainActivity extends BridgeActivity {
                         null
                 )
         );
+    }
+
+    private void handleNewsIntent(Intent intent) {
+        if (intent == null) return;
+        String briefingJson = intent.getStringExtra("from_news_briefing_json");
+        if (briefingJson != null && !briefingJson.isEmpty()) {
+            dispatchNewsBriefingDelivered(briefingJson);
+        } else {
+            String slotId = intent.getStringExtra("from_news_slot");
+            if (slotId != null && !slotId.isEmpty()) {
+                dispatchPendingNativeBriefings();
+            }
+        }
+    }
+
+    private void dispatchNewsBriefingDelivered(String briefingJson) {
+        if (getBridge() == null || getBridge().getWebView() == null || briefingJson == null || briefingJson.isEmpty()) return;
+        try {
+            String quoted = JSONObject.quote(briefingJson);
+            getBridge().getWebView().post(() ->
+                    getBridge().getWebView().evaluateJavascript(
+                            "try{window.dispatchEvent(new CustomEvent('kevinNewsBriefingNativeReceived',{detail:JSON.parse(" + quoted + ")}));}catch(e){}",
+                            null
+                    )
+            );
+        } catch (Exception ignored) {}
+    }
+
+    private void dispatchPendingNativeBriefings() {
+        if (getBridge() == null || getBridge().getWebView() == null) return;
+        try {
+            String pending = KevinAgentPrefs.consumePendingNewsBriefingsJson(this);
+            if (pending != null && !pending.isEmpty() && !pending.equals("[]")) {
+                String quoted = JSONObject.quote(pending);
+                getBridge().getWebView().post(() ->
+                        getBridge().getWebView().evaluateJavascript(
+                                "try{window.dispatchEvent(new CustomEvent('kevinNewsBriefingNativeReceived',{detail:JSON.parse(" + quoted + ")}));}catch(e){}",
+                                null
+                        )
+                );
+            }
+        } catch (Exception ignored) {}
     }
 
     private final class ScreenCaptureBridge {

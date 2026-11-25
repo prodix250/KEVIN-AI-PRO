@@ -249,7 +249,7 @@ public class KevinAgentBridge {
                         "Kevin AI Daily News & Briefings",
                         NotificationManager.IMPORTANCE_HIGH
                 );
-                channel.setDescription("Amakuru agezweho ya Kevin AI (06:00 Tech, 12:00 Isi & Sport, 18:00 Tech)");
+                channel.setDescription("Amakuru agezweho ya Kevin AI (06:00 Tech, 12:00 Isi & Sport, 15:00 Ubusesenguzi bwa Siporo, 18:00 Tech)");
                 channel.enableVibration(true);
                 channel.setShowBadge(true);
                 nm.createNotificationChannel(channel);
@@ -285,9 +285,44 @@ public class KevinAgentBridge {
 
             int notifId = (slotId != null ? Math.abs(slotId.hashCode()) : 7777);
             nm.notify(notifId, notif);
+            if (!TextUtils.isEmpty(slotId)) {
+                KevinAgentPrefs.markNewsSlotDelivered(activity, slotId);
+            }
             return true;
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    @JavascriptInterface
+    public String consumePendingNewsBriefingsJson() {
+        try {
+            return KevinAgentPrefs.consumePendingNewsBriefingsJson(activity);
+        } catch (Throwable t) {
+            return "[]";
+        }
+    }
+
+    @JavascriptInterface
+    public void syncDeliveredSlotId(String slotId) {
+        try {
+            if (!TextUtils.isEmpty(slotId)) {
+                KevinAgentPrefs.markNewsSlotDelivered(activity, slotId);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    @JavascriptInterface
+    public String getDeliveredNewsSlotIdsJson() {
+        try {
+            Set<String> set = KevinAgentPrefs.getDeliveredNewsSlotIds(activity);
+            JSONArray arr = new JSONArray();
+            for (String s : set) {
+                arr.put(s);
+            }
+            return arr.toString();
+        } catch (Throwable t) {
+            return "[]";
         }
     }
 
