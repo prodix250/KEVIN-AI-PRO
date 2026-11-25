@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import {
   buildNewsSlotId,
@@ -18,13 +19,65 @@ interface RssArticleItem {
   pubDate: string;
   pubMs: number;
   sourceName: string;
+  fromCustomQuery?: boolean;
 }
 
+type CachedDailyNewsBriefing = DailyNewsBriefing & {
+  customSig?: string;
+};
+
 const CACHE_FILE_PATH = path.join(os.tmpdir(), 'kevin-ai-daily-news-cache-v1.json');
-const briefingCache = new Map<string, DailyNewsBriefing>();
+const briefingCache = new Map<string, CachedDailyNewsBriefing>();
 const inFlightGenerations = new Map<string, Promise<DailyNewsBriefing | null>>();
 const usedMorningUrlsByDate = new Map<string, Set<string>>();
 let cacheLoaded = false;
+
+function normalizeNewsCustomInstructions(raw?: string): string {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 1200);
+}
+
+function getNewsCustomSignature(cleanCustom: string): string {
+  if (!cleanCustom) return 'default';
+  return crypto.createHash('sha256').update(cleanCustom).digest('hex').slice(0, 12);
+}
+
+function makeBriefingCacheKey(slotId: string, customSig: string): string {
+  return customSig === 'default' ? slotId : `${slotId}__${customSig}`;
+}
+
+function buildCustomNewsRssUrl(cleanCustom: string): string | null {
+  if (!cleanCustom) return null;
+  const stopWords = new Set([
+    'amakuru', 'jya', 'wibanda', 'wibande', 'cyane', 'kuri', 'ku', 'mu', 'muri', 'na', 'no', 'n',
+    'nshaka', 'ko', 'uzajya', 'umpa', 'mpere', 'unyohereze', 'nyohereza', 'gusa', 'kandi', 'ariko',
+    'nk', 'nka', 'ayo', 'aya', 'ibyo', 'ibi', 'bivugwa', 'mashya', 'agezweho', 'neza', 'uko',
+    'wandika', 'wandike', 'incamake', 'muzi', 'kwisi', 'isi', 'yose', 'y', 'ya', 'wa', 'ba', 'za',
+    'news', 'focus', 'about', 'only', 'please', 'write', 'send', 'always', 'give', 'tell', 'want',
+    'update', 'updates', 'latest', 'fresh', 'today', 'report', 'briefing', 'summary', 'format',
+    'bullet', 'points', 'short', 'detailed', 'style', 'tone', 'more', 'most', 'very', 'just', 'with',
+    'from', 'into', 'that', 'this', 'the', 'and', 'for', 'you', 'your', 'are', 'have', 'will',
+  ]);
+  const tokens = cleanCustom
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 3 && !stopWords.has(w.toLowerCase()));
+
+  const uniqueTokens: string[] = [];
+  const seen = new Set<string>();
+  for (const t of tokens) {
+    const low = t.toLowerCase();
+    if (!seen.has(low)) {
+      seen.add(low);
+      uniqueTokens.push(t);
+    }
+    if (uniqueTokens.length >= 7) break;
+  }
+  if (uniqueTokens.length === 0) return null;
+  const query = `(${uniqueTokens.map((t) => encodeURIComponent(t)).join('+OR+')})+when:1d`;
+  return `https://news.google.com/rss/search?q=${query}&hl=en&gl=US&ceid=US:en`;
+}
 
 function decodeXmlEntities(text: string): string {
   return text
@@ -49,7 +102,9 @@ function loadCacheFromDisk() {
       const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
       for (const item of parsed) {
         if (item && typeof item.slotId === 'string' && typeof item.body === 'string' && (item.generatedAtMs || 0) >= cutoff) {
-          briefingCache.set(item.slotId, item as DailyNewsBriefing);
+          const cachedItem = item as CachedDailyNewsBriefing;
+          const cacheKey = makeBriefingCacheKey(cachedItem.slotId, cachedItem.customSig || 'default');
+          briefingCache.set(cacheKey, cachedItem);
           if (item.slotKey === 'morning_tech' && Array.isArray(item.sources)) {
             usedMorningUrlsByDate.set(
               item.kigaliDate,
@@ -70,7 +125,8 @@ function saveCacheToDisk() {
     const items = Array.from(briefingCache.values()).filter((it) => it.generatedAtMs >= cutoff);
     briefingCache.clear();
     for (const it of items) {
-      briefingCache.set(it.slotId, it);
+      const cacheKey = makeBriefingCacheKey(it.slotId, it.customSig || 'default');
+      briefingCache.set(cacheKey, it);
     }
     fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(items), 'utf8');
   } catch (err) {
@@ -123,12 +179,16 @@ async function fetchRssUrl(rssUrl: string, timeoutMs = 4500): Promise<RssArticle
   }
 }
 
-async function fetchFreshRssForSlot(slotKey: DailyNewsSlotKey, kigaliDate: string): Promise<RssArticleItem[]> {
+async function fetchFreshRssForSlot(
+  slotKey: DailyNewsSlotKey,
+  kigaliDate: string,
+  cleanCustomNews = ''
+): Promise<RssArticleItem[]> {
   const nowMs = Date.now();
   const maxAgeHours = slotKey === 'evening_tech' ? 14 : 18;
   const minPubMs = nowMs - maxAgeHours * 3600 * 1000;
 
-  const feedUrls =
+  const baseFeedUrls =
     slotKey === 'afternoon_sports_analysis'
       ? [
           // In-depth European & World Football Club Analysis, tactics & transfers
@@ -150,15 +210,26 @@ async function fetchFreshRssForSlot(slotKey: DailyNewsSlotKey, kigaliDate: strin
           'https://news.google.com/rss/search?q=(technology+news+OR+software+update+OR+cybersecurity+OR+Apple+OR+Microsoft+OR+Nvidia+OR+Meta)+when:1d&hl=en&gl=US&ceid=US:en',
         ];
 
-  const fetchedArrays = await Promise.all(feedUrls.map((u) => fetchRssUrl(u)));
-  const merged = fetchedArrays.flat();
+  const customFeedUrl = buildCustomNewsRssUrl(cleanCustomNews);
+  const customPromise = customFeedUrl
+    ? fetchRssUrl(customFeedUrl).then((items) =>
+        items.map((it) => ({ ...it, fromCustomQuery: true }))
+      )
+    : Promise.resolve([] as RssArticleItem[]);
+
+  const [customItems, ...baseArrays] = await Promise.all([
+    customPromise,
+    ...baseFeedUrls.map((u) => fetchRssUrl(u)),
+  ]);
+
+  const merged = [...customItems, ...baseArrays.flat()];
   const seenKeys = new Set<string>();
   const morningUsed = slotKey === 'evening_tech' ? (usedMorningUrlsByDate.get(kigaliDate) || new Set<string>()) : new Set<string>();
 
   const fresh: RssArticleItem[] = [];
   for (const item of merged) {
     if (item.pubMs < minPubMs) continue;
-    if ((slotKey === 'noon_world' || slotKey === 'afternoon_sports_analysis') && isTechOrAiArticle(item.title)) continue;
+    if (!item.fromCustomQuery && (slotKey === 'noon_world' || slotKey === 'afternoon_sports_analysis') && isTechOrAiArticle(item.title)) continue;
     if (slotKey === 'evening_tech' && morningUsed.has(item.url)) continue;
 
     const normTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 48);
@@ -168,8 +239,13 @@ async function fetchFreshRssForSlot(slotKey: DailyNewsSlotKey, kigaliDate: strin
     fresh.push(item);
   }
 
-  fresh.sort((a, b) => b.pubMs - a.pubMs);
-  return fresh.slice(0, 10);
+  fresh.sort((a, b) => {
+    if (Boolean(a.fromCustomQuery) !== Boolean(b.fromCustomQuery)) {
+      return a.fromCustomQuery ? -1 : 1;
+    }
+    return b.pubMs - a.pubMs;
+  });
+  return fresh.slice(0, 12);
 }
 
 function buildBriefingPreview(text: string): string {
@@ -185,7 +261,8 @@ function buildNewsGenerationPrompt(
   slotKey: DailyNewsSlotKey,
   kigaliDate: string,
   displayDateRw: string,
-  rssItems: RssArticleItem[]
+  rssItems: RssArticleItem[],
+  cleanCustomNews = ''
 ): { systemInstruction: string; userPrompt: string } {
   const nowKigaliTime = new Date().toLocaleTimeString('en-GB', {
     timeZone: 'Africa/Kigali',
@@ -210,13 +287,22 @@ function buildNewsGenerationPrompt(
         .join('\n')
     : '(No pre-fetched RSS rows; rely strictly on verified Google Search results from the last 14 hours only.)';
 
+  const customInstructionsBlock = cleanCustomNews
+    ? `\n\nUSER'S CUSTOM INSTRUCTION NEWS (HIGHEST PRIORITY PREFERENCES):
+"""
+${cleanCustomNews}
+"""
+- Prioritize topics, teams, countries, industries, or formatting/tone requested in the user's Custom Instruction News above whenever genuinely fresh news from the last 12 to 18 hours exists.
+- Still respect the current slot context while honoring the user's preferred focus and presentation style.`
+    : '';
+
   const systemInstruction = `You are Kevin AI, Rwanda's intelligent WhatsApp-style assistant created by Uwumukiza Kevin.
 You are sending a scheduled daily news WhatsApp briefing in authentic, natural, grammatically fluent Rwandan Kinyarwanda (Ikinyarwanda cy'umwimerere).
 STRICT FRESHNESS RULE:
 - Current Rwanda time is ${displayDateRw} (${kigaliDate}) at ${nowKigaliTime} (Africa/Kigali).
 - ONLY report genuinely BREAKING / FRESH news from the last 12 to 16 hours. NEVER include old news from days, weeks, or years ago.
 - Base every fact ONLY on the verified live articles / Google Search grounding results provided. Never invent news or scores.
-- Format like a clean, scannable WhatsApp briefing with 4 to 6 crisp bullet items (bold headline + 1-2 short clear sentences explaining what happened), friendly emojis, and warm Rwandan tone.`;
+- Format like a clean, scannable WhatsApp briefing with 4 to 6 crisp bullet items (bold headline + 1-2 short clear sentences explaining what happened), friendly emojis, and warm Rwandan tone.${customInstructionsBlock}`;
 
   if (slotKey === 'morning_tech') {
     return {
@@ -288,16 +374,21 @@ export async function generateOrGetBriefingForSlot(
   slotKey: DailyNewsSlotKey,
   kigaliDate: string,
   apiKeys: string[],
-  forceGenerate = false
+  forceGenerate = false,
+  newsCustomInstructions = ''
 ): Promise<DailyNewsBriefing | null> {
   loadCacheFromDisk();
+  const cleanCustomNews = normalizeNewsCustomInstructions(newsCustomInstructions);
+  const customSig = getNewsCustomSignature(cleanCustomNews);
   const slotId = buildNewsSlotId(kigaliDate, slotKey);
-  const existing = briefingCache.get(slotId);
+  const cacheKey = makeBriefingCacheKey(slotId, customSig);
+
+  const existing = briefingCache.get(cacheKey);
   if (existing && !forceGenerate) {
     return existing;
   }
 
-  const pending = inFlightGenerations.get(slotId);
+  const pending = inFlightGenerations.get(cacheKey);
   if (pending) {
     return pending;
   }
@@ -308,7 +399,7 @@ export async function generateOrGetBriefingForSlot(
   const displayDateRw = `${dy}/${mo}/${yr}`;
 
   const task = (async (): Promise<DailyNewsBriefing | null> => {
-    const rssItems = await fetchFreshRssForSlot(slotKey, kigaliDate);
+    const rssItems = await fetchFreshRssForSlot(slotKey, kigaliDate, cleanCustomNews);
     if (apiKeys.length === 0) {
       return null;
     }
@@ -317,8 +408,12 @@ export async function generateOrGetBriefingForSlot(
       slotKey,
       kigaliDate,
       displayDateRw,
-      rssItems
+      rssItems,
+      cleanCustomNews
     );
+    const effectiveUserPrompt = cleanCustomNews
+      ? `${userPrompt}\n\nAMABWIRIZA YIHARIYE Y'UMUKORESHA (CUSTOM INSTRUCTION NEWS — KURIKIZA IBI):\n${cleanCustomNews}`
+      : userPrompt;
 
     const rssSources = rssItems.map((it) => ({
       title: it.sourceName ? `${it.sourceName}: ${it.title}` : it.title,
@@ -326,7 +421,7 @@ export async function generateOrGetBriefingForSlot(
     }));
 
     const modelsToTry = ['gemini-3.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
-    const useSearchFirst = rssItems.length < 3;
+    const useSearchFirst = Boolean(cleanCustomNews) || rssItems.length < 3;
     const modes: Array<'search' | 'rss'> = useSearchFirst ? ['search', 'rss'] : ['rss', 'search'];
 
     for (const mode of modes) {
@@ -343,7 +438,7 @@ export async function generateOrGetBriefingForSlot(
             });
             const genPromise = ai.models.generateContent({
               model,
-              contents: userPrompt,
+              contents: effectiveUserPrompt,
               config: {
                 systemInstruction,
                 ...(mode === 'search' ? { tools: [{ googleSearch: {} }] } : {}),
@@ -392,7 +487,7 @@ export async function generateOrGetBriefingForSlot(
               );
             }
 
-            const briefing: DailyNewsBriefing = {
+            const briefing: CachedDailyNewsBriefing = {
               slotId,
               kigaliDate,
               slotKey,
@@ -404,13 +499,15 @@ export async function generateOrGetBriefingForSlot(
               generatedAtMs: Date.now(),
               scheduledAtMs,
               category: slotKey === 'noon_world' ? 'world_sports' : slotKey === 'afternoon_sports_analysis' ? 'sports_analysis' : 'tech_ai',
+              ...(customSig !== 'default' ? { customSig } : {}),
             };
-            briefingCache.set(slotId, briefing);
+            briefingCache.set(cacheKey, briefing);
             saveCacheToDisk();
-            console.log(`[NewsScheduler] Generated fresh briefing for ${slotId} (${collectedSources.length} sources)`);
-            return briefing;
+            console.log(`[NewsScheduler] Generated fresh briefing for ${cacheKey} (${collectedSources.length} sources)`);
+            const { customSig: _omitSig, ...publicBriefing } = briefing;
+            return publicBriefing;
           } catch (err) {
-            console.warn(`[NewsScheduler] ${slotId} (${model}, ${mode}) attempt failed:`, err instanceof Error ? err.message : String(err));
+            console.warn(`[NewsScheduler] ${cacheKey} (${model}, ${mode}) attempt failed:`, err instanceof Error ? err.message : String(err));
           }
         }
       }
@@ -419,17 +516,18 @@ export async function generateOrGetBriefingForSlot(
     return null;
   })();
 
-  inFlightGenerations.set(slotId, task);
+  inFlightGenerations.set(cacheKey, task);
   try {
     return await task;
   } finally {
-    inFlightGenerations.delete(slotId);
+    inFlightGenerations.delete(cacheKey);
   }
 }
 
 export async function syncDueNewsBriefings(params: {
   deliveredIds?: string[];
   customApiKeys?: string | string[];
+  newsCustomInstructions?: string;
   getServerApiKeys: (customKeys?: string | string[]) => string[];
 }): Promise<{
   serverTimeMs: number;
@@ -446,7 +544,13 @@ export async function syncDueNewsBriefings(params: {
   const briefings: DailyNewsBriefing[] = [];
   for (const due of dueSlots) {
     if (deliveredSet.has(due.slotId)) continue;
-    const item = await generateOrGetBriefingForSlot(due.meta.key, due.kigaliDate, apiKeys, false);
+    const item = await generateOrGetBriefingForSlot(
+      due.meta.key,
+      due.kigaliDate,
+      apiKeys,
+      false,
+      params.newsCustomInstructions || ''
+    );
     if (item) {
       briefings.push(item);
     }

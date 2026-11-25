@@ -5,6 +5,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
@@ -323,6 +324,11 @@ public final class DailyNewsManager {
                 requestBody.put("customApiKeys", keysArr);
             }
 
+            String newsCustomInstructions = KevinAgentPrefs.getNewsCustomInstructions(context);
+            if (!TextUtils.isEmpty(newsCustomInstructions)) {
+                requestBody.put("newsCustomInstructions", newsCustomInstructions);
+            }
+
             HttpURLConnection conn = null;
             try {
                 URL url = new URL(syncUrl);
@@ -402,17 +408,19 @@ public final class DailyNewsManager {
         }
     }
 
-    public static void showHeadsUpNewsNotification(
+    public static boolean showHeadsUpNewsNotification(
             Context context,
             String title,
             String preview,
             String slotId,
             String briefingJson
     ) {
-        if (context == null) return;
+        if (context == null) return false;
         try {
             NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-            if (nm == null) return;
+            if (nm == null) return false;
+
+            boolean notificationsEnabled = Build.VERSION.SDK_INT < Build.VERSION_CODES.N || nm.areNotificationsEnabled();
 
             String channelId = KevinAgentBridge.NEWS_CHANNEL_ID;
 
@@ -421,7 +429,20 @@ public final class DailyNewsManager {
             String safeBigText = !TextUtils.isEmpty(preview) ? preview : "Kanda hano usome amakuru mashya muri Kevin AI.";
             long postedAtMs = System.currentTimeMillis();
 
+            int whistleResId = context.getResources().getIdentifier(
+                    "kevin_news_whistle",
+                    "raw",
+                    context.getPackageName()
+            );
+            Uri customSoundUri = whistleResId != 0
+                    ? Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + context.getPackageName() + "/" + whistleResId)
+                    : RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try {
+                    nm.deleteNotificationChannel("kevin_daily_news");
+                } catch (Throwable ignored) {}
+
                 NotificationChannel channel = new NotificationChannel(
                         channelId,
                         "Kevin AI Daily News & Briefings",
@@ -435,12 +456,11 @@ public final class DailyNewsManager {
                 channel.setShowBadge(true);
                 channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
 
-                Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
                 AudioAttributes audioAttributes = new AudioAttributes.Builder()
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
                         .build();
-                channel.setSound(soundUri, audioAttributes);
+                channel.setSound(customSoundUri, audioAttributes);
                 nm.createNotificationChannel(channel);
 
                 NotificationChannel shadeChannel = new NotificationChannel(
@@ -488,12 +508,12 @@ public final class DailyNewsManager {
                     .setOngoing(false)
                     .setContentIntent(pendingIntent)
                     .setVibrate(new long[]{0, 260, 120, 260})
-                    .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
-                    .setDefaults(Notification.DEFAULT_ALL)
+                    .setSound(customSoundUri)
+                    .setDefaults(Notification.DEFAULT_LIGHTS | Notification.DEFAULT_VIBRATE)
                     .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
 
             nm.notify(reqCode, headsUpBuilder.build());
-            Log.d(TAG, "Heads-Up notification posted for slot: " + slotId + " (auto-collapses in " + HEADS_UP_DURATION_MS + "ms)");
+            Log.d(TAG, "Heads-Up notification posted for slot: " + slotId + " with custom whistle sound (auto-collapses in " + HEADS_UP_DURATION_MS + "ms)");
 
             // After ~3 seconds (3.2s), collapse the floating heads-up banner into the notification panel silently
             final Context appCtx = context.getApplicationContext();
@@ -533,8 +553,11 @@ public final class DailyNewsManager {
                     delayedNm.notify(reqCode, shadeBuilder.build());
                 } catch (Throwable ignored) {}
             }, HEADS_UP_DURATION_MS);
+
+            return notificationsEnabled;
         } catch (Throwable t) {
             Log.w(TAG, "showHeadsUpNewsNotification failed: " + t.getMessage());
+            return false;
         }
     }
 }

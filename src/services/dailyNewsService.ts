@@ -7,12 +7,55 @@ import {
 import {
   getGeminiApiKeysArray,
   getUserCustomApiKey,
-  playWhatsAppSound,
+  playNewsNotificationSound,
   resolveApiEndpoint,
 } from './geminiService';
 
 export const DELIVERED_NEWS_SLOTS_KEY = 'kevin_ai_delivered_news_slots_v1';
 export const NEWS_PENDING_TOAST_EVENT = 'kevinNewsBriefingReceived';
+export const NEWS_CUSTOM_INSTRUCTIONS_KEY = 'kevin_news_custom_instructions';
+export const NEWS_CUSTOM_INSTRUCTIONS_LEGACY_KEY = 'kevin_ai_news_custom_instructions';
+
+export function getNewsCustomInstructions(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const local = (
+      window.localStorage.getItem(NEWS_CUSTOM_INSTRUCTIONS_KEY) ||
+      window.localStorage.getItem(NEWS_CUSTOM_INSTRUCTIONS_LEGACY_KEY) ||
+      ''
+    ).trim();
+    if (local) return local;
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.getNewsCustomInstructions) {
+      const nativeVal = String(bridge.getNewsCustomInstructions() || '').trim();
+      if (nativeVal) {
+        window.localStorage.setItem(NEWS_CUSTOM_INSTRUCTIONS_KEY, nativeVal);
+        window.localStorage.setItem(NEWS_CUSTOM_INSTRUCTIONS_LEGACY_KEY, nativeVal);
+        return nativeVal;
+      }
+    }
+  } catch {}
+  return '';
+}
+
+export function saveNewsCustomInstructions(raw: string): string {
+  const trimmed = (raw || '').trim();
+  if (typeof window === 'undefined') return trimmed;
+  try {
+    if (trimmed) {
+      window.localStorage.setItem(NEWS_CUSTOM_INSTRUCTIONS_KEY, trimmed);
+      window.localStorage.setItem(NEWS_CUSTOM_INSTRUCTIONS_LEGACY_KEY, trimmed);
+    } else {
+      window.localStorage.removeItem(NEWS_CUSTOM_INSTRUCTIONS_KEY);
+      window.localStorage.removeItem(NEWS_CUSTOM_INSTRUCTIONS_LEGACY_KEY);
+    }
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.setNewsCustomInstructions) {
+      bridge.setNewsCustomInstructions(trimmed);
+    }
+  } catch {}
+  return trimmed;
+}
 
 export function getDeliveredSlotIds(): string[] {
   if (typeof window === 'undefined') return [];
@@ -43,19 +86,24 @@ export function markSlotIdDelivered(slotId: string): void {
 export function triggerHeadsUpNewsNotification(briefing: DailyNewsBriefing): void {
   if (typeof window === 'undefined') return;
 
-  // 1. Play WhatsApp receive sound
-  try {
-    playWhatsAppSound('receive');
-  } catch {}
-
-  // 2. Android native heads-up pop-up notification at the top of the screen
+  // 1. Android native heads-up pop-up notification (plays custom R.raw.kevin_news_whistle via NotificationChannel)
+  let nativePlayedSound = false;
   try {
     const bridge = (window as any).KevinAgentBridge;
     if (bridge?.showNewsNotification) {
-      bridge.showNewsNotification(briefing.title, briefing.preview, briefing.slotId);
+      nativePlayedSound = Boolean(
+        bridge.showNewsNotification(briefing.title, briefing.preview, briefing.slotId)
+      );
     }
   } catch (err) {
     console.warn('[DailyNews] Native notification error:', err);
+  }
+
+  // 2. Play custom news whistle sound on Web/Desktop/PWA or APK fallback if notifications are disabled
+  if (!nativePlayedSound) {
+    try {
+      playNewsNotificationSound();
+    } catch {}
   }
 
   // 3. Web Notification API (Browser / PWA / Desktop)
@@ -115,6 +163,7 @@ export async function fetchAndDeliverDueNewsBriefings(
     const endpoint = resolveApiEndpoint('/api/news-briefings/sync');
     const customApiKey = getUserCustomApiKey();
     const customApiKeys = getGeminiApiKeysArray();
+    const newsCustomInstructions = getNewsCustomInstructions();
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 16000);
@@ -126,6 +175,7 @@ export async function fetchAndDeliverDueNewsBriefings(
         deliveredIds,
         customApiKey,
         customApiKeys,
+        ...(newsCustomInstructions ? { newsCustomInstructions } : {}),
       }),
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
@@ -191,9 +241,13 @@ export function initDailyNewsDelivery(
 ): () => void {
   if (typeof window === 'undefined') return () => {};
 
-  // Sync any slot IDs already delivered natively in Android prefs
+  // Sync any slot IDs & Custom Instruction News to/from Android native prefs
   try {
     const bridge = (window as any).KevinAgentBridge;
+    const localNewsInstr = getNewsCustomInstructions();
+    if (localNewsInstr && bridge?.setNewsCustomInstructions) {
+      bridge.setNewsCustomInstructions(localNewsInstr);
+    }
     if (bridge?.getDeliveredNewsSlotIdsJson) {
       const nativeDeliveredRaw = bridge.getDeliveredNewsSlotIdsJson();
       const nativeDelivered: string[] = JSON.parse(nativeDeliveredRaw || '[]');

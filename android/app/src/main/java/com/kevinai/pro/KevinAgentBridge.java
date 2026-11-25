@@ -235,16 +235,16 @@ public class KevinAgentBridge {
         }
     }
 
-    public static final String NEWS_CHANNEL_ID = "kevin_daily_news";
+    public static final String NEWS_CHANNEL_ID = "kevin_daily_news_whistle_v1";
 
     @JavascriptInterface
     public boolean showNewsNotification(String title, String preview, String slotId) {
         try {
-            DailyNewsManager.showHeadsUpNewsNotification(activity, title, preview, slotId, "");
+            boolean posted = DailyNewsManager.showHeadsUpNewsNotification(activity, title, preview, slotId, "");
             if (!TextUtils.isEmpty(slotId)) {
                 KevinAgentPrefs.markNewsSlotDelivered(activity, slotId);
             }
-            return true;
+            return posted;
         } catch (Throwable t) {
             return false;
         }
@@ -266,6 +266,22 @@ public class KevinAgentBridge {
                 KevinAgentPrefs.markNewsSlotDelivered(activity, slotId);
             }
         } catch (Throwable ignored) {}
+    }
+
+    @JavascriptInterface
+    public void setNewsCustomInstructions(String instructions) {
+        try {
+            KevinAgentPrefs.setNewsCustomInstructions(activity, instructions);
+        } catch (Throwable ignored) {}
+    }
+
+    @JavascriptInterface
+    public String getNewsCustomInstructions() {
+        try {
+            return KevinAgentPrefs.getNewsCustomInstructions(activity);
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     @JavascriptInterface
@@ -2161,6 +2177,38 @@ public class KevinAgentBridge {
     @JavascriptInterface
     public void playBeep() {
         playPopSound();
+    }
+
+    @JavascriptInterface
+    public void playNewsNotificationSound() {
+        activity.runOnUiThread(() -> {
+            try {
+                int resId = activity.getResources().getIdentifier("kevin_news_whistle", "raw", activity.getPackageName());
+                if (resId != 0) {
+                    android.media.MediaPlayer mp = android.media.MediaPlayer.create(activity, resId);
+                    if (mp != null) {
+                        mp.setAudioStreamType(android.media.AudioManager.STREAM_MUSIC);
+                        mp.setOnCompletionListener(android.media.MediaPlayer::release);
+                        mp.start();
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            try {
+                android.content.res.AssetFileDescriptor afd = activity.getAssets().openFd("public/assets/aistudio/samsung_whistle_cce9e4f7.mp3");
+                android.media.MediaPlayer mp = new android.media.MediaPlayer();
+                mp.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+                afd.close();
+                mp.setAudioStreamType(android.media.AudioManager.STREAM_MUSIC);
+                mp.prepare();
+                mp.setOnCompletionListener(android.media.MediaPlayer::release);
+                mp.start();
+                return;
+            } catch (Exception ignored) {}
+
+            playPopSound();
+        });
     }
 
     private String normalizeEqPresetName(String rawPreset) {

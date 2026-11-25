@@ -824,14 +824,16 @@ async function startServer() {
 
   app.post('/api/news-briefings/sync', async (req: Request, res: Response) => {
     try {
-      const { deliveredIds, customApiKey, customApiKeys } = (req.body || {}) as {
+      const { deliveredIds, customApiKey, customApiKeys, newsCustomInstructions } = (req.body || {}) as {
         deliveredIds?: string[];
         customApiKey?: string;
         customApiKeys?: string[];
+        newsCustomInstructions?: string;
       };
       const result = await syncDueNewsBriefings({
         deliveredIds: Array.isArray(deliveredIds) ? deliveredIds : [],
         customApiKeys: customApiKeys || customApiKey,
+        newsCustomInstructions: typeof newsCustomInstructions === 'string' ? newsCustomInstructions : '',
         getServerApiKeys,
       });
       res.json(result);
@@ -846,12 +848,14 @@ async function startServer() {
   app.get('/api/news-briefings/pending', async (req: Request, res: Response) => {
     try {
       const rawDelivered = typeof req.query.deliveredIds === 'string' ? req.query.deliveredIds : '';
+      const newsCustomInstructions = typeof req.query.newsCustomInstructions === 'string' ? req.query.newsCustomInstructions : '';
       const deliveredIds = rawDelivered
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
       const result = await syncDueNewsBriefings({
         deliveredIds,
+        newsCustomInstructions,
         getServerApiKeys,
       });
       res.json(result);
@@ -984,6 +988,192 @@ Most speakers speak Kinyarwanda (or natural Kinyarwanda mixed with French/Englis
       res.status(500).json({ error: extractReadableError(lastErr) });
     } catch (error: any) {
       console.error('Server /api/stt error:', error);
+      res.status(500).json({ error: extractReadableError(error) });
+    }
+  });
+
+  app.post('/api/tts', async (req: Request, res: Response) => {
+    try {
+      const { text, voiceType, customApiKey, customApiKeys } = (req.body || {}) as {
+        text?: string;
+        voiceType?: 'female' | 'male' | 'child';
+        customApiKey?: string;
+        customApiKeys?: string[];
+      };
+
+      if (!text || typeof text !== 'string' || !text.trim()) {
+        res.status(400).json({ error: 'Nta nyandiko yo gusoma yabonetse.' });
+        return;
+      }
+
+      const availableKeys = getServerApiKeys(customApiKeys || customApiKey);
+      if (availableKeys.length === 0) {
+        res.status(500).json({ error: 'Nta kevin API key yabonetse. Nyamuneka yishyireho muri Settings > Secrets panel.' });
+        return;
+      }
+
+      const cleanSpoken = text
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1')
+        .replace(/https?:\/\/\S+/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/^#{1,6}\s+/gm, '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/__([^_]+)__/g, '$1')
+        .replace(/_([^_]+)_/g, '$1')
+        .replace(/^\s*[-*•]\s+/gm, '. ')
+        .replace(/(\d+)\s*%/g, '$1 ku ijana')
+        .replace(/\s*&\s*/g, ' na ')
+        .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, ' ')
+        .replace(/\r?\n+/g, '. ')
+        .replace(/\.\s*\./g, '.')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+        .slice(0, 2200);
+
+      if (!cleanSpoken) {
+        res.status(400).json({ error: 'Nta magambo yo gusoma abonetse.' });
+        return;
+      }
+
+      const selectedVoice = voiceType === 'male' ? 'male' : voiceType === 'child' ? 'child' : 'female';
+
+      const voiceConfigMap = {
+        female: {
+          models: ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'],
+          voiceNames: ['Kore', 'Zephyr'],
+          style:
+            "Warm, articulate adult Rwandan woman (age ~28) from Kigali speaking fluent, authentic native Kinyarwanda (Ikinyarwanda cy'umwimerere). Pronounce Kinyarwanda vowels (a, e, i, o, u), tonal cadence, and consonant clusters (cy, by, ry, ny, sh, shy, pf, ts, mp, mb, nd, ng, rw, bw, tw, mw, kw) naturally and smoothly like a native Rwandan speaker. Speak any embedded English or French words cleanly.",
+        },
+        male: {
+          models: ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'],
+          voiceNames: ['Charon', 'Fenrir'],
+          style:
+            "Warm, confident, deep adult Rwandan man (age ~32) from Kigali speaking fluent, authentic native Kinyarwanda (Ikinyarwanda cy'umwimerere). Pronounce Kinyarwanda vowels (a, e, i, o, u), tonal rhythm, and consonant clusters (cy, by, ry, ny, sh, shy, pf, ts, mp, mb, nd, ng, rw, bw, tw, mw, kw) clearly with steady, natural Rwandan intonation. Speak any embedded English or French words cleanly.",
+        },
+        child: {
+          models: ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'],
+          voiceNames: ['Zephyr', 'Puck'],
+          style:
+            "Bright, cheerful, natural young Rwandan child (age 8 to 10) from Kigali with a genuinely youthful, higher-pitched child voice timbre, speaking fluent, authentic native Kinyarwanda (Ikinyarwanda cy'umwimerere). Articulate Kinyarwanda vowels (a, e, i, o, u) and consonant clusters (cy, by, ry, ny, sh, shy, pf, ts, mp, mb, nd, ng, rw, bw, tw, mw, kw) cleanly with natural childlike warmth and clarity.",
+        },
+      } as const;
+
+      const profile = voiceConfigMap[selectedVoice];
+      const invalidKeys = new Set<string>();
+      let lastErr: unknown = null;
+
+      for (const model of profile.models) {
+        for (const voiceName of profile.voiceNames) {
+          for (let keyIdx = 0; keyIdx < availableKeys.length; keyIdx++) {
+            const key = availableKeys[keyIdx];
+            if (invalidKeys.has(key)) continue;
+
+            const ai = new GoogleGenAI({
+              apiKey: key,
+              httpOptions: {
+                apiVersion: 'v1beta',
+                headers: { 'User-Agent': 'aistudio-build' },
+              },
+            });
+
+            try {
+              const ttsPromise = ai.models.generateContent({
+                model,
+                contents: [
+                  {
+                    role: 'user',
+                    parts: [
+                      {
+                        text: cleanSpoken,
+                        speechMetadata: {
+                          style: profile.style,
+                        },
+                      } as any,
+                    ],
+                  },
+                ],
+                config: {
+                  responseModalities: ['AUDIO'],
+                  speechConfig: {
+                    voiceConfig: {
+                      prebuiltVoiceConfig: { voiceName },
+                    },
+                  },
+                },
+              });
+              ttsPromise.catch(() => {});
+
+              const response = await Promise.race([
+                ttsPromise,
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error('503 TTS timed out')), 24000)
+                ),
+              ]);
+
+              const parts = response.candidates?.[0]?.content?.parts || [];
+              const audioPart = parts.find((p: any) => p?.inlineData?.data);
+              const rawBase64 = audioPart?.inlineData?.data;
+              const rawMime = audioPart?.inlineData?.mimeType || 'audio/wav';
+
+              if (rawBase64 && rawBase64.length > 100) {
+                let finalBase64 = rawBase64;
+                let finalMime = rawMime;
+                const buf = Buffer.from(rawBase64, 'base64');
+                const isRiff = buf.length >= 4 && buf.subarray(0, 4).toString('ascii') === 'RIFF';
+
+                if (!isRiff && (rawMime.toLowerCase().includes('l16') || rawMime.toLowerCase().includes('pcm'))) {
+                  const header = Buffer.alloc(44);
+                  const dataSize = buf.length;
+                  const sampleRate = 24000;
+                  const numChannels = 1;
+                  const bitsPerSample = 16;
+                  header.write('RIFF', 0);
+                  header.writeUInt32LE(36 + dataSize, 4);
+                  header.write('WAVE', 8);
+                  header.write('fmt ', 12);
+                  header.writeUInt32LE(16, 16);
+                  header.writeUInt16LE(1, 20);
+                  header.writeUInt16LE(numChannels, 22);
+                  header.writeUInt32LE(sampleRate, 24);
+                  header.writeUInt32LE(sampleRate * numChannels * (bitsPerSample / 8), 28);
+                  header.writeUInt16LE(numChannels * (bitsPerSample / 8), 32);
+                  header.writeUInt16LE(bitsPerSample, 34);
+                  header.write('data', 36);
+                  header.writeUInt32LE(dataSize, 40);
+                  finalBase64 = Buffer.concat([header, buf]).toString('base64');
+                  finalMime = 'audio/wav';
+                }
+
+                res.json({
+                  audioBase64: finalBase64,
+                  mimeType: finalMime.startsWith('audio/') ? finalMime : 'audio/wav',
+                  voiceType: selectedVoice,
+                });
+                return;
+              }
+            } catch (err: any) {
+              lastErr = err;
+              const msg = extractReadableError(err).toLowerCase();
+              const combined = `${msg} ${(err?.message || '').toLowerCase()}`;
+              if (err?.status === 400 || err?.status === 403 || combined.includes('api key')) {
+                invalidKeys.add(key);
+              }
+              if (err?.status === 404 || combined.includes('not_found')) {
+                break;
+              }
+            }
+          }
+          // Try next key or next model/voice cleanly
+        }
+      }
+
+      res.status(500).json({ error: extractReadableError(lastErr || 'Ntibyashobotse gukora ijwi.') });
+    } catch (error: any) {
+      console.error('Server /api/tts error:', error);
       res.status(500).json({ error: extractReadableError(error) });
     }
   });

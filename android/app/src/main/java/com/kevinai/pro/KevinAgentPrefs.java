@@ -34,6 +34,7 @@ public final class KevinAgentPrefs {
     private static final String KEY_EQUALIZER_STATE_JSON = "equalizer_state_json";
     private static final String KEY_DELIVERED_NEWS_SLOTS_JSON = "delivered_news_slots_json";
     private static final String KEY_PENDING_NEWS_BRIEFINGS_JSON = "pending_news_briefings_json";
+    private static final String KEY_NEWS_CUSTOM_INSTRUCTIONS = "news_custom_instructions";
 
     private KevinAgentPrefs() {}
 
@@ -673,5 +674,17 @@ public final class KevinAgentPrefs {
     public static synchronized String peekPendingNewsBriefingsJson(Context context) {
         if (context == null) return "[]";
         return prefs(context).getString(KEY_PENDING_NEWS_BRIEFINGS_JSON, "[]");
+    }
+
+    public static synchronized void setNewsCustomInstructions(Context context, String instructions) {
+        if (context == null) return;
+        String clean = instructions != null ? instructions.trim() : "";
+        prefs(context).edit().putString(KEY_NEWS_CUSTOM_INSTRUCTIONS, clean).apply();
+    }
+
+    public static synchronized String getNewsCustomInstructions(Context context) {
+        if (context == null) return "";
+        String val = prefs(context).getString(KEY_NEWS_CUSTOM_INSTRUCTIONS, "");
+        return val != null ? val.trim() : "";
     }
 }

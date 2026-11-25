@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown, Pause, Play } from 'lucide-react';
+import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown, Pause, Play, RotateCcw, Square, Loader2, Newspaper } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
@@ -13,8 +13,9 @@ import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateD
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
 import { downloadAIImage, downloadDocumentFile } from './utils/download';
-import { initDailyNewsDelivery, NEWS_PENDING_TOAST_EVENT } from './services/dailyNewsService';
+import { getNewsCustomInstructions, initDailyNewsDelivery, NEWS_PENDING_TOAST_EVENT, saveNewsCustomInstructions } from './services/dailyNewsService';
 import type { DailyNewsBriefing } from './services/dailyNewsConfig';
+import { KEVIN_TTS_VOICE_OPTIONS, KevinTtsVoiceType, speakReplyText, stopReplySpeech } from './services/ttsService';
 
 const THEME_LIGHT_DEFAULT_MIGRATION_KEY = 'kevin_ai_theme_light_default_migrated';
 
@@ -380,6 +381,23 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [showAssistantOverlay, setShowAssistantOverlay] = useState(false);
   const [activeNewsPopup, setActiveNewsPopup] = useState<DailyNewsBriefing | null>(null);
+  const [voiceMenuMsgId, setVoiceMenuMsgId] = useState<string | null>(null);
+  const [ttsState, setTtsState] = useState<{
+    messageId: string | null;
+    status: 'idle' | 'loading' | 'playing';
+    voiceType: KevinTtsVoiceType | null;
+  }>({ messageId: null, status: 'idle', voiceType: null });
+
+  useEffect(() => {
+    if (!voiceMenuMsgId) return;
+    const closeMenu = () => setVoiceMenuMsgId(null);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, [voiceMenuMsgId]);
+
+  useEffect(() => () => {
+    stopReplySpeech();
+  }, []);
 
   useEffect(() => {
     if (!isDedicatedAssistantOverlay) return;
@@ -526,6 +544,22 @@ export default function App() {
       showToastMessage("✨ Custom Instructions zasibwe.");
     }
     setShowCustomInstructionsModal(false);
+  };
+
+  const [newsCustomInstructions, setNewsCustomInstructions] = useState<string>(() => getNewsCustomInstructions());
+  const [tempNewsCustomInstructions, setTempNewsCustomInstructions] = useState<string>(() => getNewsCustomInstructions());
+  const [showNewsInstructionsModal, setShowNewsInstructionsModal] = useState<boolean>(false);
+
+  const handleSaveNewsCustomInstructions = () => {
+    const saved = saveNewsCustomInstructions(tempNewsCustomInstructions);
+    setNewsCustomInstructions(saved);
+    setTempNewsCustomInstructions(saved);
+    if (saved) {
+      showToastMessage("✨ Custom Instruction News zabitswe neza!");
+    } else {
+      showToastMessage("✨ Custom Instruction News zasibwe.");
+    }
+    setShowNewsInstructionsModal(false);
   };
   const [attachedImage, setAttachedImage] = useState<AttachmentItem | null>(null);
   const [attachedImages, setAttachedImages] = useState<AttachmentItem[]>([]);
@@ -1363,6 +1397,7 @@ export default function App() {
     if (showSettingsModal) { setShowSettingsModal(false); return; }
     if (showApiKeyModal) { setShowApiKeyModal(false); return; }
     if (showCustomInstructionsModal) { setShowCustomInstructionsModal(false); return; }
+    if (showNewsInstructionsModal) { setShowNewsInstructionsModal(false); return; }
     if (showAbout) { setShowAbout(false); return; }
     if (showClearConfirm) { setShowClearConfirm(false); return; }
     if (menuOpen) { setMenuOpen(false); return; }
@@ -1868,7 +1903,151 @@ export default function App() {
     }
   };
 
+  const handleSpeakMessage = (messageId: string, text: string, voiceType: KevinTtsVoiceType) => {
+    setVoiceMenuMsgId(null);
+    setTtsState({ messageId, status: 'loading', voiceType });
+    void speakReplyText(text, voiceType, {
+      onPlaybackStarted: () => {
+        setTtsState((prev) =>
+          prev.messageId === messageId ? { ...prev, status: 'playing' } : prev
+        );
+      },
+      onFinished: () => {
+        setTtsState((prev) =>
+          prev.messageId === messageId ? { messageId: null, status: 'idle', voiceType: null } : prev
+        );
+      },
+      onError: (errMsg) => {
+        setTtsState({ messageId: null, status: 'idle', voiceType: null });
+        showToastMessage(`⚠️ ${errMsg}`);
+      },
+    });
+  };
+
+  const handleRetryMessage = async (kevinMessageId: string) => {
+    if (isGenerating) return;
+    stopReplySpeech();
+    setVoiceMenuMsgId(null);
+
+    const targetIdx = messages.findIndex((m) => m.id === kevinMessageId);
+    if (targetIdx === -1) return;
+
+    let userIdx = -1;
+    for (let i = targetIdx - 1; i >= 0; i--) {
+      if (messages[i].sender === 'user') {
+        userIdx = i;
+        break;
+      }
+    }
+
+    const userMsg = userIdx >= 0 ? messages[userIdx] : null;
+    const historyForRetry = userIdx >= 0 ? messages.slice(0, userIdx) : messages.slice(0, targetIdx);
+    const baseVisibleMessages = messages.slice(0, targetIdx);
+    const promptForRetry = userMsg
+      ? userMsg.text
+      : `Ongera utegure kandi usobanure neza ubu butumwa mu buryo busobanutse kurushaho:\n\n${messages[targetIdx].text.slice(0, 600)}`;
+
+    const retryAttachments: AttachmentItem[] = [];
+    if (userMsg?.image && userMsg.image.startsWith('data:')) {
+      const mimeMatch = userMsg.image.match(/^data:([^;]+);base64,/);
+      retryAttachments.push({
+        base64: userMsg.image,
+        mimeType: mimeMatch?.[1] || 'image/jpeg',
+        name: 'retry-image.jpg',
+      });
+    }
+
+    setIsGenerating(true);
+    setIsTyping(true);
+    updateSessionMessages(baseVisibleMessages);
+
+    try {
+      let aiReplyText = '';
+      const newAiMessageId = (Date.now() + 1).toString();
+
+      await sendMessageToGemini(
+        historyForRetry,
+        promptForRetry,
+        (chunk) => {
+          setIsTyping(false);
+          aiReplyText += chunk;
+
+          setMessages((prevMessages) => {
+            const existingAiMessage = prevMessages.find((m) => m.id === newAiMessageId);
+            const newMessages = existingAiMessage
+              ? prevMessages.map((m) => (m.id === newAiMessageId ? { ...m, text: aiReplyText } : m))
+              : [
+                  ...prevMessages,
+                  {
+                    id: newAiMessageId,
+                    text: aiReplyText,
+                    sender: 'kevin' as const,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    status: 'read' as MessageStatus,
+                  },
+                ];
+            setSessions((prev) =>
+              prev.map((s) => (s.id === currentSessionId ? { ...s, messages: newMessages } : s))
+            );
+            return newMessages;
+          });
+        },
+        retryAttachments.length > 0 ? retryAttachments : undefined,
+        selectedModel,
+        (action) => {
+          setMessages((prevMessages) => {
+            const existingAiMessage = prevMessages.find((m) => m.id === newAiMessageId);
+            const updatedMessages = existingAiMessage
+              ? prevMessages.map((m) => (m.id === newAiMessageId ? { ...m, action } : m))
+              : [
+                  ...prevMessages,
+                  {
+                    id: newAiMessageId,
+                    text: aiReplyText || action.label,
+                    sender: 'kevin' as const,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    status: 'read' as MessageStatus,
+                    action,
+                  },
+                ];
+            setSessions((prev) =>
+              prev.map((s) => (s.id === currentSessionId ? { ...s, messages: updatedMessages } : s))
+            );
+            return updatedMessages;
+          });
+        },
+        undefined,
+        undefined,
+        (sources) => {
+          setMessages((prevMessages) => {
+            const updatedMessages = prevMessages.map((m) =>
+              m.id === newAiMessageId ? { ...m, sources } : m
+            );
+            setSessions((prev) =>
+              prev.map((s) => (s.id === currentSessionId ? { ...s, messages: updatedMessages } : s))
+            );
+            return updatedMessages;
+          });
+        }
+      );
+      playWhatsAppSound('receive');
+    } catch (error: any) {
+      console.error('Retry error:', error);
+      const rawErrMsg = error?.message || String(error);
+      showToastMessage(
+        rawErrMsg && rawErrMsg.length < 180
+          ? `⚠️ ${rawErrMsg}`
+          : '⚠️ Byanze kongera gusubiza. Ongera ugerageze.'
+      );
+    } finally {
+      setIsTyping(false);
+      setIsGenerating(false);
+    }
+  };
+
   const startNewChat = () => {
+    stopReplySpeech();
+    setVoiceMenuMsgId(null);
     const timestamp = Date.now();
     const newSession: ChatSession = {
       id: timestamp,
@@ -2590,7 +2769,7 @@ export default function App() {
                   className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[88%] sm:max-w-[82%] p-3.5 sm:p-4 rounded-2xl shadow-xs ${
+                    className={`relative max-w-[88%] sm:max-w-[82%] p-3.5 sm:p-4 rounded-2xl shadow-xs ${
                       message.sender === 'user'
                         ? 'bg-[#DCF8C6] dark:bg-[#005c4b] rounded-tr-none text-gray-900 dark:text-[#e9edef]'
                         : 'bg-white dark:bg-[#202c33] rounded-tl-none text-gray-900 dark:text-[#e9edef]'
@@ -3003,8 +3182,56 @@ export default function App() {
                     {message.sources && message.sources.length > 0 && (
                       <SearchSourcesBadge sources={message.sources} />
                     )}
-                    <div className="text-xs text-gray-500 dark:text-[#8696a0] flex items-center justify-end gap-2 mt-1.5 font-medium">
+                    <div className="text-xs text-gray-500 dark:text-[#8696a0] flex items-center justify-end gap-2.5 mt-1.5 font-medium">
                       <CopyButton text={message.text} />
+                      {message.sender === 'kevin' && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (ttsState.messageId === message.id && ttsState.status !== 'idle') {
+                                stopReplySpeech();
+                                setTtsState({ messageId: null, status: 'idle', voiceType: null });
+                                return;
+                              }
+                              setVoiceMenuMsgId((prev) => (prev === message.id ? null : message.id));
+                            }}
+                            title={
+                              ttsState.messageId === message.id && ttsState.status !== 'idle'
+                                ? 'Hagarika gusoma'
+                                : 'Soma mu ijwi (Hitamo Umugore, Umugabo, cyangwa Umwana)'
+                            }
+                            className={`cursor-pointer p-0.5 rounded transition-colors flex items-center gap-1 ${
+                              ttsState.messageId === message.id && ttsState.status !== 'idle'
+                                ? 'text-[#075E54] dark:text-[#00FF88]'
+                                : 'hover:text-gray-800 dark:hover:text-gray-200'
+                            }`}
+                          >
+                            {ttsState.messageId === message.id && ttsState.status === 'loading' ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : ttsState.messageId === message.id && ttsState.status === 'playing' ? (
+                              <Square size={11} className="fill-current" />
+                            ) : (
+                              <Volume2 size={13} />
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isGenerating}
+                            onClick={() => void handleRetryMessage(message.id)}
+                            title="Ongera usubize (Retry)"
+                            className={`cursor-pointer p-0.5 rounded transition-colors flex items-center ${
+                              isGenerating
+                                ? 'opacity-40 cursor-not-allowed'
+                                : 'hover:text-gray-800 dark:hover:text-gray-200'
+                            }`}
+                          >
+                            <RotateCcw size={12} />
+                          </button>
+                        </>
+                      )}
                       <span>{message.timestamp}</span>
                       {message.sender === 'user' && (
                         <span className={message.status === 'read' ? 'text-[#53bdeb] text-[15px] font-bold leading-none' : 'text-gray-400 dark:text-[#8696a0] text-[15px] leading-none'}>
@@ -3012,6 +3239,41 @@ export default function App() {
                         </span>
                       )}
                     </div>
+
+                    <AnimatePresence>
+                      {message.sender === 'kevin' && voiceMenuMsgId === message.id && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 6, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 6, scale: 0.95 }}
+                          transition={{ duration: 0.14 }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute bottom-9 left-2 z-40 w-56 rounded-2xl bg-white dark:bg-[#233138] border border-gray-200 dark:border-[#374248] shadow-xl p-1.5 text-left"
+                        >
+                          <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-[#8696a0]">
+                            Hitamo ijwi rigusomera
+                          </div>
+                          {KEVIN_TTS_VOICE_OPTIONS.map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => handleSpeakMessage(message.id, message.text, opt.id)}
+                              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl hover:bg-gray-100 dark:hover:bg-[#182229] transition-colors cursor-pointer text-left"
+                            >
+                              <span className="text-base leading-none shrink-0">{opt.emoji}</span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold text-gray-800 dark:text-[#e9edef] leading-tight">
+                                  {opt.label}
+                                </p>
+                                <p className="text-[10px] text-gray-500 dark:text-[#8696a0] truncate">
+                                  {opt.subtitle}
+                                </p>
+                              </div>
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </motion.div>
               ))}
@@ -3456,6 +3718,76 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Custom Instruction News Modal */}
+      <AnimatePresence>
+        {showNewsInstructionsModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setShowNewsInstructionsModal(false)}>
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-2xl p-6 w-full max-w-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-sky-500/10 text-sky-500 flex items-center justify-center font-bold">
+                    <Newspaper size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-white">Custom Instruction News</h3>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Hitamo amakuru Kevin AI yibandaho n'uko iyategura ikayoherereza</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNewsInstructionsModal(false)}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                    Amabwiriza y'Amakuru yawe (Custom Instruction News):
+                  </label>
+                  <textarea
+                    value={tempNewsCustomInstructions}
+                    onChange={(e) => setTempNewsCustomInstructions(e.target.value)}
+                    placeholder="Urugero: Jya wibanda cyane ku makuru ya Arsenal na Champions League, AI nshya za Google na OpenAI, ubukungu bw'u Rwanda, kandi uyahe mu ncamake zisobanutse..."
+                    rows={5}
+                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2.5 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-sm transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500 resize-none"
+                  />
+                  <p className="mt-1.5 text-[11px] text-gray-500 dark:text-[#8696a0]">
+                    Ibi bikoreshwa ku makuru Kevin AI yohereza buri munsi (06:00, 12:00, 15:00 na 18:00).
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-[#282828]">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewsInstructionsModal(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                  >
+                    Reka
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveNewsCustomInstructions}
+                    className="px-5 py-2 rounded-xl text-xs font-bold bg-[#00a884] hover:bg-[#075E54] text-white shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check size={14} />
+                    <span>Bika Amabwiriza</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Settings Hub Modal */}
       <AnimatePresence>
         {showSettingsModal && (
@@ -3510,6 +3842,19 @@ export default function App() {
                   </div>
                   <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500 truncate max-w-[120px]">
                     {customInstructions ? 'Birakora (Active)' : 'Ntayo'}
+                  </span>
+                </div>
+
+                <div
+                  onClick={() => { setTempNewsCustomInstructions(newsCustomInstructions); setShowSettingsModal(false); setShowNewsInstructionsModal(true); }}
+                  className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Newspaper size={16} className="text-sky-500" />
+                    <span>Custom Instruction News</span>
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500 truncate max-w-[120px]">
+                    {newsCustomInstructions ? 'Birakora (Active)' : 'Ntayo'}
                   </span>
                 </div>
 

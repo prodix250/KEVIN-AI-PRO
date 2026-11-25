@@ -1,5 +1,6 @@
 import kevin2Url from '../assets/kevin_2.jpg';
 import popSoundUrl from '../assets/pop_sound.wav';
+import newsWhistleUrl from '../assets/kevin_news_whistle.mp3';
 
 export interface AttachmentItem {
   data?: string;
@@ -902,6 +903,39 @@ export function playWhatsAppSound(type: 'pop' | 'send' | 'receive' = 'pop') {
         try {
           const fallback = new Audio('/assets/aistudio/mixkit-long-pop-2358_551c9e9a.wav');
           fallback.volume = 0.9;
+          void fallback.play().catch(() => {});
+        } catch {}
+      });
+    }
+  } catch {
+    // fail silently if audio autoplay policy blocks
+  }
+}
+
+export function playNewsNotificationSound() {
+  if (typeof window === 'undefined') return;
+
+  // 1. If running on Android APK with KevinAgentBridge, trigger native whistle MediaPlayer sound
+  try {
+    const bridge = (window as any).KevinAgentBridge;
+    if (bridge?.playNewsNotificationSound) {
+      bridge.playNewsNotificationSound();
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Play the custom Samsung whistle audio file in browser / webview
+  try {
+    const audio = new Audio(newsWhistleUrl);
+    audio.volume = 0.95;
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {
+        try {
+          const fallback = new Audio('/assets/aistudio/samsung_whistle_cce9e4f7.mp3');
+          fallback.volume = 0.95;
           void fallback.play().catch(() => {});
         } catch {}
       });
