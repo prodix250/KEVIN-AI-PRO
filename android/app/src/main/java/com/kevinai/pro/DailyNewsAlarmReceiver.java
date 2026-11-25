@@ -44,7 +44,7 @@ public class DailyNewsAlarmReceiver extends BroadcastReceiver {
                             finalLock.release();
                         }
                     } catch (Throwable ignored) {}
-                }, 5000L);
+                }, 8000L);
             }
         }
     }

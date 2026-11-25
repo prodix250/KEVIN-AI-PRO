@@ -17,6 +17,9 @@ import android.net.NetworkInfo;
 import android.net.NetworkRequest;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -52,6 +55,8 @@ public final class DailyNewsManager {
     public static final String EXTRA_SLOT_ID = "slot_id";
 
     private static final String TIMEZONE_KIGALI = "Africa/Kigali";
+    private static final String NEWS_SHADE_CHANNEL_ID = "kevin_daily_news_shade";
+    private static final long HEADS_UP_DURATION_MS = 3200L;
     private static final int ALARM_REQUEST_CODE = 9001;
 
     private static final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -411,6 +416,11 @@ public final class DailyNewsManager {
 
             String channelId = KevinAgentBridge.NEWS_CHANNEL_ID;
 
+            String safeTitle = !TextUtils.isEmpty(title) ? title : "Kevin AI: Amakuru Mashya";
+            String safePreview = !TextUtils.isEmpty(preview) ? preview : "Amakuru mashya agezweho kuri ubu.";
+            String safeBigText = !TextUtils.isEmpty(preview) ? preview : "Kanda hano usome amakuru mashya muri Kevin AI.";
+            long postedAtMs = System.currentTimeMillis();
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 NotificationChannel channel = new NotificationChannel(
                         channelId,
@@ -419,7 +429,7 @@ public final class DailyNewsManager {
                 );
                 channel.setDescription("Amakuru agezweho ya Kevin AI (06:00 Tech, 12:00 Isi & Sport, 15:00 Ubusesenguzi bwa Siporo, 18:00 Tech)");
                 channel.enableVibration(true);
-                channel.setVibrationPattern(new long[]{0, 300, 150, 300});
+                channel.setVibrationPattern(new long[]{0, 260, 120, 260});
                 channel.enableLights(true);
                 channel.setLightColor(Color.parseColor("#10b981"));
                 channel.setShowBadge(true);
@@ -431,16 +441,29 @@ public final class DailyNewsManager {
                         .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
                         .build();
                 channel.setSound(soundUri, audioAttributes);
-
                 nm.createNotificationChannel(channel);
+
+                NotificationChannel shadeChannel = new NotificationChannel(
+                        NEWS_SHADE_CHANNEL_ID,
+                        "Kevin AI News Notification Panel",
+                        NotificationManager.IMPORTANCE_DEFAULT
+                );
+                shadeChannel.setDescription("Amakuru abikwa muri notification panel nyuma yo kwigaragaza hejuru");
+                shadeChannel.enableVibration(false);
+                shadeChannel.setSound(null, null);
+                shadeChannel.setShowBadge(true);
+                shadeChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                nm.createNotificationChannel(shadeChannel);
             }
 
             Intent openIntent = new Intent(context, MainActivity.class);
             openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             openIntent.putExtra("from_news_slot", slotId);
-            openIntent.putExtra("from_news_briefing_json", briefingJson);
+            if (!TextUtils.isEmpty(briefingJson)) {
+                openIntent.putExtra("from_news_briefing_json", briefingJson);
+            }
 
-            int reqCode = Math.abs((slotId != null ? slotId : "daily_news").hashCode());
+            final int reqCode = Math.abs((slotId != null ? slotId : "daily_news").hashCode());
             PendingIntent pendingIntent = PendingIntent.getActivity(
                     context,
                     reqCode,
@@ -449,27 +472,67 @@ public final class DailyNewsManager {
             );
 
             NotificationCompat.BigTextStyle bigStyle = new NotificationCompat.BigTextStyle()
-                    .setBigContentTitle(!TextUtils.isEmpty(title) ? title : "Kevin AI: Amakuru Mashya")
-                    .bigText(!TextUtils.isEmpty(preview) ? preview : "Kanda hano usome amakuru mashya muri Kevin AI.");
+                    .setBigContentTitle(safeTitle)
+                    .bigText(safeBigText);
 
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channelId)
+            NotificationCompat.Builder headsUpBuilder = new NotificationCompat.Builder(context, channelId)
                     .setSmallIcon(com.kevinai.pro.R.mipmap.ic_launcher)
-                    .setContentTitle(!TextUtils.isEmpty(title) ? title : "Kevin AI: Amakuru Mashya")
-                    .setContentText(!TextUtils.isEmpty(preview) ? preview : "Amakuru mashya agezweho kuri ubu.")
+                    .setContentTitle(safeTitle)
+                    .setContentText(safePreview)
                     .setStyle(bigStyle)
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                    .setWhen(postedAtMs)
+                    .setShowWhen(true)
                     .setAutoCancel(true)
                     .setOngoing(false)
                     .setContentIntent(pendingIntent)
-                    .setFullScreenIntent(pendingIntent, false)
-                    .setVibrate(new long[]{0, 300, 150, 300})
+                    .setVibrate(new long[]{0, 260, 120, 260})
                     .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
                     .setDefaults(Notification.DEFAULT_ALL)
                     .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
 
-            nm.notify(reqCode, builder.build());
-            Log.d(TAG, "Heads-Up notification posted for slot: " + slotId);
+            nm.notify(reqCode, headsUpBuilder.build());
+            Log.d(TAG, "Heads-Up notification posted for slot: " + slotId + " (auto-collapses in " + HEADS_UP_DURATION_MS + "ms)");
+
+            // After ~3 seconds (3.2s), collapse the floating heads-up banner into the notification panel silently
+            final Context appCtx = context.getApplicationContext();
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                try {
+                    NotificationManager delayedNm = (NotificationManager) appCtx.getSystemService(Context.NOTIFICATION_SERVICE);
+                    if (delayedNm == null) return;
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        boolean stillActive = false;
+                        for (StatusBarNotification sbn : delayedNm.getActiveNotifications()) {
+                            if (sbn.getId() == reqCode) {
+                                stillActive = true;
+                                break;
+                            }
+                        }
+                        if (!stillActive) return;
+                    }
+
+                    NotificationCompat.Builder shadeBuilder = new NotificationCompat.Builder(appCtx, NEWS_SHADE_CHANNEL_ID)
+                            .setSmallIcon(com.kevinai.pro.R.mipmap.ic_launcher)
+                            .setContentTitle(safeTitle)
+                            .setContentText(safePreview)
+                            .setStyle(new NotificationCompat.BigTextStyle().setBigContentTitle(safeTitle).bigText(safeBigText))
+                            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                            .setWhen(postedAtMs)
+                            .setShowWhen(true)
+                            .setAutoCancel(true)
+                            .setOngoing(false)
+                            .setSilent(true)
+                            .setOnlyAlertOnce(true)
+                            .setDefaults(0)
+                            .setContentIntent(pendingIntent)
+                            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+
+                    delayedNm.notify(reqCode, shadeBuilder.build());
+                } catch (Throwable ignored) {}
+            }, HEADS_UP_DURATION_MS);
         } catch (Throwable t) {
             Log.w(TAG, "showHeadsUpNewsNotification failed: " + t.getMessage());
         }

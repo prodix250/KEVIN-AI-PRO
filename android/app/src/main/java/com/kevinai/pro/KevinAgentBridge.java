@@ -240,51 +240,7 @@ public class KevinAgentBridge {
     @JavascriptInterface
     public boolean showNewsNotification(String title, String preview, String slotId) {
         try {
-            NotificationManager nm = (NotificationManager) activity.getSystemService(Activity.NOTIFICATION_SERVICE);
-            if (nm == null) return false;
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                NotificationChannel channel = new NotificationChannel(
-                        NEWS_CHANNEL_ID,
-                        "Kevin AI Daily News & Briefings",
-                        NotificationManager.IMPORTANCE_HIGH
-                );
-                channel.setDescription("Amakuru agezweho ya Kevin AI (06:00 Tech, 12:00 Isi & Sport, 15:00 Ubusesenguzi bwa Siporo, 18:00 Tech)");
-                channel.enableVibration(true);
-                channel.setShowBadge(true);
-                nm.createNotificationChannel(channel);
-            }
-
-            Intent openIntent = new Intent(activity, MainActivity.class);
-            openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            openIntent.putExtra("from_news_slot", slotId);
-
-            int requestCode = (slotId != null ? slotId.hashCode() : 2026);
-            PendingIntent pendingIntent = PendingIntent.getActivity(
-                    activity,
-                    requestCode,
-                    openIntent,
-                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
-            );
-
-            NotificationCompat.BigTextStyle bigStyle = new NotificationCompat.BigTextStyle()
-                    .setBigContentTitle(!TextUtils.isEmpty(title) ? title : "Kevin AI: Amakuru Mashya")
-                    .bigText(!TextUtils.isEmpty(preview) ? preview : "Kanda hano usome amakuru mashya muri Kevin AI.");
-
-            Notification notif = new NotificationCompat.Builder(activity, NEWS_CHANNEL_ID)
-                    .setSmallIcon(com.kevinai.pro.R.mipmap.ic_launcher)
-                    .setContentTitle(!TextUtils.isEmpty(title) ? title : "Kevin AI: Amakuru Mashya")
-                    .setContentText(!TextUtils.isEmpty(preview) ? preview : "Amakuru mashya agezweho kuri ubu.")
-                    .setStyle(bigStyle)
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-                    .setAutoCancel(true)
-                    .setContentIntent(pendingIntent)
-                    .setDefaults(Notification.DEFAULT_ALL)
-                    .build();
-
-            int notifId = (slotId != null ? Math.abs(slotId.hashCode()) : 7777);
-            nm.notify(notifId, notif);
+            DailyNewsManager.showHeadsUpNewsNotification(activity, title, preview, slotId, "");
             if (!TextUtils.isEmpty(slotId)) {
                 KevinAgentPrefs.markNewsSlotDelivered(activity, slotId);
             }

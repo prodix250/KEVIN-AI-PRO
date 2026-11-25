@@ -793,6 +793,14 @@ export default function App() {
   }, [isDedicatedAssistantOverlay, currentSessionId]);
 
   useEffect(() => {
+    if (!activeNewsPopup) return;
+    const timer = setTimeout(() => {
+      setActiveNewsPopup(null);
+    }, 3200);
+    return () => clearTimeout(timer);
+  }, [activeNewsPopup]);
+
+  useEffect(() => {
     if (!showAgentModal || !nativeAgentStatus.isAndroid) return;
     setNativeAgentStatus(getNativeAgentStatus());
     const id = setInterval(() => {
