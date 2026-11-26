@@ -246,6 +246,13 @@ async function fetchFreshRssForSlot(
           'https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRFp1ZEdvU0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en',
           'https://news.google.com/rss/search?q=(Rwanda+OR+Africa+OR+world+breaking+news+OR+football+OR+Champions+League+OR+Premier+League)+when:1d&hl=en&gl=RW&ceid=RW:en',
         ]
+      : slotKey === 'evening_rwanda'
+      ? [
+          // Rwanda regional & national news across Kigali & all provinces (today)
+          'https://news.google.com/rss/search?q=(Rwanda+OR+Kigali+OR+Musanze+OR+Rubavu+OR+Huye+OR+Rusizi+OR+Nyagatare+OR+Muhanga+OR+Rwamagana+OR+Karongi)+when:1d&hl=en&gl=RW&ceid=RW:en',
+          'https://news.google.com/rss/search?q=(Rwanda+news+OR+IGIHE+OR+%22Kigali+Today%22+OR+RBA+OR+%22New+Times+Rwanda%22+OR+Umuseke)+when:1d&hl=en&gl=RW&ceid=RW:en',
+          'https://news.google.com/rss/search?q=(Rwanda+OR+%22Northern+Province%22+OR+%22Southern+Province%22+OR+%22Eastern+Province%22+OR+%22Western+Province%22+OR+Amajyaruguru+OR+Amajyepfo+OR+Iburasirazuba+OR+Iburengerazuba)+when:1d&hl=en&gl=RW&ceid=RW:en',
+        ]
       : [
           // Technology & AI global breaking news (overnight or today)
           'https://news.google.com/rss/search?q=(%22artificial+intelligence%22+OR+OpenAI+OR+Google+AI+OR+Anthropic+OR+new+AI+model+OR+AI+release)+when:1d&hl=en&gl=US&ceid=US:en',
@@ -407,6 +414,22 @@ ${articlesBlock}`,
     };
   }
 
+  if (slotKey === 'evening_rwanda') {
+    return {
+      systemInstruction,
+      userPrompt: `Tegura ubutumwa bwa saa mbiri z'umugoroba (20:00 / 8:00 PM Rwanda) bw'AMAKURU MASHYA YO MU RWANDA HOSE N'UKO BYIRIWE BYIFASHE HIRYA NO HINO MU DUCE DUTANDUKANYE TW'IGIHUGU uyu munsi.
+Ibyo ubandikaho:
+- Tangira uti: "Mwiriwe neza! 🇷🇼📰 Dore amakuru mashya yo mu Rwanda hose n'uko byiriwe byifashe hirya no hino mu duce tw'igihugu uyu munsi:"
+- Ibanze ku makuru nyayo kandi mashya yiriwe avugwa uyu munsi mu Rwanda mbere ya saa mbiri: mu Mujyi wa Kigali no mu ntara zose (Amajyaruguru, Amajyepfo, Iburasirazuba, Iburengerazuba — uturere nka Musanze, Rubavu, Huye, Rusizi, Nyagatare, Muhanga, Rwamagana, Karongi, n'ahandi habonetse inkuru z'ukuri).
+- Vuga ibyiriwe bibera mu Rwanda mu bukungu, iterambere, ibikorwaremezo, ubuhinzi, uburezi, ubuzima, imibereho y'abaturage, umutekano, ibyemezo by'inzego cyangwa imikino/umuco mu Rwanda (uhereye ku makuru y'ukuri yiriwe avugwa uyu munsi gusa).
+- NTUKABESHYE, NTUKARANGAGE, kandi NTUSHIRMO amakuru ashaje y'iminsi yashize cyangwa ayo hanze atari ayo mu Rwanda.
+- Soza ubaza mu Kinyarwanda niba hari akarere cyangwa inkuru yo mu Rwanda bifuza ko ubasobanurira birambuye.
+
+AMAKURU MASHYA YO MU RWANDA YABONETSE KURI INTERNET:
+${articlesBlock}`,
+    };
+  }
+
   return {
     systemInstruction,
     userPrompt: `Tegura ubutumwa bwa nimugoroba saa kumi n'ebyiri (18:00 / 6:00 PM Rwanda) bw'amakuru mashya y'IBYIRIWE BIVUGWA MU IKORANABUHANGA n'UBWENGE BUKORANO (AI) uyu munsi ku isi yose.
@@ -556,7 +579,13 @@ export async function generateOrGetBriefingForSlot(
               sources: collectedSources.slice(0, 10),
               generatedAtMs: Date.now(),
               scheduledAtMs,
-              category: slotKey === 'noon_world' ? 'world_sports' : slotKey === 'afternoon_sports_analysis' ? 'sports_analysis' : 'tech_ai',
+              category: slotKey === 'noon_world'
+                ? 'world_sports'
+                : slotKey === 'afternoon_sports_analysis'
+                  ? 'sports_analysis'
+                  : slotKey === 'evening_rwanda'
+                    ? 'rwanda_news'
+                    : 'tech_ai',
               ...(customSig !== 'default' ? { customSig } : {}),
             };
             briefingCache.set(cacheKey, briefing);

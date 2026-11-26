@@ -300,7 +300,7 @@ public class MainActivity extends BridgeActivity {
             String quoted = JSONObject.quote(briefingJson);
             getBridge().getWebView().post(() ->
                     getBridge().getWebView().evaluateJavascript(
-                            "try{window.dispatchEvent(new CustomEvent('kevinNewsBriefingNativeReceived',{detail:JSON.parse(" + quoted + ")}));}catch(e){}",
+                            "try{var _b=JSON.parse(" + quoted + ");if(!Array.isArray(window.__kevinPendingNativeBriefings)){window.__kevinPendingNativeBriefings=[];}window.__kevinPendingNativeBriefings.push(_b);window.dispatchEvent(new CustomEvent('kevinNewsBriefingNativeReceived',{detail:_b}));}catch(e){}",
                             null
                     )
             );
@@ -310,12 +310,12 @@ public class MainActivity extends BridgeActivity {
     private void dispatchPendingNativeBriefings() {
         if (getBridge() == null || getBridge().getWebView() == null) return;
         try {
-            String pending = KevinAgentPrefs.consumePendingNewsBriefingsJson(this);
+            String pending = KevinAgentPrefs.peekPendingNewsBriefingsJson(this);
             if (pending != null && !pending.isEmpty() && !pending.equals("[]")) {
                 String quoted = JSONObject.quote(pending);
                 getBridge().getWebView().post(() ->
                         getBridge().getWebView().evaluateJavascript(
-                                "try{window.dispatchEvent(new CustomEvent('kevinNewsBriefingNativeReceived',{detail:JSON.parse(" + quoted + ")}));}catch(e){}",
+                                "try{var _arr=JSON.parse(" + quoted + ");window.__kevinPendingNativeBriefings=Array.isArray(_arr)?_arr:[_arr];window.dispatchEvent(new CustomEvent('kevinNewsBriefingNativeReceived',{detail:_arr}));}catch(e){}",
                                 null
                         )
                 );

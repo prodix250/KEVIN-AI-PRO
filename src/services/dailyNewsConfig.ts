@@ -1,4 +1,4 @@
-export type DailyNewsSlotKey = 'morning_tech' | 'noon_world' | 'afternoon_sports_analysis' | 'evening_tech';
+export type DailyNewsSlotKey = 'morning_tech' | 'noon_world' | 'afternoon_sports_analysis' | 'evening_tech' | 'evening_rwanda';
 
 export interface DailyNewsSlotMeta {
   key: DailyNewsSlotKey;
@@ -21,7 +21,7 @@ export interface DailyNewsBriefing {
   sources: Array<{ title: string; url: string }>;
   generatedAtMs: number;
   scheduledAtMs: number;
-  category: 'tech_ai' | 'world_sports' | 'sports_analysis';
+  category: 'tech_ai' | 'world_sports' | 'sports_analysis' | 'rwanda_news';
 }
 
 export const DAILY_NEWS_SLOTS: DailyNewsSlotMeta[] = [
@@ -60,6 +60,15 @@ export const DAILY_NEWS_SLOTS: DailyNewsSlotMeta[] = [
     titleRw: "Ibyiriwe mu Ikoranabuhanga & AI (Nimugoroba)",
     categoryLabel: 'Tech & AI',
     emoji: '🌆🤖',
+  },
+  {
+    key: 'evening_rwanda',
+    hourKigali: 20,
+    minuteKigali: 0,
+    scheduledLabel: '20:00',
+    titleRw: "Amakuru yo mu Rwanda Hirya no Hino (Saa Mbiri)",
+    categoryLabel: 'Rwanda Hose',
+    emoji: '🇷🇼📰',
   },
 ];
 

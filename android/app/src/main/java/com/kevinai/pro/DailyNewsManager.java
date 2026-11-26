@@ -133,7 +133,8 @@ public final class DailyNewsManager {
                 { 6, 0 },   // 06:00 Morning Tech
                 { 12, 0 },  // 12:00 Noon World & Sports
                 { 15, 0 },  // 15:00 Afternoon Football & Sports Analysis (Saa Cyenda)
-                { 18, 0 }   // 18:00 Evening Tech
+                { 18, 0 },  // 18:00 Evening Tech
+                { 20, 0 }   // 20:00 Evening Rwanda Regional News (Saa Mbiri)
         };
 
         long earliestFuture = Long.MAX_VALUE;
@@ -285,15 +286,27 @@ public final class DailyNewsManager {
                 }
             }
 
-            // If early morning before 06:00, check if yesterday evening slot was delivered
+            // 20:00 Evening Rwanda Regional News (Saa Mbiri)
+            if (curTotalMin >= 20 * 60) {
+                String sId = todayDate + "_evening_rwanda";
+                if (!deliveredIds.contains(sId)) {
+                    dueSlotIds.add(sId);
+                }
+            }
+
+            // If early morning before 06:00, check if yesterday late slots were delivered
             if (curTotalMin < 6 * 60) {
                 Calendar yest = (Calendar) cal.clone();
                 yest.add(Calendar.DAY_OF_YEAR, -1);
                 String yestDate = String.format(Locale.ROOT, "%04d-%02d-%02d",
                         yest.get(Calendar.YEAR), yest.get(Calendar.MONTH) + 1, yest.get(Calendar.DAY_OF_MONTH));
-                String yestSlot = yestDate + "_evening_tech";
-                if (!deliveredIds.contains(yestSlot)) {
-                    dueSlotIds.add(yestSlot);
+                String yestTechSlot = yestDate + "_evening_tech";
+                if (!deliveredIds.contains(yestTechSlot)) {
+                    dueSlotIds.add(yestTechSlot);
+                }
+                String yestRwandaSlot = yestDate + "_evening_rwanda";
+                if (!deliveredIds.contains(yestRwandaSlot)) {
+                    dueSlotIds.add(yestRwandaSlot);
                 }
             }
 
@@ -329,13 +342,14 @@ public final class DailyNewsManager {
                 requestBody.put("newsCustomInstructions", newsCustomInstructions);
             }
 
+            Set<String> backendDeliveredSlots = new java.util.HashSet<>();
             HttpURLConnection conn = null;
             try {
                 URL url = new URL(syncUrl);
                 conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
-                conn.setConnectTimeout(14_000);
-                conn.setReadTimeout(20_000);
+                conn.setConnectTimeout(25_000);
+                conn.setReadTimeout(45_000);
                 conn.setDoInput(true);
                 conn.setDoOutput(true);
                 conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
@@ -373,18 +387,8 @@ public final class DailyNewsManager {
 
                             if (TextUtils.isEmpty(slotId) || TextUtils.isEmpty(body)) continue;
 
-                            // Mark delivered & store pending
-                            KevinAgentPrefs.markNewsSlotDelivered(context, slotId);
-                            KevinAgentPrefs.addPendingNewsBriefing(context, b);
-
-                            // Trigger Heads-Up pop-up notification
-                            showHeadsUpNewsNotification(context, title, preview, slotId, b.toString());
-
-                            // Broadcast to active activity
-                            Intent deliveredIntent = new Intent(ACTION_NEWS_BRIEFING_DELIVERED);
-                            deliveredIntent.putExtra(EXTRA_SLOT_ID, slotId);
-                            deliveredIntent.putExtra(EXTRA_BRIEFING_JSON, b.toString());
-                            context.sendBroadcast(deliveredIntent);
+                            backendDeliveredSlots.add(slotId);
+                            deliverSingleBriefingNative(context, slotId, title, preview, b);
                         }
                     }
                 } else {
@@ -395,6 +399,32 @@ public final class DailyNewsManager {
             } finally {
                 if (conn != null) {
                     conn.disconnect();
+                }
+            }
+
+            // Direct on-device fallback for any due slots that backend failed/timed out/missed
+            if (!apiKeys.isEmpty()) {
+                for (String missingSlotId : dueSlotIds) {
+                    if (backendDeliveredSlots.contains(missingSlotId)) continue;
+                    if (KevinAgentPrefs.isNewsSlotDelivered(context, missingSlotId)) continue;
+                    try {
+                        JSONObject directBriefing = generateBriefingDirectlyNative(
+                                missingSlotId,
+                                apiKeys,
+                                newsCustomInstructions
+                        );
+                        if (directBriefing != null) {
+                            String slotId = directBriefing.optString("slotId", "");
+                            String title = directBriefing.optString("title", "Kevin AI: Amakuru Mashya");
+                            String preview = directBriefing.optString("preview", "");
+                            String body = directBriefing.optString("body", "");
+                            if (!TextUtils.isEmpty(slotId) && !TextUtils.isEmpty(body)) {
+                                deliverSingleBriefingNative(context, slotId, title, preview, directBriefing);
+                            }
+                        }
+                    } catch (Throwable directErr) {
+                        Log.w(TAG, "Direct news fallback failed for " + missingSlotId + ": " + directErr.getMessage());
+                    }
                 }
             }
 
@@ -448,7 +478,7 @@ public final class DailyNewsManager {
                         "Kevin AI Daily News & Briefings",
                         NotificationManager.IMPORTANCE_HIGH
                 );
-                channel.setDescription("Amakuru agezweho ya Kevin AI (06:00 Tech, 12:00 Isi & Sport, 15:00 Ubusesenguzi bwa Siporo, 18:00 Tech)");
+                channel.setDescription("Amakuru agezweho ya Kevin AI (06:00 Tech, 12:00 Isi & Sport, 15:00 Ubusesenguzi bwa Siporo, 18:00 Tech, 20:00 Rwanda)");
                 channel.enableVibration(true);
                 channel.setVibrationPattern(new long[]{0, 260, 120, 260});
                 channel.enableLights(true);
@@ -558,6 +588,295 @@ public final class DailyNewsManager {
         } catch (Throwable t) {
             Log.w(TAG, "showHeadsUpNewsNotification failed: " + t.getMessage());
             return false;
+        }
+    }
+
+    private static void deliverSingleBriefingNative(
+            Context context,
+            String slotId,
+            String title,
+            String preview,
+            JSONObject briefingObj
+    ) {
+        KevinAgentPrefs.markNewsSlotDelivered(context, slotId);
+        KevinAgentPrefs.addPendingNewsBriefing(context, briefingObj);
+        showHeadsUpNewsNotification(context, title, preview, slotId, briefingObj.toString());
+
+        Intent deliveredIntent = new Intent(ACTION_NEWS_BRIEFING_DELIVERED);
+        deliveredIntent.putExtra(EXTRA_SLOT_ID, slotId);
+        deliveredIntent.putExtra(EXTRA_BRIEFING_JSON, briefingObj.toString());
+        context.sendBroadcast(deliveredIntent);
+    }
+
+    private static JSONObject generateBriefingDirectlyNative(
+            String slotId,
+            List<String> apiKeys,
+            String cleanCustomNews
+    ) {
+        int sepIdx = slotId.indexOf('_');
+        if (sepIdx <= 0 || sepIdx >= slotId.length() - 1) return null;
+        String kigaliDate = slotId.substring(0, sepIdx);
+        String slotKey = slotId.substring(sepIdx + 1);
+
+        String scheduledLabel;
+        String titleRw;
+        String emoji;
+        String category;
+        String[] rssUrls;
+        if ("morning_tech".equals(slotKey)) {
+            scheduledLabel = "06:00";
+            titleRw = "Amakuru y'Ikoranabuhanga & AI (Mugitondo)";
+            emoji = "☀️💻";
+            category = "tech_ai";
+            rssUrls = new String[] {
+                    "https://news.google.com/rss/search?q=(%22artificial+intelligence%22+OR+OpenAI+OR+Google+AI+OR+Anthropic+OR+new+AI+model)+when:1d&hl=en&gl=US&ceid=US:en",
+                    "https://news.google.com/rss/search?q=(technology+news+OR+Apple+OR+Microsoft+OR+Nvidia+OR+Meta+OR+cybersecurity)+when:1d&hl=en&gl=US&ceid=US:en"
+            };
+        } else if ("noon_world".equals(slotKey)) {
+            scheduledLabel = "12:00";
+            titleRw = "Amakuru y'Isi & Imikino (Saa Sita)";
+            emoji = "🌍⚽";
+            category = "world_sports";
+            rssUrls = new String[] {
+                    "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en",
+                    "https://news.google.com/rss/search?q=(Rwanda+OR+Africa+OR+world+breaking+news+OR+football+OR+Premier+League)+when:1d&hl=en&gl=RW&ceid=RW:en"
+            };
+        } else if ("afternoon_sports_analysis".equals(slotKey)) {
+            scheduledLabel = "15:00";
+            titleRw = "Ubusesenguzi bw'Amakipe & Imikino yo ku Isi (Saa Cyenda)";
+            emoji = "⚽📊";
+            category = "sports_analysis";
+            rssUrls = new String[] {
+                    "https://news.google.com/rss/search?q=(%22tactical+analysis%22+OR+%22football+analysis%22+OR+%22Premier+League%22+OR+%22Champions+League%22+OR+%22Real+Madrid%22+OR+%22Barcelona%22+OR+%22Arsenal%22)+when:1d&hl=en&gl=US&ceid=US:en",
+                    "https://news.google.com/rss/search?q=(football+tactics+OR+club+analysis+OR+transfer+analysis)+when:1d&hl=en&gl=GB&ceid=GB:en"
+            };
+        } else if ("evening_rwanda".equals(slotKey)) {
+            scheduledLabel = "20:00";
+            titleRw = "Amakuru yo mu Rwanda Hirya no Hino (Saa Mbiri)";
+            emoji = "🇷🇼📰";
+            category = "rwanda_news";
+            rssUrls = new String[] {
+                    "https://news.google.com/rss/search?q=(Rwanda+OR+Kigali+OR+Musanze+OR+Rubavu+OR+Huye+OR+Rusizi+OR+Nyagatare+OR+Muhanga+OR+Rwamagana)+when:1d&hl=en&gl=RW&ceid=RW:en",
+                    "https://news.google.com/rss/search?q=(Rwanda+news+OR+IGIHE+OR+%22Kigali+Today%22+OR+RBA+OR+%22New+Times+Rwanda%22)+when:1d&hl=en&gl=RW&ceid=RW:en"
+            };
+        } else {
+            scheduledLabel = "18:00";
+            titleRw = "Ibyiriwe mu Ikoranabuhanga & AI (Nimugoroba)";
+            emoji = "🌆🤖";
+            category = "tech_ai";
+            rssUrls = new String[] {
+                    "https://news.google.com/rss/search?q=(%22artificial+intelligence%22+OR+OpenAI+OR+Google+AI+OR+Anthropic+OR+AI+release)+when:1d&hl=en&gl=US&ceid=US:en",
+                    "https://news.google.com/rss/search?q=(technology+news+OR+software+update+OR+Apple+OR+Microsoft+OR+Nvidia+OR+Meta)+when:1d&hl=en&gl=US&ceid=US:en"
+            };
+        }
+
+        List<String[]> articles = new ArrayList<>();
+        Set<String> seenUrls = new java.util.HashSet<>();
+        for (String rssUrl : rssUrls) {
+            fetchRssItemsNative(rssUrl, articles, seenUrls, 10);
+            if (articles.size() >= 10) break;
+        }
+
+        StringBuilder articlesBlock = new StringBuilder();
+        JSONArray sourcesArr = new JSONArray();
+        for (int i = 0; i < Math.min(10, articles.size()); i++) {
+            String[] a = articles.get(i);
+            articlesBlock.append(i + 1).append(". \"").append(a[0]).append("\"");
+            if (!TextUtils.isEmpty(a[2])) {
+                articlesBlock.append(" (").append(a[2]).append(")");
+            }
+            articlesBlock.append(" — ").append(a[1]).append("\n");
+            try {
+                JSONObject src = new JSONObject();
+                src.put("title", TextUtils.isEmpty(a[2]) ? a[0] : (a[2] + ": " + a[0]));
+                src.put("url", a[1]);
+                sourcesArr.put(src);
+            } catch (Exception ignored) {}
+        }
+
+        String customNote = !TextUtils.isEmpty(cleanCustomNews)
+                ? "\n\nUSER CUSTOM INSTRUCTION NEWS (PREFERENCES):\n" + cleanCustomNews
+                + "\n- Prioritize requested topics ONLY when verified fresh articles exist; NEVER fabricate facts and NEVER say 'Nta makuru mashya ahari' when verified articles exist."
+                : "";
+
+        String sysPrompt = "You are Kevin AI, Rwanda's intelligent assistant created by Uwumukiza Kevin.\n"
+                + "Write a scheduled WhatsApp-style daily news briefing in authentic, fluent Rwandan Kinyarwanda (date: " + kigaliDate + ").\n"
+                + "STRICT FRESHNESS & TRUTHFULNESS RULE: ONLY report genuinely fresh real news from the verified sources provided (or live Google Search grounding). NEVER invent, guess, or fabricate facts, scores, or quotes. Format with 4 to 6 crisp bullet points (bold title + 1-2 short factual sentences) and friendly emojis."
+                + customNote;
+
+        String slotPrompt;
+        if ("morning_tech".equals(slotKey)) {
+            slotPrompt = "Tangira uti: \"Mwaramutse neza! ☀️💻 Dore amakuru mashya y'ikoranabuhanga na AI yavugwaga muri iri joro ku isi:\"\nTanga inkuru 4-6 z'ukuri z'ikoranabuhanga na AI.";
+        } else if ("noon_world".equals(slotKey)) {
+            slotPrompt = "Tangira uti: \"Mwiriwe neza! 🌍⚽ Dore amakuru mashya y'isi n'imikino (Sport) agezweho kuri uyu munsi saa sita:\"\nHATARIMO ikoranabuhanga/AI; vuga imikino, ubukungu, politiki n'amakuru yo mu Rwanda, Afurika n'isi.";
+        } else if ("afternoon_sports_analysis".equals(slotKey)) {
+            slotPrompt = "Tangira uti: \"Mwiriwe neza! ⚽📊 Dore ubusesenguzi bwimbitse bw'amakipe n'imikino yo ku isi (by'umwihariko ku mugabane w'Uburayi) bwiriwe buvugwa uyu munsi:\"\nTanga ubusesenguzi nyabwo bw'imikinire, ingamba z'abatoza n'isoko ry'abakinnyi cyane cyane i Burayi n'iyindi migabane.";
+        } else if ("evening_rwanda".equals(slotKey)) {
+            slotPrompt = "Tangira uti: \"Mwiriwe neza! 🇷🇼📰 Dore amakuru mashya yo mu Rwanda hose n'uko byiriwe byifashe hirya no hino mu duce tw'igihugu uyu munsi:\"\nIbanze ku makuru mashya y'ukuri yiriwe avugwa mu Mujyi wa Kigali no mu ntara zose z'u Rwanda.";
+        } else {
+            slotPrompt = "Tangira uti: \"Mwiriwe neza! 🌆🤖 Dore amakuru mashya y'ikoranabuhanga na AI yiriwe avugwa uyu munsi ku isi:\"\nTanga inkuru 4-6 z'ukuri z'ibyiriwe bivugwa mu ikoranabuhanga na AI.";
+        }
+
+        String fullPrompt = slotPrompt + "\n\nAMAKURU MASHYA YABONETSE KURI INTERNET:\n"
+                + (articlesBlock.length() > 0 ? articlesBlock.toString() : "(Use live Google Search grounding for today's breaking news only.)");
+
+        String[] models = new String[] { "gemini-3.5-flash-lite", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-2.5-flash" };
+        boolean useSearchFirst = articles.size() < 3;
+        boolean[] searchModes = useSearchFirst ? new boolean[] { true, false } : new boolean[] { false, true };
+
+        for (boolean withSearch : searchModes) {
+            if (!withSearch && articles.isEmpty()) continue;
+            for (String model : models) {
+                for (String key : apiKeys) {
+                    String generated = callGeminiGenerateNative(model, key, sysPrompt, fullPrompt, withSearch);
+                    if (!TextUtils.isEmpty(generated) && generated.length() >= 40) {
+                        if (articles.size() >= 3 && generated.length() < 520
+                                && generated.toLowerCase(Locale.ROOT).contains("nta makuru")) {
+                            continue;
+                        }
+                        try {
+                            String cleanPreview = generated
+                                    .replaceAll("\\[([^\\]]+)\\]\\([^)]+\\)", "$1")
+                                    .replaceAll("[*_`#>]", "")
+                                    .replaceAll("\\s+", " ")
+                                    .trim();
+                            if (cleanPreview.length() > 140) {
+                                cleanPreview = cleanPreview.substring(0, 137) + "...";
+                            }
+                            JSONObject out = new JSONObject();
+                            out.put("slotId", slotId);
+                            out.put("kigaliDate", kigaliDate);
+                            out.put("slotKey", slotKey);
+                            out.put("scheduledLabel", scheduledLabel);
+                            out.put("title", emoji + " " + titleRw);
+                            out.put("preview", cleanPreview);
+                            out.put("body", generated);
+                            out.put("sources", sourcesArr);
+                            out.put("generatedAtMs", System.currentTimeMillis());
+                            out.put("scheduledAtMs", System.currentTimeMillis());
+                            out.put("category", category);
+                            return out;
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void fetchRssItemsNative(
+            String rssUrl,
+            List<String[]> out,
+            Set<String> seenUrls,
+            int maxTotal
+    ) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(rssUrl).openConnection();
+            conn.setInstanceFollowRedirects(true);
+            conn.setConnectTimeout(4500);
+            conn.setReadTimeout(5000);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36");
+            if (conn.getResponseCode() < 200 || conn.getResponseCode() >= 300) return;
+            BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append('\n');
+                if (sb.length() > 220_000) break;
+            }
+            reader.close();
+            String xml = sb.toString();
+            java.util.regex.Matcher itemMatcher = java.util.regex.Pattern.compile("<item>([\\s\\S]*?)</item>").matcher(xml);
+            while (itemMatcher.find() && out.size() < maxTotal) {
+                String block = itemMatcher.group(1);
+                String t = extractXmlTag(block, "title");
+                String u = extractXmlTag(block, "link");
+                String s = extractXmlTag(block, "source");
+                if (!TextUtils.isEmpty(t) && !TextUtils.isEmpty(u) && seenUrls.add(u)) {
+                    out.add(new String[] { t, u, s });
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private static String extractXmlTag(String xml, String tag) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("<" + tag + "[^>]*>([\\s\\S]*?)</" + tag + ">").matcher(xml);
+        if (!m.find()) return "";
+        String val = m.group(1);
+        return val
+                .replaceAll("<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>", "$1")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&apos;", "'")
+                .trim();
+    }
+
+    private static String callGeminiGenerateNative(
+            String model,
+            String apiKey,
+            String systemPrompt,
+            String userPrompt,
+            boolean withGoogleSearch
+    ) {
+        HttpURLConnection conn = null;
+        try {
+            String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/"
+                    + model + ":generateContent?key=" + Uri.encode(apiKey);
+            JSONObject payload = new JSONObject();
+            payload.put("systemInstruction", new JSONObject().put("parts", new JSONArray().put(new JSONObject().put("text", systemPrompt))));
+            payload.put("contents", new JSONArray().put(new JSONObject()
+                    .put("role", "user")
+                    .put("parts", new JSONArray().put(new JSONObject().put("text", userPrompt)))));
+            if (withGoogleSearch) {
+                payload.put("tools", new JSONArray().put(new JSONObject().put("google_search", new JSONObject())));
+            }
+            conn = (HttpURLConnection) new URL(endpoint).openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(7000);
+            conn.setReadTimeout(12000);
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
+            conn.setFixedLengthStreamingMode(bytes.length);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(bytes);
+                os.flush();
+            }
+            if (conn.getResponseCode() < 200 || conn.getResponseCode() >= 300) {
+                return "";
+            }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            reader.close();
+            JSONObject res = new JSONObject(sb.toString());
+            JSONArray candidates = res.optJSONArray("candidates");
+            if (candidates == null || candidates.length() == 0) return "";
+            JSONObject content = candidates.getJSONObject(0).optJSONObject("content");
+            if (content == null) return "";
+            JSONArray parts = content.optJSONArray("parts");
+            if (parts == null) return "";
+            StringBuilder out = new StringBuilder();
+            for (int i = 0; i < parts.length(); i++) {
+                String txt = parts.getJSONObject(i).optString("text", "");
+                if (!TextUtils.isEmpty(txt)) out.append(txt);
+            }
+            return out.toString().trim();
+        } catch (Exception ignored) {
+            return "";
+        } finally {
+            if (conn != null) conn.disconnect();
         }
     }
 }
