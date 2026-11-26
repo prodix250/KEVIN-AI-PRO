@@ -240,7 +240,7 @@ async function generateBriefingDirectlyInApk(
     : '';
 
   const clock = getKigaliClockInfo(new Date());
-  const systemInstruction = `You are Kevin AI, Rwanda's intelligent WhatsApp-style assistant created by Uwumukiza Kevin.
+  const systemInstruction = `You are Izi AI, Rwanda's intelligent WhatsApp-style assistant created by Uwumukiza Kevin.
 Write a scheduled daily news briefing in authentic, fluent Rwandan Kinyarwanda (${clock.displayDateRw} / ${due.kigaliDate}).
 STRICT FRESHNESS & TRUTHFULNESS RULE:
 - ONLY report genuinely fresh, real news from today / the last 12 to 18 hours. NEVER include old news.

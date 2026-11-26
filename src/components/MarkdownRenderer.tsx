@@ -50,7 +50,7 @@ const MarkdownImage = ({ src, alt }: { src?: string; alt?: string }) => {
       const bottomMargin = 24 * scale;
       const radius = 8 * scale;
       context.font = `700 ${fontSize}px Arial, sans-serif`;
-      const whiteText = 'KEVIN ';
+      const whiteText = 'IZI ';
       const orangeText = 'AI';
       const badgeWidth = context.measureText(whiteText).width
         + context.measureText(orangeText).width
@@ -140,7 +140,7 @@ const MarkdownImage = ({ src, alt }: { src?: string; alt?: string }) => {
         {/* Compact Kevin AI Watermark Badge at bottom-right covering pollinations.ai completely with solid black */}
         <div className="absolute bottom-2.5 right-2.5 px-2.5 py-0.5 rounded-md bg-black text-white text-[10px] font-semibold flex items-center gap-1 shadow-md border border-white/20 select-none pointer-events-none z-20">
           <span className="w-1.5 h-1.5 rounded-full bg-[#FF6600]"></span>
-          <span className="text-white tracking-wide">KEVIN</span>
+          <span className="text-white tracking-wide">IZI</span>
           <span className="text-[#FF7A00] font-black tracking-wider">AI</span>
         </div>
 
@@ -151,7 +151,7 @@ const MarkdownImage = ({ src, alt }: { src?: string; alt?: string }) => {
             onClick={handleDownload}
             disabled={isDownloading}
             className="px-3 py-1.5 rounded-full bg-black/80 hover:bg-black text-white shadow-md backdrop-blur-xs transition-all hover:scale-105 cursor-pointer flex items-center gap-1.5 text-xs font-medium border border-white/10"
-            title="Download Image (with Kevin AI Watermark)"
+            title="Download Image (with Izi AI Watermark)"
           >
             {isDownloading ? (
               <Loader2 size={13} className="animate-spin text-[#FF6600]" />

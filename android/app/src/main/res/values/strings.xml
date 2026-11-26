@@ -1,8 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Kevin AI </string>
-    <string name="title_activity_main">Kevin AI </string>
+    <string name="app_name">Izi AI</string>
+    <string name="title_activity_main">Izi AI</string>
     <string name="package_name">com.kevinai.pro</string>
     <string name="custom_url_scheme">com.kevinai.pro</string>
-    <string name="kevin_accessibility_description">Allows Kevin AI Agent to automatically press Send in WhatsApp and Play in YouTube when you command it.</string>
+    <string name="kevin_accessibility_description">Allows Izi AI Agent to automatically press Send in WhatsApp and Play in YouTube when you command it.</string>
 </resources>

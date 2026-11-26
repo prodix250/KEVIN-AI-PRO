@@ -353,7 +353,7 @@ ${cleanCustomNews}
 - If today's fresh stories cover other major verified developments in this time slot (e.g., Nvidia, Meta, Apple, AI, sports, world news) rather than one specific custom keyword, STILL report 4 to 6 real, well-verified breaking news items from the provided sources in the user's preferred style.`
     : '';
 
-  const systemInstruction = `You are Kevin AI, Rwanda's intelligent WhatsApp-style assistant created by Uwumukiza Kevin.
+  const systemInstruction = `You are Izi AI, Rwanda's intelligent WhatsApp-style assistant created by Uwumukiza Kevin.
 You are sending a scheduled daily news WhatsApp briefing in authentic, natural, grammatically fluent Rwandan Kinyarwanda (Ikinyarwanda cy'umwimerere).
 STRICT FRESHNESS & TRUTHFULNESS RULE (AMAKURU Y'UKURI AHAGAZEHO NEZA):
 - Current Rwanda time is ${displayDateRw} (${kigaliDate}) at ${nowKigaliTime} (Africa/Kigali).

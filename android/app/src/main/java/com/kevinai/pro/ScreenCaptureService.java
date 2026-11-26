@@ -40,7 +40,7 @@ public class ScreenCaptureService extends Service {
     private static final int NOTIFICATION_ID = 2401;
     private static final String CHANNEL_ID = "kevin_live_screen";
     private static final String NOTIFICATION_TITLE =
-            "🟢 Kevin AI: Live Screen Vision is Active";
+            "🟢 Izi AI: Live Screen Vision is Active";
 
     public static volatile boolean isCaptureRunning = false;
     public static volatile boolean suppressOverlayFrames = false;
@@ -214,7 +214,7 @@ public class ScreenCaptureService extends Service {
         imageReader = ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 2);
         imageReader.setOnImageAvailableListener(reader -> captureLatestFrame(reader), null);
         virtualDisplay = mediaProjection.createVirtualDisplay(
-                "Kevin AI Live Screen Vision",
+                "Izi AI Live Screen Vision",
                 width,
                 height,
                 density,
@@ -348,7 +348,7 @@ public class ScreenCaptureService extends Service {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(com.kevinai.pro.R.mipmap.ic_launcher)
                 .setContentTitle(NOTIFICATION_TITLE)
-                .setContentText("Kevin AI is viewing your screen to assist you in real time.")
+                .setContentText("Izi AI is viewing your screen to assist you in real time.")
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
@@ -362,7 +362,7 @@ public class ScreenCaptureService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "Kevin AI Live Screen Vision",
+                    "Izi AI Live Screen Vision",
                     NotificationManager.IMPORTANCE_LOW
             );
             getSystemService(NotificationManager.class).createNotificationChannel(channel);

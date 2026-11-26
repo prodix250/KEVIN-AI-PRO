@@ -4,14 +4,15 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown, Pause, Play, RotateCcw, Square, Loader2, Newspaper, Eye, EyeOff } from 'lucide-react';
+import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown, Pause, Play, RotateCcw, Square, Loader2, Newspaper, Eye, EyeOff, Mail } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, playWhatsAppSound, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource, playSongInLarkPlayer, executeLarkPlayerCommand, executeAudiomackCommand, getDeviceSongs, DeviceSong } from './services/geminiService';
+import { sendMessageToGemini, generateImagePrompt, generateAIImage, isImageGenerationRequest, cleanImagePrompt, cleanBase64, compressImageToAttachment, readNativeCompressedImage, playWhatsAppSound, AttachmentItem, DeviceAction, getUserCustomApiKey, setUserCustomApiKey, getGeminiKeysPool, setGeminiKeysPool, GeminiKeysPool, getGeminiApiKeysArray, isCapacitorApkRuntime, isKevinPhotoRequest, getKevinPhotoUrl, runDeviceAction, executeDeviceAction, loadChatHistory, saveChatHistory, getAgentPermissions, saveAgentPermissions, getWhatsAppAutoReplyState, formatRemainingPauseDuration, getNativeAgentStatus, getAgentOutbox, appendAgentOutbox, transcribeAudioWithSTT, generateWhatsAppAutoReply, getSavedContacts, saveContact, deleteSavedContact, importContactsFromVcfText, importContactsFromDevice, sanitizePhoneNumber, formatWhatsAppPhoneNumber, isLikelyPhoneNumber, AgentPermissions, NativeAgentStatus, AgentOutboxItem, SavedContact, GroundingSource, playSongInLarkPlayer, executeLarkPlayerCommand, executeAudiomackCommand, getDeviceSongs, DeviceSong } from './services/geminiService';
 import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateDocument } from './services/documentService';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
+import EmailReplyModal from './components/EmailReplyModal';
 import { downloadAIImage, downloadDocumentFile } from './utils/download';
 import { getNewsCustomInstructions, initDailyNewsDelivery, NEWS_PENDING_TOAST_EVENT, saveNewsCustomInstructions } from './services/dailyNewsService';
 import type { DailyNewsBriefing } from './services/dailyNewsConfig';
@@ -619,6 +620,7 @@ export default function App() {
   const [sessionToDelete, setSessionToDelete] = useState<number | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -750,7 +752,7 @@ export default function App() {
         message: detail.reply,
         status: 'sent',
       });
-      showToastMessage(`💬 Kevin AI yasubije ${detail.sender} kuri WhatsApp!`);
+      showToastMessage(`💬 Izi AI yasubije ${detail.sender} kuri WhatsApp!`);
     };
 
     window.addEventListener('kevinAgentPermissionsUpdated', handlePerms);
@@ -918,7 +920,7 @@ export default function App() {
       } else if (res.source === 'unsupported') {
         vcfInputRef.current?.click();
       } else {
-        showToastMessage(`✅ Contacts ${res.added} zongerewe muri Kevin AI!`);
+        showToastMessage(`✅ Contacts ${res.added} zongerewe muri Izi AI!`);
       }
     } catch (err) {
       showToastMessage(err instanceof Error ? err.message : 'Byanze kuvana contacts kuri telefone.');
@@ -1404,6 +1406,7 @@ export default function App() {
   const backButtonHandlerRef = useRef<() => void>(() => {});
   backButtonHandlerRef.current = () => {
     if (previewImage) { setPreviewImage(null); return; }
+    if (showEmailModal) { setShowEmailModal(false); return; }
     if (showAssistantOverlay) { setShowAssistantOverlay(false); return; }
     if (showAgentModal) { setShowAgentModal(false); return; }
     if (showSettingsModal) { setShowSettingsModal(false); return; }
@@ -1613,6 +1616,34 @@ export default function App() {
     } else {
       showToastMessage("⚠️ Byanze kubika Word document.");
     }
+  };
+
+  const handleWelcomeYoutubePlay = () => {
+    const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const youtubeAutoplayUrl = 'https://www.youtube.com/watch?v=U6JBZNAkp24&autoplay=1';
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      text: 'Nshurangira Yatapita by Diamond Platnumz',
+      sender: 'user',
+      timestamp: nowStr,
+      status: 'read',
+    };
+    const ytAction = executeDeviceAction('open_youtube', {
+      query: 'Yatapita by Diamond Platnumz',
+      videoId: 'U6JBZNAkp24',
+      videoTitle: 'Diamond Platnumz - Yatapita (Official Music Video)',
+      channel: 'Diamond Platnumz',
+    });
+    const aiMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      text: `🎶 **Yatapita — Diamond Platnumz**\n\nNdayigufunguriye kuri YouTube irahita yicuranga ako kanya:\n\n[▶️ Curanga Yatapita by Diamond Platnumz (Autoplay)](${youtubeAutoplayUrl})`,
+      sender: 'kevin',
+      timestamp: nowStr,
+      status: 'read',
+      action: ytAction || undefined,
+    };
+    updateSessionMessages([...messages, userMessage, aiMessage]);
+    playWhatsAppSound('receive');
   };
 
   const handleSendMessage = async (
@@ -1886,7 +1917,7 @@ export default function App() {
       const isAuthError = errMsg.includes('API key not valid') || errMsg.includes('401') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('Secrets') || errMsg.includes('Nta Gemini API key');
       let displayMsg = "Mbabarira, habaye ikibazo cyo kohereza ubutumwa. Ongera ugerageze.";
       if (isApkMissingKey) {
-        displayMsg = "🔑 Nta Gemini API Key irashyirwaho kuri iyi porogaramu. Nyamuneka jya muri Settings > INJIZA KEVIN API KEYS ushyiremo API Key yawe kugira ngo Kevin AI ikore neza.";
+        displayMsg = "🔑 Nta Gemini API Key irashyirwaho kuri iyi porogaramu. Nyamuneka jya muri Settings > INJIZA KEVIN API KEYS ushyiremo API Key yawe kugira ngo Izi AI ikore neza.";
         setKeysPool(getGeminiKeysPool());
         setShowApiKeyModal(true);
       } else if (isQuotaError) {
@@ -2141,7 +2172,7 @@ export default function App() {
             <div className="absolute -inset-4 rounded-full border border-emerald-500/20 animate-ping pointer-events-none"></div>
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight mb-2">
-            Kevin <span className="text-[#00FF88]">AI</span>
+            Izi <span className="text-[#00FF88]">AI</span>
           </h1>
           <p className="text-sm font-bold text-orange-500 tracking-wider uppercase mb-8">UKORA GAKE BIKAGENDA CYANE</p>
           
@@ -2175,7 +2206,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-semibold text-base sm:text-lg flex items-center">
-                <span className="text-white font-bold">Kevin</span>
+                <span className="text-white font-bold">Izi</span>
                 <span className="text-[#00FF88] font-extrabold ml-1">AI</span>
               </h1>
               <p className="text-[11px] text-green-100 dark:text-[#8696a0] flex items-center gap-1.5 mt-0.5 min-h-[16px]">
@@ -2209,6 +2240,18 @@ export default function App() {
                     <div className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200" onClick={() => { toggleTheme(); setMenuOpen(false); }}>
                       {theme === 'dark' ? <Sun size={16} className="text-amber-400" /> : <Moon size={16} className="text-indigo-500" />} 
                       <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+                    </div>
+                    <div
+                      className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
+                      onClick={() => { setMenuOpen(false); setShowEmailModal(true); }}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Mail size={16} className="text-red-500" />
+                        <span>Subiza Email (Gmail)</span>
+                      </div>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400">
+                        GMAIL
+                      </span>
                     </div>
                     <div
                       className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
@@ -2280,7 +2323,7 @@ export default function App() {
                     )}
                     <div className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200" onClick={() => { setShowAbout(true); setMenuOpen(false); }}>
                       <Info size={16} className="text-blue-400" />
-                      <span>About Kevin AI</span>
+                      <span>About Izi AI</span>
                     </div>
                   </div>
 
@@ -2445,7 +2488,7 @@ export default function App() {
                     K
                   </div>
                   <div>
-                    <span className="font-bold text-sm text-gray-800 dark:text-[#e9edef] block leading-tight">Kevin AI</span>
+                    <span className="font-bold text-sm text-gray-800 dark:text-[#e9edef] block leading-tight">Izi AI</span>
                     <span className="text-[11px] text-gray-500 dark:text-[#8696a0]">Chat History</span>
                   </div>
                 </div>
@@ -2649,7 +2692,7 @@ export default function App() {
                 >
                   <div className="flex items-center gap-2">
                     <Info size={15} />
-                    <span>Ibyerekeye Kevin AI</span>
+                    <span>Ibyerekeye Izi AI</span>
                   </div>
                   <span className="text-[10px] font-bold text-amber-600">Amakuru</span>
                 </div>
@@ -2738,7 +2781,7 @@ export default function App() {
       {/* Chat Area */}
       <div className="relative flex-1 min-h-0 flex flex-col">
       <main ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 relative chat-scroll-area">
-        {(messages.length === 0 || (messages.length === 1 && messages[0].sender === 'kevin' && messages[0].text.includes("Hello! I'm Kevin AI"))) ? (
+        {(messages.length === 0 || (messages.length === 1 && messages[0].sender === 'kevin' && messages[0].text.includes("Hello! I'm Izi AI"))) ? (
           <div className="flex flex-col items-center justify-center min-h-[80%] text-center py-10 px-4">
             <div className="mb-6 animate-float">
               <div className="relative w-32 h-32 flex items-center justify-center shadow-xl shadow-emerald-500/20 ring-4 ring-emerald-500/20 rounded-full p-4 bg-emerald-500/10 backdrop-blur-sm">
@@ -2758,13 +2801,37 @@ export default function App() {
             <p className="text-gray-600 dark:text-[#8696a0] mb-10 max-w-md leading-relaxed" dangerouslySetInnerHTML={{ __html: "<span class='text-amber-600 dark:text-amber-500 font-bold'>Uwumukiza Kevin</span> ni we wandemye. Ubu ushobora kumbaza ikibazo icyo ari cyose, niteguye guhita nkugufasha?" }}></p>
             <div className="grid grid-cols-2 gap-2.5 sm:gap-3 w-full max-w-md mx-auto">
               {[
-                { q: "Kevin ni muntu ki?", s: "Menya Kevin" },
-                { q: "Nkorera ifoto y'umusozi mwiza mu Rwanda", s: "🎨 Kora Ifoto (AI Image)" },
-                { q: "Nyereka ifoto y'uwakuremye (Kevin)", s: "📸 Ifoto y'Uwakuremye" },
-                { q: "Yize ayahe mashuri?", s: "Amashuri yize" },
+                { id: 'yt_yatapita', q: "Nshurangira", s: "Yatapita by Diamond Platnumz", isYoutube: true },
+                { id: 'img_rwanda', q: "Nkorera ifoto y'umusozi mwiza mu Rwanda", s: "🎨 Kora Ifoto (AI Image)" },
+                { id: 'kevin_photo', q: "Nyereka ifoto y'uwakuremye (Kevin)", s: "📸 Ifoto y'Uwakuremye" },
+                { id: 'email_reply', q: "Subiza ubutumwa kuri Email", s: "📧 Soma & usubize Emails" },
               ].map((card, i) => (
-                <div key={i} className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#222e35] p-2.5 sm:p-3 rounded-2xl cursor-pointer hover:shadow-md hover:border-[#25D366] dark:hover:border-[#00a884] transition-all text-left group flex flex-col justify-center" onClick={() => { setInput(card.q); handleSendMessage(card.q); }}>
-                  <p className="text-xs sm:text-sm font-semibold text-gray-800 dark:text-[#e9edef] group-hover:text-[#075E54] dark:group-hover:text-[#00FF88] transition-colors">{card.q}</p>
+                <div
+                  key={card.id || i}
+                  className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#222e35] p-2.5 sm:p-3 rounded-2xl cursor-pointer hover:shadow-md hover:border-[#25D366] dark:hover:border-[#00a884] transition-all text-left group flex flex-col justify-center"
+                  onClick={() => {
+                    if (card.id === 'yt_yatapita') {
+                      handleWelcomeYoutubePlay();
+                    } else if (card.id === 'email_reply') {
+                      setShowEmailModal(true);
+                    } else {
+                      setInput(card.q);
+                      handleSendMessage(card.q);
+                    }
+                  }}
+                >
+                  <p className="text-xs sm:text-sm font-semibold text-gray-800 dark:text-[#e9edef] group-hover:text-[#075E54] dark:group-hover:text-[#00FF88] transition-colors flex items-center gap-1.5">
+                    <span>{card.q}</span>
+                    {card.isYoutube && (
+                      <svg viewBox="0 0 24 24" className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" aria-label="YouTube">
+                        <path
+                          fill="#FF0000"
+                          d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
+                        />
+                        <path fill="#FFFFFF" d="M9.545 15.568V8.432L15.818 12z" />
+                      </svg>
+                    )}
+                  </p>
                   <p className="text-[10px] sm:text-xs text-gray-500 dark:text-[#8696a0] mt-1">{card.s}</p>
                 </div>
               ))}
@@ -2798,7 +2865,7 @@ export default function App() {
                         />
                         {message.sender === 'kevin' && (
                           <div className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-sm text-xs font-semibold flex items-center gap-1.5 shadow-md border border-white/20 select-none pointer-events-none z-20">
-                            <span className="text-white">Kevin</span>
+                            <span className="text-white">Izi</span>
                             <span className="text-[#FF6B00] font-bold">AI</span>
                           </div>
                         )}
@@ -2806,7 +2873,7 @@ export default function App() {
                           onClick={(e) => {
                             e.stopPropagation();
                             downloadImage(message.image!, `kevin_ai_${Date.now()}.jpg`, () => {
-                              showToastMessage("✨ Ifoto yabitswe ifite watermark ya Kevin AI!");
+                              showToastMessage("✨ Ifoto yabitswe ifite watermark ya Izi AI!");
                             });
                           }}
                           className="absolute top-2 right-2 px-3 py-1.5 rounded-full bg-black/80 hover:bg-black text-white shadow-md backdrop-blur-xs transition-all hover:scale-105 cursor-pointer flex items-center gap-1.5 text-xs font-medium border border-white/10 z-20"
@@ -2887,7 +2954,7 @@ export default function App() {
                                         ? 'Permission ikenewe kugira ngo ikore ako kanya'
                                         : message.action.status === 'executed'
                                           ? 'Byakozwe ako kanya (Full Agent)'
-                                          : 'Kevin AI Device Action'}
+                                          : 'Izi AI Device Action'}
                             </p>
                           </div>
                           {(message.action.name === 'open_lark_player' || message.action.name === 'query_device_music') && (
@@ -3579,9 +3646,9 @@ export default function App() {
       {showAbout && (
         <div className="absolute inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowAbout(false)}>
           <div className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-2xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3">Ibyerekeye Kevin AI</h2>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3">Ibyerekeye Izi AI</h2>
             <p className="text-gray-700 dark:text-[#d1d7db] leading-relaxed mb-6 text-sm">
-              Kevin AI ni umufasha wawe w'ubwenge buhangano (AI), yakozwe na <strong className="text-[#00FF88] font-bold">Uwumukiza Kevin</strong> wizera ko <strong className="text-amber-400 font-bold">UKORA GAKE BIKAGENDA CYANE</strong>.
+              Izi AI ni umufasha wawe w'ubwenge buhangano (AI), yakozwe na <strong className="text-[#00FF88] font-bold">Uwumukiza Kevin</strong> wizera ko <strong className="text-amber-400 font-bold">UKORA GAKE BIKAGENDA CYANE</strong>.
             </p>
             <button onClick={() => setShowAbout(false)} className="bg-[#00a884] hover:bg-[#075E54] text-white font-semibold py-2.5 px-4 rounded-xl w-full transition-colors shadow-md">Funga</button>
           </div>
@@ -3615,7 +3682,7 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="font-bold text-base text-gray-900 dark:text-white">Witwa nde? (Your Name)</h3>
-                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Bwira Kevin AI izina ryawe kugira ngo akwiture neza</p>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Bwira Izi AI izina ryawe kugira ngo akwiture neza</p>
                   </div>
                 </div>
                 {userName.trim() ? (
@@ -3687,7 +3754,7 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="font-bold text-base text-gray-900 dark:text-white">Custom Instructions</h3>
-                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Bwira Kevin AI uko ushaka ko yitwara cyangwa akitaba</p>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Bwira Izi AI uko ushaka ko yitwara cyangwa akitaba</p>
                   </div>
                 </div>
                 <button 
@@ -3751,7 +3818,7 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="font-bold text-base text-gray-900 dark:text-white">Custom Instruction News</h3>
-                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Hitamo amakuru Kevin AI yibandaho n'uko iyategura ikayoherereza</p>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Hitamo amakuru Izi AI yibandaho n'uko iyategura ikayoherereza</p>
                   </div>
                 </div>
                 <button
@@ -3776,7 +3843,7 @@ export default function App() {
                     className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2.5 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-sm transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500 resize-none"
                   />
                   <p className="mt-1.5 text-[11px] text-gray-500 dark:text-[#8696a0]">
-                    Ibi bikoreshwa ku makuru Kevin AI yohereza buri munsi (06:00, 12:00, 15:00 na 18:00).
+                    Ibi bikoreshwa ku makuru Izi AI yohereza buri munsi (06:00, 12:00, 15:00 na 18:00).
                   </p>
                 </div>
 
@@ -3821,7 +3888,7 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="font-bold text-base text-gray-900 dark:text-white">Settings</h3>
-                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Igenamiterere rya Kevin AI</p>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Igenamiterere rya Izi AI</p>
                   </div>
                 </div>
                 <button
@@ -3900,6 +3967,19 @@ export default function App() {
                       : 'text-gray-400 dark:text-gray-500'
                   }`}>
                     {agentPermissions.autoSend || agentPermissions.whatsappAutoReply ? 'ACTIVE' : 'SETUP'}
+                  </span>
+                </div>
+
+                <div
+                  onClick={() => { setShowSettingsModal(false); setShowEmailModal(true); }}
+                  className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Mail size={16} className="text-red-500" />
+                    <span>Subiza Email (Gmail)</span>
+                  </div>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400">
+                    GMAIL
                   </span>
                 </div>
 
@@ -4224,7 +4304,7 @@ export default function App() {
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-gray-900 dark:text-[#e9edef]">📩 Auto-Send Messages (SMS & WhatsApp)</p>
                       <p className="text-xs text-gray-500 dark:text-[#8696a0]">
-                        Yemerera Kevin AI kohereza ubutumwa ako kanya ku nimero uyihaye nta guhagarara.
+                        Yemerera Izi AI kohereza ubutumwa ako kanya ku nimero uyihaye nta guhagarara.
                       </p>
                     </div>
                     <button
@@ -4332,7 +4412,7 @@ export default function App() {
                           </span>
                         </div>
                         <p className="text-xs text-gray-500 dark:text-[#8696a0]">
-                          Kevin AI ajya areba chat za WhatsApp zose akagusubiriza ubutumwa butarasubizwa.
+                          Izi AI ajya areba chat za WhatsApp zose akagusubiriza ubutumwa butarasubizwa.
                         </p>
                       </div>
                       <button
@@ -4465,14 +4545,14 @@ export default function App() {
                               whatsappInstalled?: boolean;
                             };
                             if (!res.hasNotificationAccess && !res.hasAccessibility) {
-                              showToastMessage('Emera "WA Notif" cyangwa "Accessibility" hasi kugira ngo Kevin AI isubize chat za WhatsApp.');
+                              showToastMessage('Emera "WA Notif" cyangwa "Accessibility" hasi kugira ngo Izi AI isubize chat za WhatsApp.');
                             } else if (res.openedWhatsAppForScan) {
                               setShowAgentModal(false);
-                              showToastMessage(`💬 Kevin AI ifunguye WhatsApp ngo isubize ubutumwa budasubije!`);
+                              showToastMessage(`💬 Izi AI ifunguye WhatsApp ngo isubize ubutumwa budasubije!`);
                             } else {
                               showToastMessage(
                                 res.activeNotifQueued && res.activeNotifQueued > 0
-                                  ? `💬 Kevin AI irimo gusubiza notifications ${res.activeNotifQueued} za WhatsApp!`
+                                  ? `💬 Izi AI irimo gusubiza notifications ${res.activeNotifQueued} za WhatsApp!`
                                   : '💬 Notifications za WhatsApp zarasuzumwe. Emera na Accessibility kugira ngo inarebe chat zose.'
                               );
                             }
@@ -4491,7 +4571,7 @@ export default function App() {
                 {/* WhatsApp Auto-Reply Style */}
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2a3942] space-y-2">
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">
-                    Uburyo Kevin AI asubiza kuri WhatsApp (Reply Style):
+                    Uburyo Izi AI asubiza kuri WhatsApp (Reply Style):
                   </label>
                   <textarea
                     rows={2}
@@ -4557,7 +4637,7 @@ export default function App() {
                     </div>
                     {!nativeAgentStatus.hasAccessibility && (
                       <p className="text-[11px] text-amber-800 dark:text-amber-200">
-                        Kanda &ldquo;Accessibility: Fungura&rdquo; wemerere &ldquo;Kevin AI Full Agent&rdquo; kugira ngo ubutumwa bwa WhatsApp buhite bukanda Send ako kanya.
+                        Kanda &ldquo;Accessibility: Fungura&rdquo; wemerere &ldquo;Izi AI Full Agent&rdquo; kugira ngo ubutumwa bwa WhatsApp buhite bukanda Send ako kanya.
                       </p>
                     )}
                     {(!nativeAgentStatus.hasSmsPermission || !nativeAgentStatus.hasCallPermission || !nativeAgentStatus.hasContactsPermission || !nativeAgentStatus.hasMicPermission || !nativeAgentStatus.hasMusicPermission) && (
@@ -4784,7 +4864,7 @@ export default function App() {
               <button 
                 onClick={() => {
                   downloadImage(previewImage!, `kevin_ai_${Date.now()}.jpg`, () => {
-                    showToastMessage("✨ Ifoto yabitswe ifite watermark ya Kevin AI!");
+                    showToastMessage("✨ Ifoto yabitswe ifite watermark ya Izi AI!");
                   });
                 }}
                 className="px-4 py-2 rounded-full bg-black/80 hover:bg-black text-white text-xs font-bold backdrop-blur-md flex items-center gap-2 transition-all cursor-pointer border border-white/20 shadow-lg"
@@ -4815,13 +4895,20 @@ export default function App() {
                 className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl block"
               />
               <div className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-sm text-xs font-semibold flex items-center gap-1.5 shadow-md border border-white/20 select-none pointer-events-none z-20">
-                <span className="text-white">Kevin</span>
+                <span className="text-white">Izi</span>
                 <span className="text-[#FF6B00] font-bold">AI</span>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      <EmailReplyModal
+        isOpen={showEmailModal}
+        onClose={() => setShowEmailModal(false)}
+        selectedModel={selectedModel}
+        onToast={showToastMessage}
+      />
 
       <AssistantOverlay
         isOpen={showAssistantOverlay}

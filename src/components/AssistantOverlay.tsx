@@ -743,7 +743,7 @@ export default function AssistantOverlay({
       }, 1000);
     } catch (error) {
       resetVoiceRecordingState();
-      setErrorMsg(error instanceof Error ? error.message : 'Emerera Kevin AI gukoresha Microphone.');
+      setErrorMsg(error instanceof Error ? error.message : 'Emerera Izi AI gukoresha Microphone.');
     }
   };
 
@@ -930,7 +930,7 @@ export default function AssistantOverlay({
                 <div className="relative shrink-0">
                   <img
                     src={kevin2Url}
-                    alt="Kevin AI"
+                    alt="Izi AI"
                     className="w-8 h-8 rounded-full object-cover ring-2 ring-[#00FF88]/70"
                   />
                   <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#00FF88] ring-2 ring-white dark:ring-[#111b21]" />
@@ -938,7 +938,7 @@ export default function AssistantOverlay({
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm font-extrabold tracking-tight text-[#075E54] dark:text-[#00FF88]">
-                      Kevin AI
+                      Izi AI
                     </span>
                     <Sparkles size={13} className="text-[#00a884]" />
                   </div>
@@ -968,7 +968,7 @@ export default function AssistantOverlay({
                 <button
                   type="button"
                   onClick={handleExpand}
-                  title="Fungura Kevin AI yose"
+                  title="Fungura Izi AI yose"
                   className="p-2 rounded-full text-gray-500 hover:text-[#075E54] dark:text-[#8696a0] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#202c33] transition-colors cursor-pointer"
                 >
                   <Maximize2 size={16} />
@@ -1024,7 +1024,7 @@ export default function AssistantOverlay({
                           {action.status === 'executed'
                             ? 'Byakozwe ako kanya (Full Agent)'
                             : action.status === 'needs_permission'
-                              ? 'Emerera Kevin AI hasi'
+                              ? 'Emerera Izi AI hasi'
                               : action.status === 'contact_not_found'
                                 ? 'Nimero ntiraboneka muri Contacts'
                                 : 'Hitamo hasi'}
@@ -1297,7 +1297,7 @@ export default function AssistantOverlay({
                     Live Screen Share irakora
                   </p>
                   <p className="text-[11px] text-gray-600 dark:text-[#8696a0] truncate">
-                    Kevin AI irareba ibiri kuri screen yawe
+                    Izi AI irareba ibiri kuri screen yawe
                   </p>
                 </div>
                 <button

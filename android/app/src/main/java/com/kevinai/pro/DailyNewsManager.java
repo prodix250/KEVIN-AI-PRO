@@ -381,7 +381,7 @@ public final class DailyNewsManager {
                             JSONObject b = briefings.optJSONObject(i);
                             if (b == null) continue;
                             String slotId = b.optString("slotId", "");
-                            String title = b.optString("title", "Kevin AI: Amakuru Mashya");
+                            String title = b.optString("title", "Izi AI: Amakuru Mashya");
                             String preview = b.optString("preview", "");
                             String body = b.optString("body", "");
 
@@ -415,7 +415,7 @@ public final class DailyNewsManager {
                         );
                         if (directBriefing != null) {
                             String slotId = directBriefing.optString("slotId", "");
-                            String title = directBriefing.optString("title", "Kevin AI: Amakuru Mashya");
+                            String title = directBriefing.optString("title", "Izi AI: Amakuru Mashya");
                             String preview = directBriefing.optString("preview", "");
                             String body = directBriefing.optString("body", "");
                             if (!TextUtils.isEmpty(slotId) && !TextUtils.isEmpty(body)) {
@@ -454,9 +454,9 @@ public final class DailyNewsManager {
 
             String channelId = KevinAgentBridge.NEWS_CHANNEL_ID;
 
-            String safeTitle = !TextUtils.isEmpty(title) ? title : "Kevin AI: Amakuru Mashya";
+            String safeTitle = !TextUtils.isEmpty(title) ? title : "Izi AI: Amakuru Mashya";
             String safePreview = !TextUtils.isEmpty(preview) ? preview : "Amakuru mashya agezweho kuri ubu.";
-            String safeBigText = !TextUtils.isEmpty(preview) ? preview : "Kanda hano usome amakuru mashya muri Kevin AI.";
+            String safeBigText = !TextUtils.isEmpty(preview) ? preview : "Kanda hano usome amakuru mashya muri Izi AI.";
             long postedAtMs = System.currentTimeMillis();
 
             int whistleResId = context.getResources().getIdentifier(
@@ -475,10 +475,10 @@ public final class DailyNewsManager {
 
                 NotificationChannel channel = new NotificationChannel(
                         channelId,
-                        "Kevin AI Daily News & Briefings",
+                        "Izi AI Daily News & Briefings",
                         NotificationManager.IMPORTANCE_HIGH
                 );
-                channel.setDescription("Amakuru agezweho ya Kevin AI (06:00 Tech, 12:00 Isi & Sport, 15:00 Ubusesenguzi bwa Siporo, 18:00 Tech, 20:00 Rwanda)");
+                channel.setDescription("Amakuru agezweho ya Izi AI (06:00 Tech, 12:00 Isi & Sport, 15:00 Ubusesenguzi bwa Siporo, 18:00 Tech, 20:00 Rwanda)");
                 channel.enableVibration(true);
                 channel.setVibrationPattern(new long[]{0, 260, 120, 260});
                 channel.enableLights(true);
@@ -495,7 +495,7 @@ public final class DailyNewsManager {
 
                 NotificationChannel shadeChannel = new NotificationChannel(
                         NEWS_SHADE_CHANNEL_ID,
-                        "Kevin AI News Notification Panel",
+                        "Izi AI News Notification Panel",
                         NotificationManager.IMPORTANCE_DEFAULT
                 );
                 shadeChannel.setDescription("Amakuru abikwa muri notification panel nyuma yo kwigaragaza hejuru");
@@ -699,7 +699,7 @@ public final class DailyNewsManager {
                 + "\n- Prioritize requested topics ONLY when verified fresh articles exist; NEVER fabricate facts and NEVER say 'Nta makuru mashya ahari' when verified articles exist."
                 : "";
 
-        String sysPrompt = "You are Kevin AI, Rwanda's intelligent assistant created by Uwumukiza Kevin.\n"
+        String sysPrompt = "You are Izi AI, Rwanda's intelligent assistant created by Uwumukiza Kevin.\n"
                 + "Write a scheduled WhatsApp-style daily news briefing in authentic, fluent Rwandan Kinyarwanda (date: " + kigaliDate + ").\n"
                 + "STRICT FRESHNESS & TRUTHFULNESS RULE: ONLY report genuinely fresh real news from the verified sources provided (or live Google Search grounding). NEVER invent, guess, or fabricate facts, scores, or quotes. Format with 4 to 6 crisp bullet points (bold title + 1-2 short factual sentences) and friendly emojis."
                 + customNote;

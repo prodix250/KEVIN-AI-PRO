@@ -23,7 +23,7 @@ class AppErrorBoundary extends Component<{children: ReactNode}, ErrorBoundarySta
       return (
         <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#f0f2f5] dark:bg-[#111b21] text-center">
           <div className="max-w-sm w-full rounded-2xl bg-white dark:bg-[#202c33] p-6 shadow-lg border border-gray-200 dark:border-[#2f3b43] space-y-4">
-            <h1 className="text-lg font-bold text-[#075E54] dark:text-[#00FF88]">Kevin AI</h1>
+            <h1 className="text-lg font-bold text-[#075E54] dark:text-[#00FF88]">Izi AI</h1>
             <p className="text-sm text-gray-600 dark:text-[#d1d7db]">
               Habaye akabazo gato mu gufungura dosiye cyangwa ifoto. Kanda hasi wongere ufungure neza.
             </p>
@@ -32,7 +32,7 @@ class AppErrorBoundary extends Component<{children: ReactNode}, ErrorBoundarySta
               onClick={() => window.location.reload()}
               className="w-full py-2.5 px-4 rounded-xl bg-[#00a884] hover:bg-[#075E54] text-white font-semibold text-sm cursor-pointer"
             >
-              Ongera ufungure Kevin AI
+              Ongera ufungure Izi AI
             </button>
           </div>
         </div>

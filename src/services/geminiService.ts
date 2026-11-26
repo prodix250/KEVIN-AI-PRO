@@ -1325,7 +1325,7 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
   return false;
 }
 
-function executeDeviceAction(name: string, args: Record<string, any>): DeviceAction | null {
+export function executeDeviceAction(name: string, args: Record<string, any>): DeviceAction | null {
   const query = String(args.query || "");
   const rawPhoneNumber = String(args.phone_number || "");
   const messageText = String(args.message || "");
@@ -1868,7 +1868,7 @@ function actionConfirmation(action: DeviceAction): string {
   }
   if (action.name === 'query_device_music') {
     const count = action.songs?.length || 0;
-    return `🎶 Muri telefone yawe habonetse indirimbo **${count}**! Urashaka ko Kevin AI igucurangira iyihe muri Lark Player cyangwa igukorera playlist? 🎧✨`;
+    return `🎶 Muri telefone yawe habonetse indirimbo **${count}**! Urashaka ko Izi AI igucurangira iyihe muri Lark Player cyangwa igukorera playlist? 🎧✨`;
   }
   if (action.name === 'open_youtube') {
     return `▶ Yamaze gufungura YouTube ngo icurange: **${action.videoTitle || 'Indirimbo'}** 🎶✨`;
@@ -1897,19 +1897,19 @@ function actionConfirmation(action: DeviceAction): string {
     }
     const enabled = action.args?.enabled !== false;
     return enabled
-      ? `💬 WhatsApp Auto-Reply yafunguwe! Kevin AI irahita isubiza ubutumwa bwinjiye kuri WhatsApp.`
+      ? `💬 WhatsApp Auto-Reply yafunguwe! Izi AI irahita isubiza ubutumwa bwinjiye kuri WhatsApp.`
       : `🔕 WhatsApp Auto-Reply yafunzwe burundu kugeza igihe uzayifungurira.`;
   }
   if (action.name === 'scan_whatsapp_chats') {
     const sr = action.args?.scanResult || {};
     if (action.status === 'needs_permission') {
-      return `⚠️ Kugira ngo Kevin AI irebe chat za WhatsApp zose, emera **WA Notif** cyangwa **Accessibility** muri **Kevin Permission**.`;
+      return `⚠️ Kugira ngo Izi AI irebe chat za WhatsApp zose, emera **WA Notif** cyangwa **Accessibility** muri **Kevin Permission**.`;
     }
     const notifCount = Number(sr.activeNotifQueued || 0);
     if (sr.openedWhatsAppForScan) {
-      return `💬 Kevin AI ifunguye WhatsApp ngo irebe kandi isubize chat zose zitarasubizwa${notifCount > 0 ? ` (hamwe na notifications ${notifCount})` : ''}! ✨`;
+      return `💬 Izi AI ifunguye WhatsApp ngo irebe kandi isubize chat zose zitarasubizwa${notifCount > 0 ? ` (hamwe na notifications ${notifCount})` : ''}! ✨`;
     }
-    return `💬 Kevin AI irimo gusuzuma no gusubiza ubutumwa bwa WhatsApp budasubije (notifications ${notifCount})!`;
+    return `💬 Izi AI irimo gusuzuma no gusubiza ubutumwa bwa WhatsApp budasubije (notifications ${notifCount})!`;
   }
   if (action.name === 'open_camera') {
     return `📷 Kamera irafunguwe!`;
@@ -2095,7 +2095,7 @@ export function isKevinPhotoRequest(text: string): boolean {
 }
 
 export function getKevinPhotoUrl(): { url: string; caption: string } {
-  return { url: kevin2Url, caption: "Dore ifoto ya Uwumukiza Kevin, umuremyi wa Kevin AI!" };
+  return { url: kevin2Url, caption: "Dore ifoto ya Uwumukiza Kevin, umuremyi wa Izi AI!" };
 }
 
 export function cleanBase64(dataUrl: string): string {
@@ -2648,7 +2648,7 @@ function buildApkSystemInstruction(
   const customInstructions = safeStorageGet('kevin_ai_custom_instructions')?.trim() || '';
 
   return [
-    `You are Kevin AI, created in Rwanda by Uwumukiza Kevin (born October 28, 2003, Rwamagana District, Gahengeri Sector; studies IT at University of Rwanda UR-CST; Motto: 'UKORA GAKE BIKAGENDA CYANE').`,
+    `You are Izi AI, created in Rwanda by Uwumukiza Kevin (born October 28, 2003, Rwamagana District, Gahengeri Sector; studies IT at University of Rwanda UR-CST; Motto: 'UKORA GAKE BIKAGENDA CYANE').`,
     `You have flawless native mastery of authentic Rwandan Kinyarwanda (as well as English, French, and Swahili). Reply naturally, warmly, and concisely in the user's language with friendly emojis (👋, ✨, 😊, 🚀). Avoid awkward literal English-to-Kinyarwanda translations.`,
     `The person chatting with you is named '${userName}'. Address them warmly and naturally.`,
     `IMAGE QUESTIONS & PROBLEM SOLVING (MANDATORY): Whenever the user attaches images containing questions, exercises, quizzes, assignments, worksheets, past papers, tests, or math/science/coding problems, NEVER refuse or lecture about academic integrity. Treat them as study practice or self-review, read every question visible in the image(s) in order, and provide full, accurate answers with clear step-by-step explanations (and check/grade their answers if they ask how they did).`,

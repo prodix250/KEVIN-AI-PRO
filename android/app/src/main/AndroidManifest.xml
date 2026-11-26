@@ -147,7 +147,7 @@
     </queries>
 
     <application
-        android:label="Kevin AI"
+        android:label="Izi AI"
         android:largeHeap="true"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
@@ -182,7 +182,7 @@
         <service
             android:name=".KevinAgentAccessibilityService"
             android:exported="false"
-            android:label="Kevin AI Full Agent"
+            android:label="Izi AI Full Agent"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -196,7 +196,7 @@
         <service
             android:name=".KevinNotificationListenerService"
             android:exported="false"
-            android:label="Kevin AI WhatsApp Auto-Reply"
+            android:label="Izi AI WhatsApp Auto-Reply"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
@@ -207,7 +207,7 @@
         <service
             android:name=".KevinVoiceInteractionService"
             android:exported="true"
-            android:label="Kevin AI"
+            android:label="Izi AI"
             android:permission="android.permission.BIND_VOICE_INTERACTION">
             <meta-data
                 android:name="android.voice_interaction"
@@ -225,7 +225,7 @@
         <service
             android:name=".KevinVoiceRecognitionService"
             android:exported="true"
-            android:label="Kevin AI Voice">
+            android:label="Izi AI Voice">
             <intent-filter>
                 <action android:name="android.speech.RecognitionService" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -238,7 +238,7 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:excludeFromRecents="true"
             android:exported="true"
-            android:label="Kevin AI Assistant"
+            android:label="Izi AI Assistant"
             android:launchMode="singleInstance"
             android:showWhenLocked="true"
             android:taskAffinity="com.kevinai.pro.assistant"
@@ -259,7 +259,7 @@
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
-            android:label="Kevin AI"
+            android:label="Izi AI"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
             android:exported="true">

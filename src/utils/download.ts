@@ -17,7 +17,7 @@ export function applyKevinAIWatermark(ctx: CanvasRenderingContext2D, width: numb
 
   // Typography measurements
   ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-  const kevinText = "Kevin ";
+  const kevinText = "Izi ";
   const kevinWidth = ctx.measureText(kevinText).width;
 
   ctx.font = `900 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
@@ -198,9 +198,9 @@ export async function downloadAIImage(imageUrl: string, filename = `kevin_ai_${D
 
     const textStartX = dotX + dotRadius + 8;
     ctx.fillStyle = "#FFFFFF";
-    ctx.fillText("Kevin ", textStartX, badgeY + (badgeHeight / 2));
+    ctx.fillText("Izi ", textStartX, badgeY + (badgeHeight / 2));
 
-    const kevinWidth = ctx.measureText("Kevin ").width;
+    const kevinWidth = ctx.measureText("Izi ").width;
     ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
     ctx.fillStyle = "#FF6B00"; // Bold Orange
     ctx.fillText("AI", textStartX + kevinWidth, badgeY + (badgeHeight / 2));

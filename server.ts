@@ -9,10 +9,10 @@ import { startDailyNewsScheduler, syncDueNewsBriefings } from './serverNewsSched
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const KEVIN_SYSTEM_INSTRUCTION = `You are Kevin AI,
+const KEVIN_SYSTEM_INSTRUCTION = `You are Izi AI,
 
 1. IDENTITY & CREATOR PROFILE:
-- Name: Kevin AI
+- Name: Izi AI
 - Creator & Developer: Uwumukiza Kevin
 - Motto: 'UKORA GAKE BIKAGENDA CYANE'
 - Verified Creator Background:
@@ -44,7 +44,7 @@ const KEVIN_SYSTEM_INSTRUCTION = `You are Kevin AI,
   * AVOID LITERAL TRANSLATIONS FROM ENGLISH:
     - NEVER say awkward literal translations like 'Ndi umufasha w'ubwenge bukorano', 'ndaho neza', 'icyo nakufasha', or 'mu buryo bwa WhatsApp'.
     - ALWAYS use natural authentic Rwandan expressions:
-      'Ndi Kevin AI, niteguye kugufasha mu buryo bwose! 💻✨'
+      'Ndi Izi AI, niteguye kugufasha mu buryo bwose! 💻✨'
       'Meze neza rwose!'
       'Ndagufasha iki uyu munsi?'
       'Biroroshye cyane, dore uko bikorwa:'
@@ -257,7 +257,7 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: "open_whatsapp",
-    description: "Immediately send a WhatsApp message to a phone number or contact using Kevin AI's auto-send agent. For Rwanda numbers, include country code +250 (e.g. +250788123456 or 250788123456).",
+    description: "Immediately send a WhatsApp message to a phone number or contact using Izi AI's auto-send agent. For Rwanda numbers, include country code +250 (e.g. +250788123456 or 250788123456).",
     parametersJsonSchema: {
       type: "object",
       properties: {
@@ -276,7 +276,7 @@ const deviceActionDeclarations: FunctionDeclaration[] = [
       properties: {
         enabled: { type: "boolean", description: "Whether WhatsApp auto-reply should be enabled (true to enable/resume or pause temporarily, false to turn completely off)." },
         pause_minutes: { type: "number", description: "Optional number of minutes to pause WhatsApp auto-reply (e.g. 15, 30, 60, 120, 480). Omit or 0 when turning completely off or immediately resuming." },
-        reply_style: { type: "string", description: "Instructions for how Kevin AI should reply on WhatsApp." }
+        reply_style: { type: "string", description: "Instructions for how Izi AI should reply on WhatsApp." }
       },
       required: ["enabled"]
     }
@@ -1568,7 +1568,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       const safeUserName = typeof userName === 'string' && userName.trim() ? userName.trim() : 'Incuti yanjye';
       const usernameContext = `The person currently chatting with you is named '${safeUserName}'. Always address them politely by their name during the conversation to make it personal and natural.`;
       const customInstructionsContext = typeof customInstructions === 'string' && customInstructions.trim()
-        ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions.trim()}\nFollow these instructions in addition to the core Kevin AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
+        ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions.trim()}\nFollow these instructions in addition to the core Izi AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
         : '';
       const audioInstruction = hasAudioAttachment
         ? `[KINYARWANDA VOICE NOTE & AUDIO COMPREHENSION]:

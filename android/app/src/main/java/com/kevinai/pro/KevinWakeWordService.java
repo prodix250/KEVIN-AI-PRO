@@ -1107,7 +1107,7 @@ public class KevinWakeWordService extends Service {
                 );
                 Notification triggerNotif = new NotificationCompat.Builder(this, TRIGGER_CHANNEL_ID)
                         .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                        .setContentTitle("Kevin AI Assistant irafunguye")
+                        .setContentTitle("Izi AI Assistant irafunguye")
                         .setContentText(TextUtils.isEmpty(trailingCommand)
                                 ? "Kanda hano uvuge icyo ushaka"
                                 : trailingCommand)
@@ -1147,19 +1147,19 @@ public class KevinWakeWordService extends Service {
 
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "Kevin AI Wake Word (\"Hi Kevin\")",
+                    "Izi AI Wake Word (\"Hi Kevin\")",
                     NotificationManager.IMPORTANCE_LOW
             );
-            channel.setDescription("Kumva ijwi rya \"Hi Kevin\" kugira ngo Kevin AI Assistant ifunguke.");
+            channel.setDescription("Kumva ijwi rya \"Hi Kevin\" kugira ngo Izi AI Assistant ifunguke.");
             channel.setShowBadge(false);
             manager.createNotificationChannel(channel);
 
             NotificationChannel triggerChannel = new NotificationChannel(
                     TRIGGER_CHANNEL_ID,
-                    "Kevin AI Assistant Launch",
+                    "Izi AI Assistant Launch",
                     NotificationManager.IMPORTANCE_HIGH
             );
-            triggerChannel.setDescription("Gufungura Kevin AI Assistant ako kanya uvuze \"Hi Kevin\".");
+            triggerChannel.setDescription("Gufungura Izi AI Assistant ako kanya uvuze \"Hi Kevin\".");
             triggerChannel.setShowBadge(false);
             manager.createNotificationChannel(triggerChannel);
         }
@@ -1185,7 +1185,7 @@ public class KevinWakeWordService extends Service {
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle("Kevin AI: \"Hi Kevin\" iriteguye")
+                .setContentTitle("Izi AI: \"Hi Kevin\" iriteguye")
                 .setContentText(text)
                 .setOngoing(true)
                 .setSilent(true)
