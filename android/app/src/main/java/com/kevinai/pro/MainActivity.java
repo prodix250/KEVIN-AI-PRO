@@ -25,6 +25,7 @@ public class MainActivity extends BridgeActivity {
     private static final int AUDIO_PERMISSION_REQUEST_CODE = 1001;
     private static final int SCREEN_CAPTURE_REQUEST_CODE = 1002;
     private static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 1003;
+    public static final int GMAIL_AUTH_REQUEST_CODE = 1005;
     private boolean waitingForNotificationPermission;
     private KevinAgentBridge agentBridge;
 
@@ -209,6 +210,12 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == GMAIL_AUTH_REQUEST_CODE) {
+            if (agentBridge != null) {
+                agentBridge.dispatchGmailAuthResult(resultCode, data);
+            }
+            return;
+        }
         if (requestCode != SCREEN_CAPTURE_REQUEST_CODE) {
             return;
         }

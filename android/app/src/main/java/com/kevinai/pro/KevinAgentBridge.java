@@ -38,6 +38,7 @@ import android.text.TextUtils;
 import android.util.Base64;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityManager;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
@@ -2531,5 +2532,88 @@ public class KevinAgentBridge {
     @JavascriptInterface
     public String getEqualizerStateJson() {
         return KevinAgentPrefs.getEqualizerStateJson(activity);
+    }
+
+    @JavascriptInterface
+    public boolean startGmailAuth(String authUrl, String redirectPrefix, String expectedState) {
+        if (TextUtils.isEmpty(authUrl)) {
+            return false;
+        }
+        activity.runOnUiThread(() -> {
+            try {
+                Intent intent = new Intent(activity, GmailAuthActivity.class);
+                intent.putExtra(GmailAuthActivity.EXTRA_AUTH_URL, authUrl);
+                intent.putExtra(GmailAuthActivity.EXTRA_REDIRECT_PREFIX, redirectPrefix != null ? redirectPrefix : "");
+                intent.putExtra(GmailAuthActivity.EXTRA_EXPECTED_STATE, expectedState != null ? expectedState : "");
+                activity.startActivityForResult(intent, MainActivity.GMAIL_AUTH_REQUEST_CODE);
+            } catch (Exception e) {
+                dispatchGmailAuthErrorJson("launch_failed", e.getMessage());
+            }
+        });
+        return true;
+    }
+
+    @JavascriptInterface
+    public void clearGmailAuthCookies() {
+        activity.runOnUiThread(() -> {
+            try {
+                CookieManager cm = CookieManager.getInstance();
+                cm.removeAllCookies(null);
+                cm.flush();
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private void dispatchGmailAuthErrorJson(String error, String description) {
+        if (webView == null) return;
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("ok", false);
+            payload.put("cancelled", false);
+            payload.put("error", error != null ? error : "auth_error");
+            payload.put("errorDescription", description != null ? description : "");
+            String quoted = JSONObject.quote(payload.toString());
+            webView.post(() ->
+                    webView.evaluateJavascript(
+                            "window.dispatchEvent(new CustomEvent('kevinGmailAuthResult', { detail: JSON.parse(" + quoted + ") }))",
+                            null
+                    )
+            );
+        } catch (Exception ignored) {}
+    }
+
+    public void dispatchGmailAuthResult(int resultCode, Intent data) {
+        if (webView == null) return;
+        try {
+            JSONObject payload = new JSONObject();
+            if (data == null) {
+                payload.put("ok", false);
+                payload.put("cancelled", resultCode != Activity.RESULT_OK);
+                payload.put("error", resultCode == Activity.RESULT_OK ? "empty_result" : "cancelled");
+                payload.put("errorDescription", "");
+            } else {
+                boolean ok = resultCode == Activity.RESULT_OK && data.getBooleanExtra(GmailAuthActivity.EXTRA_OK, false);
+                boolean cancelled = resultCode != Activity.RESULT_OK || data.getBooleanExtra(GmailAuthActivity.EXTRA_CANCELLED, false);
+                payload.put("ok", ok);
+                payload.put("cancelled", !ok && cancelled);
+                payload.put("accessToken", data.getStringExtra(GmailAuthActivity.EXTRA_ACCESS_TOKEN) != null
+                        ? data.getStringExtra(GmailAuthActivity.EXTRA_ACCESS_TOKEN) : "");
+                payload.put("scope", data.getStringExtra(GmailAuthActivity.EXTRA_SCOPE) != null
+                        ? data.getStringExtra(GmailAuthActivity.EXTRA_SCOPE) : "");
+                payload.put("expiresIn", data.getStringExtra(GmailAuthActivity.EXTRA_EXPIRES_IN) != null
+                        ? data.getStringExtra(GmailAuthActivity.EXTRA_EXPIRES_IN) : "");
+                payload.put("error", data.getStringExtra(GmailAuthActivity.EXTRA_ERROR) != null
+                        ? data.getStringExtra(GmailAuthActivity.EXTRA_ERROR) : "");
+                payload.put("errorDescription", data.getStringExtra(GmailAuthActivity.EXTRA_ERROR_DESCRIPTION) != null
+                        ? data.getStringExtra(GmailAuthActivity.EXTRA_ERROR_DESCRIPTION) : "");
+            }
+            String quoted = JSONObject.quote(payload.toString());
+            webView.post(() ->
+                    webView.evaluateJavascript(
+                            "window.dispatchEvent(new CustomEvent('kevinGmailAuthResult', { detail: JSON.parse(" + quoted + ") }))",
+                            null
+                    )
+            );
+        } catch (Exception ignored) {}
     }
 }

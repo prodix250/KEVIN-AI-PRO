@@ -9,7 +9,14 @@ import {
   User,
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { sendMessageToGemini } from './geminiService';
+import { isCapacitorApkRuntime, sendMessageToGemini } from './geminiService';
+
+export type GmailUser = {
+  uid?: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+};
 
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -31,8 +38,10 @@ provider.setCustomParameters({
 // Keep OAuth token exclusively in memory (never localStorage or sessionStorage).
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
-let activeSignInPromise: Promise<{ user: User; accessToken: string }> | null = null;
+let cachedNativeUser: GmailUser | null = null;
+let activeSignInPromise: Promise<{ user: GmailUser; accessToken: string }> | null = null;
 let activePopupConsumer: any = null;
+let activeNativeCancel: (() => void) | null = null;
 
 type InternalResolverBase = {
   new (): {
@@ -169,26 +178,171 @@ export type GmailMessage = {
 };
 
 export const initGmailAuth = (
-  onAuthSuccess?: (user: User, token: string) => void,
-  onAuthFailure?: (user: User | null) => void
+  onAuthSuccess?: (user: GmailUser, token: string) => void,
+  onAuthFailure?: (user: GmailUser | null) => void
 ) => {
   return onAuthStateChanged(auth, (user: User | null) => {
-    if (user) {
+    const activeUser: GmailUser | null = user || cachedNativeUser;
+    if (activeUser) {
       if (cachedAccessToken) {
-        onAuthSuccess?.(user, cachedAccessToken);
+        onAuthSuccess?.(activeUser, cachedAccessToken);
       } else if (!isSigningIn) {
         cachedAccessToken = null;
-        onAuthFailure?.(user);
+        onAuthFailure?.(activeUser);
       }
-    } else {
+    } else if (!isSigningIn) {
       cachedAccessToken = null;
+      cachedNativeUser = null;
       onAuthFailure?.(null);
     }
   });
 };
 
+const verifyGmailScopes = async (accessToken: string): Promise<string | null> => {
+  try {
+    const infoRes = await fetch(
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`
+    );
+    if (infoRes.ok) {
+      const info = await infoRes.json();
+      const granted = String(info?.scope || '').split(/\s+/).filter(Boolean);
+      const hasRead =
+        granted.includes('https://www.googleapis.com/auth/gmail.readonly') ||
+        granted.includes('https://mail.google.com/') ||
+        granted.includes('https://www.googleapis.com/auth/gmail.modify');
+      const hasSend =
+        granted.includes('https://www.googleapis.com/auth/gmail.send') ||
+        granted.includes('https://mail.google.com/') ||
+        granted.includes('https://www.googleapis.com/auth/gmail.modify');
+      if (!hasRead || !hasSend) {
+        cachedAccessToken = null;
+        throw new Error('GMAIL_MISSING_SCOPES');
+      }
+      return typeof info?.email === 'string' && info.email ? info.email : null;
+    }
+  } catch (scopeCheckErr: any) {
+    if (scopeCheckErr?.message === 'GMAIL_MISSING_SCOPES') {
+      throw scopeCheckErr;
+    }
+    // If tokeninfo is unreachable, let the Gmail API call proceed directly.
+  }
+  return null;
+};
+
+const fetchGoogleProfileForToken = async (
+  accessToken: string,
+  fallbackEmail: string | null
+): Promise<GmailUser> => {
+  try {
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (res.ok) {
+      const profile = await res.json();
+      return {
+        uid: profile?.sub || undefined,
+        email: profile?.email || fallbackEmail,
+        displayName: profile?.name || profile?.email || fallbackEmail,
+        photoURL: profile?.picture || null,
+      };
+    }
+  } catch {
+    // ignore userinfo failure; fall back to tokeninfo email
+  }
+  return {
+    email: fallbackEmail,
+    displayName: fallbackEmail,
+    photoURL: null,
+  };
+};
+
+const generateOAuthNonce = (): string => {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID().replace(/-/g, '');
+    }
+  } catch {
+    // fallback below
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+};
+
+const signInWithGoogleForGmailNativeApk = async (bridge: any): Promise<{
+  user: GmailUser;
+  accessToken: string;
+}> => {
+  const clientId = String(firebaseConfig.oAuthClientId || '').trim();
+  const authDomain = String(firebaseConfig.authDomain || '').trim();
+  if (!clientId || !authDomain) {
+    throw new Error('Missing Firebase OAuth configuration.');
+  }
+
+  const redirectPrefix = `https://${authDomain}/__/auth/handler`;
+  const expectedState = generateOAuthNonce();
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectPrefix,
+    response_type: 'token',
+    scope: ['openid', 'email', 'profile', ...GMAIL_SCOPES].join(' '),
+    prompt: 'consent select_account',
+    include_granted_scopes: 'true',
+    state: expectedState,
+  });
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+
+  const authDetail = await new Promise<{ accessToken: string }>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      window.removeEventListener('kevinGmailAuthResult', onResult as EventListener);
+      activeNativeCancel = null;
+    };
+
+    const onResult = (ev: CustomEvent<any>) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const detail = ev?.detail || {};
+      if (detail.ok && detail.accessToken) {
+        resolve({ accessToken: String(detail.accessToken) });
+        return;
+      }
+      if (detail.cancelled) {
+        const cancelErr: any = new Error('Google sign-in cancelled.');
+        cancelErr.code = 'auth/popup-closed-by-user';
+        reject(cancelErr);
+        return;
+      }
+      const msg = String(detail.errorDescription || detail.error || 'Kwinjira na Google byanze.');
+      reject(new Error(msg));
+    };
+
+    activeNativeCancel = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const cancelErr: any = new Error('Google sign-in cancelled.');
+      cancelErr.code = 'auth/popup-closed-by-user';
+      reject(cancelErr);
+    };
+
+    window.addEventListener('kevinGmailAuthResult', onResult as EventListener);
+    const launched = bridge.startGmailAuth(authUrl, redirectPrefix, expectedState);
+    if (!launched) {
+      settled = true;
+      cleanup();
+      reject(new Error('Failed to launch Google Sign-In screen.'));
+    }
+  });
+
+  const tokenEmail = await verifyGmailScopes(authDetail.accessToken);
+  const profileUser = await fetchGoogleProfileForToken(authDetail.accessToken, tokenEmail);
+  cachedAccessToken = authDetail.accessToken;
+  cachedNativeUser = profileUser;
+  return { user: profileUser, accessToken: cachedAccessToken };
+};
+
 export const signInWithGoogleForGmail = async (): Promise<{
-  user: User;
+  user: GmailUser;
   accessToken: string;
 }> => {
   if (activeSignInPromise) {
@@ -198,6 +352,11 @@ export const signInWithGoogleForGmail = async (): Promise<{
   activeSignInPromise = (async () => {
     try {
       isSigningIn = true;
+      const bridge = typeof window !== 'undefined' ? (window as any).KevinAgentBridge : null;
+      if (isCapacitorApkRuntime() && typeof bridge?.startGmailAuth === 'function') {
+        return await signInWithGoogleForGmailNativeApk(bridge);
+      }
+
       const result = await signInWithPopup(
         auth,
         provider,
@@ -210,32 +369,10 @@ export const signInWithGoogleForGmail = async (): Promise<{
 
       // Verify granted OAuth scopes immediately so missing checkboxes on Google's consent
       // screen give clear instructions instead of a confusing 403 loop.
-      try {
-        const infoRes = await fetch(
-          `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(credential.accessToken)}`
-        );
-        if (infoRes.ok) {
-          const info = await infoRes.json();
-          const granted = String(info?.scope || '').split(/\s+/).filter(Boolean);
-          const hasRead = granted.includes('https://www.googleapis.com/auth/gmail.readonly')
-            || granted.includes('https://mail.google.com/')
-            || granted.includes('https://www.googleapis.com/auth/gmail.modify');
-          const hasSend = granted.includes('https://www.googleapis.com/auth/gmail.send')
-            || granted.includes('https://mail.google.com/')
-            || granted.includes('https://www.googleapis.com/auth/gmail.modify');
-          if (!hasRead || !hasSend) {
-            cachedAccessToken = null;
-            throw new Error('GMAIL_MISSING_SCOPES');
-          }
-        }
-      } catch (scopeCheckErr: any) {
-        if (scopeCheckErr?.message === 'GMAIL_MISSING_SCOPES') {
-          throw scopeCheckErr;
-        }
-        // If tokeninfo is unreachable, let the Gmail API call proceed directly.
-      }
+      await verifyGmailScopes(credential.accessToken);
 
       cachedAccessToken = credential.accessToken;
+      cachedNativeUser = null;
       return { user: result.user, accessToken: cachedAccessToken };
     } finally {
       isSigningIn = false;
@@ -251,8 +388,14 @@ export const cancelGmailSignIn = (): void => {
     activePopupConsumer?.cancel?.();
   } catch {
     // ignore cleanup errors
+  }
+  try {
+    activeNativeCancel?.();
+  } catch {
+    // ignore cleanup errors
   } finally {
     activePopupConsumer = null;
+    activeNativeCancel = null;
     isSigningIn = false;
     activeSignInPromise = null;
   }
@@ -260,11 +403,22 @@ export const cancelGmailSignIn = (): void => {
 
 export const getGmailAccessToken = (): string | null => cachedAccessToken;
 
-export const getCurrentGmailUser = (): User | null => auth.currentUser;
+export const getCurrentGmailUser = (): GmailUser | null => auth.currentUser || cachedNativeUser;
 
 export const signOutGmail = async (): Promise<void> => {
   cachedAccessToken = null;
-  await auth.signOut();
+  cachedNativeUser = null;
+  try {
+    await auth.signOut();
+  } catch {
+    // ignore Firebase signOut errors in APK native mode
+  }
+  try {
+    const bridge = typeof window !== 'undefined' ? (window as any).KevinAgentBridge : null;
+    bridge?.clearGmailAuthCookies?.();
+  } catch {
+    // ignore
+  }
 };
 
 const decodeBase64UrlUtf8 = (input: string): string => {

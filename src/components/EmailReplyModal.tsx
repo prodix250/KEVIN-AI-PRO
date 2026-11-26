@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { User } from 'firebase/auth';
 import {
   Mail,
   X,
@@ -23,6 +22,7 @@ import {
   getCurrentGmailUser,
   getGmailAccessToken,
   GmailMessage,
+  GmailUser,
   initGmailAuth,
   sendGmailReply,
   signInWithGoogleForGmail,
@@ -42,7 +42,7 @@ export default function EmailReplyModal({
   selectedModel,
   onToast,
 }: EmailReplyModalProps) {
-  const [user, setUser] = useState<User | null>(() => getCurrentGmailUser());
+  const [user, setUser] = useState<GmailUser | null>(() => getCurrentGmailUser());
   const [accessToken, setAccessToken] = useState<string | null>(() => getGmailAccessToken());
   const [needsAuth, setNeedsAuth] = useState<boolean>(() => !getGmailAccessToken());
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -130,6 +130,7 @@ export default function EmailReplyModal({
     const currentTok = getGmailAccessToken();
     if (currentTok) {
       setAccessToken(currentTok);
+      setUser(getCurrentGmailUser());
       setNeedsAuth(false);
       loadEmails(currentTok, activeQuery);
     } else {

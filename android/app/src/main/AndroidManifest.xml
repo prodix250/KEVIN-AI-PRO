@@ -255,6 +255,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Gmail Google OAuth Activity -->
+        <activity
+            android:name=".GmailAuthActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:exported="false"
+            android:label="Izi AI Google Sign-In"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Main Activity -->
         <activity
             android:name=".MainActivity"

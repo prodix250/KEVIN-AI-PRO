@@ -23903,7 +23903,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-B1v2-ThO.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-3ZwbWDlX.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -38687,7 +38687,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-Djb9Q99f.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-C8KsO8hD.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -112965,8 +112965,10 @@ provider.setCustomParameters({
 });
 let isSigningIn = false;
 let cachedAccessToken = null;
+let cachedNativeUser = null;
 let activeSignInPromise = null;
 let activePopupConsumer = null;
+let activeNativeCancel = null;
 const BaseBrowserResolver = browserPopupRedirectResolver;
 class SafePopupRedirectResolver extends BaseBrowserResolver {
   async _initialize(authInstance) {
@@ -113059,18 +113061,138 @@ class SafePopupRedirectResolver extends BaseBrowserResolver {
 }
 const initGmailAuth = (onAuthSuccess, onAuthFailure) => {
   return onAuthStateChanged(auth, (user) => {
-    if (user) {
+    const activeUser = user || cachedNativeUser;
+    if (activeUser) {
       if (cachedAccessToken) {
-        onAuthSuccess == null ? void 0 : onAuthSuccess(user, cachedAccessToken);
+        onAuthSuccess == null ? void 0 : onAuthSuccess(activeUser, cachedAccessToken);
       } else if (!isSigningIn) {
         cachedAccessToken = null;
-        onAuthFailure == null ? void 0 : onAuthFailure(user);
+        onAuthFailure == null ? void 0 : onAuthFailure(activeUser);
       }
-    } else {
+    } else if (!isSigningIn) {
       cachedAccessToken = null;
+      cachedNativeUser = null;
       onAuthFailure == null ? void 0 : onAuthFailure(null);
     }
   });
+};
+const verifyGmailScopes = async (accessToken) => {
+  try {
+    const infoRes = await fetch(
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`
+    );
+    if (infoRes.ok) {
+      const info = await infoRes.json();
+      const granted = String((info == null ? void 0 : info.scope) || "").split(/\s+/).filter(Boolean);
+      const hasRead = granted.includes("https://www.googleapis.com/auth/gmail.readonly") || granted.includes("https://mail.google.com/") || granted.includes("https://www.googleapis.com/auth/gmail.modify");
+      const hasSend = granted.includes("https://www.googleapis.com/auth/gmail.send") || granted.includes("https://mail.google.com/") || granted.includes("https://www.googleapis.com/auth/gmail.modify");
+      if (!hasRead || !hasSend) {
+        cachedAccessToken = null;
+        throw new Error("GMAIL_MISSING_SCOPES");
+      }
+      return typeof (info == null ? void 0 : info.email) === "string" && info.email ? info.email : null;
+    }
+  } catch (scopeCheckErr) {
+    if ((scopeCheckErr == null ? void 0 : scopeCheckErr.message) === "GMAIL_MISSING_SCOPES") {
+      throw scopeCheckErr;
+    }
+  }
+  return null;
+};
+const fetchGoogleProfileForToken = async (accessToken, fallbackEmail) => {
+  try {
+    const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (res.ok) {
+      const profile = await res.json();
+      return {
+        uid: (profile == null ? void 0 : profile.sub) || void 0,
+        email: (profile == null ? void 0 : profile.email) || fallbackEmail,
+        displayName: (profile == null ? void 0 : profile.name) || (profile == null ? void 0 : profile.email) || fallbackEmail,
+        photoURL: (profile == null ? void 0 : profile.picture) || null
+      };
+    }
+  } catch {
+  }
+  return {
+    email: fallbackEmail,
+    displayName: fallbackEmail,
+    photoURL: null
+  };
+};
+const generateOAuthNonce = () => {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID().replace(/-/g, "");
+    }
+  } catch {
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+};
+const signInWithGoogleForGmailNativeApk = async (bridge) => {
+  const clientId = String(firebaseConfig.oAuthClientId || "").trim();
+  const authDomain2 = String(firebaseConfig.authDomain || "").trim();
+  if (!clientId || !authDomain2) {
+    throw new Error("Missing Firebase OAuth configuration.");
+  }
+  const redirectPrefix = `https://${authDomain2}/__/auth/handler`;
+  const expectedState = generateOAuthNonce();
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectPrefix,
+    response_type: "token",
+    scope: ["openid", "email", "profile", ...GMAIL_SCOPES].join(" "),
+    prompt: "consent select_account",
+    include_granted_scopes: "true",
+    state: expectedState
+  });
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  const authDetail = await new Promise((resolve, reject2) => {
+    let settled = false;
+    const cleanup = () => {
+      window.removeEventListener("kevinGmailAuthResult", onResult);
+      activeNativeCancel = null;
+    };
+    const onResult = (ev) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const detail = (ev == null ? void 0 : ev.detail) || {};
+      if (detail.ok && detail.accessToken) {
+        resolve({ accessToken: String(detail.accessToken) });
+        return;
+      }
+      if (detail.cancelled) {
+        const cancelErr = new Error("Google sign-in cancelled.");
+        cancelErr.code = "auth/popup-closed-by-user";
+        reject2(cancelErr);
+        return;
+      }
+      const msg = String(detail.errorDescription || detail.error || "Kwinjira na Google byanze.");
+      reject2(new Error(msg));
+    };
+    activeNativeCancel = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const cancelErr = new Error("Google sign-in cancelled.");
+      cancelErr.code = "auth/popup-closed-by-user";
+      reject2(cancelErr);
+    };
+    window.addEventListener("kevinGmailAuthResult", onResult);
+    const launched = bridge.startGmailAuth(authUrl, redirectPrefix, expectedState);
+    if (!launched) {
+      settled = true;
+      cleanup();
+      reject2(new Error("Failed to launch Google Sign-In screen."));
+    }
+  });
+  const tokenEmail = await verifyGmailScopes(authDetail.accessToken);
+  const profileUser = await fetchGoogleProfileForToken(authDetail.accessToken, tokenEmail);
+  cachedAccessToken = authDetail.accessToken;
+  cachedNativeUser = profileUser;
+  return { user: profileUser, accessToken: cachedAccessToken };
 };
 const signInWithGoogleForGmail = async () => {
   if (activeSignInPromise) {
@@ -113079,6 +113201,10 @@ const signInWithGoogleForGmail = async () => {
   activeSignInPromise = (async () => {
     try {
       isSigningIn = true;
+      const bridge = typeof window !== "undefined" ? window.KevinAgentBridge : null;
+      if (isCapacitorApkRuntime() && typeof (bridge == null ? void 0 : bridge.startGmailAuth) === "function") {
+        return await signInWithGoogleForGmailNativeApk(bridge);
+      }
       const result2 = await signInWithPopup(
         auth,
         provider,
@@ -113088,26 +113214,9 @@ const signInWithGoogleForGmail = async () => {
       if (!(credential == null ? void 0 : credential.accessToken)) {
         throw new Error("Failed to obtain Google OAuth access token.");
       }
-      try {
-        const infoRes = await fetch(
-          `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(credential.accessToken)}`
-        );
-        if (infoRes.ok) {
-          const info = await infoRes.json();
-          const granted = String((info == null ? void 0 : info.scope) || "").split(/\s+/).filter(Boolean);
-          const hasRead = granted.includes("https://www.googleapis.com/auth/gmail.readonly") || granted.includes("https://mail.google.com/") || granted.includes("https://www.googleapis.com/auth/gmail.modify");
-          const hasSend = granted.includes("https://www.googleapis.com/auth/gmail.send") || granted.includes("https://mail.google.com/") || granted.includes("https://www.googleapis.com/auth/gmail.modify");
-          if (!hasRead || !hasSend) {
-            cachedAccessToken = null;
-            throw new Error("GMAIL_MISSING_SCOPES");
-          }
-        }
-      } catch (scopeCheckErr) {
-        if ((scopeCheckErr == null ? void 0 : scopeCheckErr.message) === "GMAIL_MISSING_SCOPES") {
-          throw scopeCheckErr;
-        }
-      }
+      await verifyGmailScopes(credential.accessToken);
       cachedAccessToken = credential.accessToken;
+      cachedNativeUser = null;
       return { user: result2.user, accessToken: cachedAccessToken };
     } finally {
       isSigningIn = false;
@@ -113121,17 +113230,32 @@ const cancelGmailSignIn = () => {
   try {
     (_a2 = activePopupConsumer == null ? void 0 : activePopupConsumer.cancel) == null ? void 0 : _a2.call(activePopupConsumer);
   } catch {
+  }
+  try {
+    activeNativeCancel == null ? void 0 : activeNativeCancel();
+  } catch {
   } finally {
     activePopupConsumer = null;
+    activeNativeCancel = null;
     isSigningIn = false;
     activeSignInPromise = null;
   }
 };
 const getGmailAccessToken = () => cachedAccessToken;
-const getCurrentGmailUser = () => auth.currentUser;
+const getCurrentGmailUser = () => auth.currentUser || cachedNativeUser;
 const signOutGmail = async () => {
+  var _a2;
   cachedAccessToken = null;
-  await auth.signOut();
+  cachedNativeUser = null;
+  try {
+    await auth.signOut();
+  } catch {
+  }
+  try {
+    const bridge = typeof window !== "undefined" ? window.KevinAgentBridge : null;
+    (_a2 = bridge == null ? void 0 : bridge.clearGmailAuthCookies) == null ? void 0 : _a2.call(bridge);
+  } catch {
+  }
 };
 const decodeBase64UrlUtf8 = (input) => {
   if (!input) return "";
@@ -113471,6 +113595,7 @@ function EmailReplyModal({
     const currentTok = getGmailAccessToken();
     if (currentTok) {
       setAccessToken(currentTok);
+      setUser(getCurrentGmailUser());
       setNeedsAuth(false);
       loadEmails(currentTok, activeQuery);
     } else {
@@ -114116,7 +114241,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-CBAypq2y.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-CHOteLkb.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
