@@ -1105,11 +1105,11 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
     const videoId = action.videoId || action.args?.videoId;
     const query = action.args?.query || '';
     const shouldAutoPlay = perms.autoPlayYouTube !== false || forceExecute;
-    if (bridge?.playYouTube && shouldAutoPlay) {
-      bridge.playYouTube(videoId || '', query);
+    if (action.embedUrl && shouldAutoPlay) {
       return true;
     }
-    if (action.embedUrl && shouldAutoPlay) {
+    if (bridge?.playYouTube && shouldAutoPlay) {
+      bridge.playYouTube(videoId || '', query);
       return true;
     }
     const target = shouldAutoPlay
