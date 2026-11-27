@@ -504,6 +504,11 @@ public class KevinAgentBridge {
     }
 
     @JavascriptInterface
+    public String getActiveWhatsAppMessages() {
+        return KevinNotificationListenerService.getActiveWhatsAppNotificationsJson(activity);
+    }
+
+    @JavascriptInterface
     public boolean sendSms(String phoneNumber, String message) {
         if (ContextCompat.checkSelfPermission(activity, Manifest.permission.SEND_SMS)
                 != PackageManager.PERMISSION_GRANTED) {

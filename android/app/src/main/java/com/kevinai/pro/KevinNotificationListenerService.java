@@ -124,6 +124,51 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         }
     }
 
+    public static String getActiveWhatsAppNotificationsJson(Context context) {
+        KevinNotificationListenerService svc = instance;
+        if (svc == null) {
+            return "[]";
+        }
+        try {
+            StatusBarNotification[] active = svc.getActiveNotifications();
+            if (active == null || active.length == 0) {
+                return "[]";
+            }
+            JSONArray arr = new JSONArray();
+            String ownerName = KevinAgentPrefs.getUserName(context != null ? context : svc);
+            for (StatusBarNotification sbn : active) {
+                if (sbn == null) continue;
+                String pkg = sbn.getPackageName();
+                if (!"com.whatsapp".equals(pkg) && !"com.whatsapp.w4b".equals(pkg)) continue;
+                Notification n = sbn.getNotification();
+                if (n == null || (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) continue;
+                Bundle extras = n.extras;
+                if (extras == null) continue;
+                CharSequence titleSeq = extras.getCharSequence(Notification.EXTRA_TITLE);
+                String sender = titleSeq != null ? titleSeq.toString().trim() : "";
+                if (TextUtils.isEmpty(sender) || "WhatsApp".equalsIgnoreCase(sender) || "WhatsApp Business".equalsIgnoreCase(sender)) {
+                    continue;
+                }
+                String incoming = svc.extractIncomingMessage(extras, sender, ownerName);
+                if (TextUtils.isEmpty(incoming) || svc.isIgnorableSystemText(incoming)) {
+                    continue;
+                }
+                Notification.Action replyAction = svc.findReplyAction(n);
+                JSONObject obj = new JSONObject();
+                obj.put("id", sbn.getKey());
+                obj.put("sender", sender);
+                obj.put("message", incoming);
+                obj.put("timestamp", n.when > 0 ? n.when : System.currentTimeMillis());
+                obj.put("unread", true);
+                obj.put("canReplyDirectly", replyAction != null);
+                arr.put(obj);
+            }
+            return arr.toString();
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
     private boolean handleStatusBarNotification(StatusBarNotification sbn, boolean forceScan) {
         if (sbn == null) {
             return false;

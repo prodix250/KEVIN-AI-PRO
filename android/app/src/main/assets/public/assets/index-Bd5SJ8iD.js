@@ -23903,7 +23903,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-SQZiWFY_.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-D6sHCt8F.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -38687,7 +38687,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-BpJa9YD4.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-KMCOEmq6.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -114177,6 +114177,854 @@ function EmailReplyModal({
     }
   ) });
 }
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+const WHATSAPP_INBOX_STORAGE_KEY = "kevin_ai_whatsapp_inbox";
+const INITIAL_SAMPLE_CHATS = [
+  {
+    id: "wa_sample_1",
+    sender: "Aline Mugabo",
+    phoneNumber: "+250788123456",
+    message: "Muraho Kevin! Waramutse ute? Ese warangije gusuzuma ya dosiye ya projet twavuganaga ejo?",
+    timestamp: Date.now() - 18 * 60 * 1e3,
+    unread: true
+  },
+  {
+    id: "wa_sample_2",
+    sender: "Eric Nkurunziza",
+    phoneNumber: "+250789654321",
+    message: "Bite bro! Uyu munsi uraboneka saa cyenda (3:00 PM) tuganire ku kibazo cya system?",
+    timestamp: Date.now() - 75 * 60 * 1e3,
+    unread: true
+  },
+  {
+    id: "wa_sample_3",
+    sender: "Clarisse Umutoni",
+    phoneNumber: "+250783112233",
+    message: "Urakoze cyane ku bufasha waduhaye. Waba uzi igihe gahunda nshya izatangirira?",
+    timestamp: Date.now() - 210 * 60 * 1e3,
+    unread: false,
+    repliedText: "Muraho Clarisse! Gahunda izatangira ku wa Mbere mugitondo."
+  }
+];
+function getStoredWhatsAppChats() {
+  if (typeof window === "undefined") return INITIAL_SAMPLE_CHATS;
+  try {
+    const raw = localStorage.getItem(WHATSAPP_INBOX_STORAGE_KEY);
+    if (!raw) {
+      localStorage.setItem(WHATSAPP_INBOX_STORAGE_KEY, JSON.stringify(INITIAL_SAMPLE_CHATS));
+      return INITIAL_SAMPLE_CHATS;
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_SAMPLE_CHATS;
+  } catch {
+    return INITIAL_SAMPLE_CHATS;
+  }
+}
+function saveStoredWhatsAppChats(chats) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(WHATSAPP_INBOX_STORAGE_KEY, JSON.stringify(chats));
+  } catch (err) {
+    console.error("Unable to save WhatsApp chats to localStorage:", err);
+  }
+}
+async function fetchActiveWhatsAppChats() {
+  const stored = getStoredWhatsAppChats();
+  const bridge = window.KevinAgentBridge;
+  if (bridge == null ? void 0 : bridge.getActiveWhatsAppMessages) {
+    try {
+      const raw = bridge.getActiveWhatsAppMessages();
+      const activeFromNative = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (Array.isArray(activeFromNative) && activeFromNative.length > 0) {
+        const merged = [...stored];
+        for (const nativeItem of activeFromNative) {
+          const existingIdx = merged.findIndex(
+            (c2) => c2.sender.toLowerCase() === (nativeItem.sender || "").toLowerCase()
+          );
+          const formattedItem = {
+            id: nativeItem.id || `wa_notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            sender: nativeItem.sender || "WhatsApp Contact",
+            phoneNumber: nativeItem.phoneNumber || (isLikelyPhoneNumber(nativeItem.sender) ? nativeItem.sender : ""),
+            message: nativeItem.message || "",
+            timestamp: Number(nativeItem.timestamp || Date.now()),
+            unread: true,
+            notificationKey: nativeItem.id,
+            canReplyDirectly: Boolean(nativeItem.canReplyDirectly)
+          };
+          if (existingIdx >= 0) {
+            merged[existingIdx] = {
+              ...merged[existingIdx],
+              ...formattedItem,
+              message: formattedItem.message || merged[existingIdx].message,
+              timestamp: formattedItem.timestamp,
+              unread: true
+            };
+          } else {
+            merged.unshift(formattedItem);
+          }
+        }
+        saveStoredWhatsAppChats(merged);
+        return merged;
+      }
+    } catch (e) {
+      console.warn("Unable to parse native WhatsApp notifications:", e);
+    }
+  }
+  return stored;
+}
+function addIncomingWhatsAppChat(sender, message, phoneNumber) {
+  const chats = getStoredWhatsAppChats();
+  const cleanSender = sender.trim() || "WhatsApp Contact";
+  const cleanMessage = message.trim();
+  const cleanPhone = phoneNumber ? sanitizePhoneNumber(phoneNumber) : "";
+  const newChat = {
+    id: `wa_user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    sender: cleanSender,
+    phoneNumber: cleanPhone,
+    message: cleanMessage,
+    timestamp: Date.now(),
+    unread: true
+  };
+  const updated = [newChat, ...chats.filter((c2) => c2.id !== newChat.id)];
+  saveStoredWhatsAppChats(updated);
+  return newChat;
+}
+function markWhatsAppChatAsRead(id2) {
+  const chats = getStoredWhatsAppChats();
+  const updated = chats.map((c2) => c2.id === id2 ? { ...c2, unread: false } : c2);
+  saveStoredWhatsAppChats(updated);
+}
+async function draftWhatsAppReplyWithAI(chat, instruction, _model) {
+  const reply = await generateWhatsAppAutoReply(
+    chat.sender,
+    chat.message,
+    (instruction == null ? void 0 : instruction.trim()) || void 0
+  );
+  return reply;
+}
+async function sendWhatsAppReplyAction(chat, replyText, overridePhone) {
+  var _a2;
+  const text2 = replyText.trim();
+  if (!text2) throw new Error("Igisubizo ntigishobora kuba cyera.");
+  const effectivePhone = (overridePhone == null ? void 0 : overridePhone.trim()) || ((_a2 = chat.phoneNumber) == null ? void 0 : _a2.trim()) || (isLikelyPhoneNumber(chat.sender) ? chat.sender : "");
+  let matchedPhone = effectivePhone;
+  if (!matchedPhone) {
+    const contacts = getSavedContacts();
+    const match = contacts.find(
+      (c2) => c2.name.toLowerCase() === chat.sender.toLowerCase()
+    );
+    if (match == null ? void 0 : match.phone) {
+      matchedPhone = match.phone;
+    }
+  }
+  const bridge = window.KevinAgentBridge;
+  if ((bridge == null ? void 0 : bridge.sendWhatsApp) && matchedPhone) {
+    try {
+      bridge.sendWhatsApp(matchedPhone, text2);
+      appendAgentOutbox({
+        channel: "whatsapp",
+        recipient: chat.sender || matchedPhone,
+        incoming: chat.message,
+        message: text2,
+        status: "sent"
+      });
+      playWhatsAppSound("send");
+      markWhatsAppChatAsReplied(chat.id, text2);
+      return { success: true, method: "native_app" };
+    } catch {
+    }
+  }
+  const formattedDigits = matchedPhone ? formatWhatsAppPhoneNumber(matchedPhone) : "";
+  const waUrl = formattedDigits ? `https://wa.me/${formattedDigits}?text=${encodeURIComponent(text2)}` : `https://web.whatsapp.com/send?text=${encodeURIComponent(text2)}`;
+  if (typeof window !== "undefined") {
+    window.open(waUrl, "_blank", "noopener,noreferrer");
+  }
+  appendAgentOutbox({
+    channel: "whatsapp",
+    recipient: chat.sender || matchedPhone || "WhatsApp Chat",
+    incoming: chat.message,
+    message: text2,
+    status: "sent"
+  });
+  playWhatsAppSound("send");
+  markWhatsAppChatAsReplied(chat.id, text2);
+  return { success: true, method: "web_link" };
+}
+function markWhatsAppChatAsReplied(id2, replyText) {
+  const chats = getStoredWhatsAppChats();
+  const updated = chats.map(
+    (c2) => c2.id === id2 ? { ...c2, unread: false, repliedText: replyText } : c2
+  );
+  saveStoredWhatsAppChats(updated);
+}
+function WhatsAppReplyModal({
+  isOpen,
+  onClose,
+  selectedModel,
+  onToast
+}) {
+  const [chats, setChats] = reactExports.useState(() => getStoredWhatsAppChats());
+  const [filterMode, setFilterMode] = reactExports.useState("unread");
+  const [searchQuery, setSearchQuery] = reactExports.useState("");
+  const [selectedChat, setSelectedChat] = reactExports.useState(null);
+  const [aiInstruction, setAiInstruction] = reactExports.useState("");
+  const [replyText, setReplyText] = reactExports.useState("");
+  const [isDrafting, setIsDrafting] = reactExports.useState(false);
+  const [isRefreshing, setIsRefreshing] = reactExports.useState(false);
+  const [recipientPhoneInput, setRecipientPhoneInput] = reactExports.useState("");
+  const [showSendConfirm, setShowSendConfirm] = reactExports.useState(false);
+  const [isSending, setIsSending] = reactExports.useState(false);
+  const [copiedDraft, setCopiedDraft] = reactExports.useState(false);
+  const [showAddChatModal, setShowAddChatModal] = reactExports.useState(false);
+  const [newChatSender, setNewChatSender] = reactExports.useState("");
+  const [newChatPhone, setNewChatPhone] = reactExports.useState("");
+  const [newChatMessage, setNewChatMessage] = reactExports.useState("");
+  const refreshChats = async () => {
+    setIsRefreshing(true);
+    try {
+      const active = await fetchActiveWhatsAppChats();
+      setChats(active);
+      if (active.length > 0 && !selectedChat) {
+        setSelectedChat(active[0]);
+        setRecipientPhoneInput(active[0].phoneNumber || "");
+      } else if (selectedChat) {
+        const found = active.find((c2) => c2.id === selectedChat.id);
+        if (found) {
+          setSelectedChat(found);
+          setRecipientPhoneInput(found.phoneNumber || "");
+        }
+      }
+    } catch {
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+  reactExports.useEffect(() => {
+    if (!isOpen) return;
+    refreshChats();
+  }, [isOpen]);
+  reactExports.useEffect(() => {
+    if (selectedChat) {
+      setRecipientPhoneInput(selectedChat.phoneNumber || "");
+      if (selectedChat.unread) {
+        markWhatsAppChatAsRead(selectedChat.id);
+        setChats(
+          (prev) => prev.map((c2) => c2.id === selectedChat.id ? { ...c2, unread: false } : c2)
+        );
+      }
+    }
+  }, [selectedChat == null ? void 0 : selectedChat.id]);
+  const handleSelectChat = (chat) => {
+    setSelectedChat(chat);
+    setReplyText(chat.repliedText || "");
+    setAiInstruction("");
+    setRecipientPhoneInput(chat.phoneNumber || "");
+  };
+  const handleGenerateAiDraft = async (presetInstruction) => {
+    if (!selectedChat) return;
+    const instructionToUse = presetInstruction ?? aiInstruction;
+    if (presetInstruction) {
+      setAiInstruction(presetInstruction);
+    }
+    setIsDrafting(true);
+    try {
+      const draft = await draftWhatsAppReplyWithAI(
+        selectedChat,
+        instructionToUse,
+        selectedModel
+      );
+      setReplyText(draft);
+    } catch (err) {
+      onToast(`⚠️ Byanze gutegura igisubizo: ${(err == null ? void 0 : err.message) || "Error"}`);
+    } finally {
+      setIsDrafting(false);
+    }
+  };
+  const handleSendReply = async () => {
+    if (!selectedChat || !replyText.trim()) return;
+    setIsSending(true);
+    try {
+      const res = await sendWhatsAppReplyAction(
+        selectedChat,
+        replyText.trim(),
+        recipientPhoneInput.trim()
+      );
+      setShowSendConfirm(false);
+      onToast(
+        res.method === "native_app" ? `💬 Igisubizo cyohererejwe ${selectedChat.sender} kuri WhatsApp!` : `💬 WhatsApp yafunguwe kuri ${selectedChat.sender} kugira ngo wohereze!`
+      );
+      setChats(getStoredWhatsAppChats());
+      setSelectedChat(
+        (prev) => prev ? { ...prev, unread: false, repliedText: replyText.trim() } : null
+      );
+    } catch (err) {
+      onToast(`⚠️ Byanze kohereza: ${(err == null ? void 0 : err.message) || "Error"}`);
+    } finally {
+      setIsSending(false);
+    }
+  };
+  const handleAddNewChat = (e) => {
+    e.preventDefault();
+    if (!newChatSender.trim() || !newChatMessage.trim()) {
+      onToast("⚠️ Shyiramo izina ry’uwakwandikiye n’ubutumwa yohereje.");
+      return;
+    }
+    const created = addIncomingWhatsAppChat(
+      newChatSender,
+      newChatMessage,
+      newChatPhone
+    );
+    setChats(getStoredWhatsAppChats());
+    setSelectedChat(created);
+    setRecipientPhoneInput(created.phoneNumber || "");
+    setReplyText("");
+    setNewChatSender("");
+    setNewChatPhone("");
+    setNewChatMessage("");
+    setShowAddChatModal(false);
+    onToast(`✅ Ubutumwa bwa ${created.sender} bwashyizwemo neza!`);
+  };
+  const filteredChats = chats.filter((c2) => {
+    if (filterMode === "unread" && !c2.unread) return false;
+    if (searchQuery.trim()) {
+      const q2 = searchQuery.toLowerCase();
+      const matchSender = c2.sender.toLowerCase().includes(q2);
+      const matchMsg = c2.message.toLowerCase().includes(q2);
+      const matchPhone = (c2.phoneNumber || "").toLowerCase().includes(q2);
+      return matchSender || matchMsg || matchPhone;
+    }
+    return true;
+  });
+  const unreadCount = chats.filter((c2) => c2.unread).length;
+  const formatChatTime = (ts) => {
+    if (!ts) return "";
+    const date = new Date(ts);
+    const now2 = /* @__PURE__ */ new Date();
+    const isToday = date.toDateString() === now2.toDateString();
+    return isToday ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : date.toLocaleDateString([], { month: "short", day: "numeric" });
+  };
+  const copyToClipboard = () => {
+    if (!replyText.trim()) return;
+    navigator.clipboard.writeText(replyText.trim());
+    setCopiedDraft(true);
+    setTimeout(() => setCopiedDraft(false), 2e3);
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(AnimatePresence, { children: isOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "div",
+    {
+      className: "fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 select-none",
+      onClick: onClose,
+      children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        motion.div,
+        {
+          initial: { scale: 0.94, opacity: 0 },
+          animate: { scale: 1, opacity: 1 },
+          exit: { scale: 0.94, opacity: 0 },
+          onClick: (e) => e.stopPropagation(),
+          className: "bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-3xl w-full max-w-4xl h-[90vh] max-h-[780px] flex flex-col overflow-hidden relative",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between px-4 py-3.5 border-b border-gray-200 dark:border-[#2f3b43] bg-[#f8fafc] dark:bg-[#182229] shrink-0", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 min-w-0", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-2xl bg-[#25D366]/15 text-[#25D366] flex items-center justify-center shrink-0 shadow-xs", children: /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSquare, { size: 22 }) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-bold text-sm sm:text-base text-gray-900 dark:text-white truncate", children: "Subiza ubutumwa kuri WhatsApp" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-[#25D366]/15 text-[#075E54] dark:text-[#00FF88] shrink-0", children: "WHATSAPP" })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-gray-500 dark:text-[#8696a0] truncate", children: "Soma ubutumwa butasomwe, utegure igisubizo na AI, ucyoherereze kuri WhatsApp" })
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 shrink-0", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: refreshChats,
+                    disabled: isRefreshing,
+                    className: "p-2 rounded-xl text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-[#222c33] transition-colors cursor-pointer",
+                    title: "Ongera ushake ubutumwa (Refresh)",
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { size: 17, className: isRefreshing ? "animate-spin text-[#25D366]" : "" })
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setShowAddChatModal(true),
+                    className: "hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 text-[#075E54] dark:text-[#00FF88] text-xs font-bold transition-all cursor-pointer",
+                    title: "Shyiramo ubutumwa bushya wahawe",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { size: 15 }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Ongeramo" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: onClose,
+                    className: "p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-[#252525] transition-colors cursor-pointer",
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx(X$1, { size: 19 })
+                  }
+                )
+              ] })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "div",
+                {
+                  className: `w-full md:w-80 lg:w-88 border-r border-gray-200 dark:border-[#2f3b43] flex flex-col bg-[#fdfdfd] dark:bg-[#111b21] shrink-0 ${selectedChat ? "hidden md:flex" : "flex"}`,
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-3 border-b border-gray-100 dark:border-[#222c33]", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { size: 15, className: "absolute left-3 top-2.5 text-gray-400" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "input",
+                        {
+                          type: "text",
+                          value: searchQuery,
+                          onChange: (e) => setSearchQuery(e.target.value),
+                          placeholder: "Shakisha umuntu cyangwa ubutumwa...",
+                          className: "w-full bg-gray-100 dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] pl-9 pr-8 py-2 rounded-xl text-xs border border-transparent focus:border-[#25D366] focus:outline-none transition-all placeholder:text-gray-400"
+                        }
+                      ),
+                      searchQuery && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: () => setSearchQuery(""),
+                          className: "absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600",
+                          children: /* @__PURE__ */ jsxRuntimeExports.jsx(X$1, { size: 14 })
+                        }
+                      )
+                    ] }) }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 p-1.5 mx-3 my-2 rounded-xl bg-gray-100 dark:bg-[#202c33] gap-1 text-xs font-bold", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: () => setFilterMode("unread"),
+                          className: `py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${filterMode === "unread" ? "bg-white dark:bg-[#111b21] text-[#075E54] dark:text-[#00FF88] shadow-xs" : "text-gray-500 hover:text-gray-900 dark:text-gray-400"}`,
+                          children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Butasomwe" }),
+                            unreadCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-4 h-4 rounded-full bg-[#25D366] text-white text-[10px] flex items-center justify-center", children: unreadCount })
+                          ]
+                        }
+                      ),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: () => setFilterMode("all"),
+                          className: `py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${filterMode === "all" ? "bg-white dark:bg-[#111b21] text-[#075E54] dark:text-[#00FF88] shadow-xs" : "text-gray-500 hover:text-gray-900 dark:text-gray-400"}`,
+                          children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+                            "Byose (",
+                            chats.length,
+                            ")"
+                          ] })
+                        }
+                      )
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 overflow-y-auto px-2 space-y-1 scrollbar-thin", children: filteredChats.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "py-12 text-center px-4", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-12 h-12 rounded-full bg-gray-100 dark:bg-[#202c33] text-gray-400 flex items-center justify-center mx-auto mb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSquare, { size: 22 }) }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-bold text-gray-700 dark:text-gray-300", children: "Nta butumwa bubonetse" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-gray-400 mt-1", children: filterMode === "unread" ? "Ubutumwa bwose butasomwe bwarangiye." : "Nta butumwa bwa WhatsApp burakoreshwa." }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: () => setShowAddChatModal(true),
+                          className: "mt-3 px-3 py-1.5 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 text-[#075E54] dark:text-[#00FF88] text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1",
+                          children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { size: 13 }),
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Ongeramo ubutumwa" })
+                          ]
+                        }
+                      )
+                    ] }) : filteredChats.map((chat) => {
+                      const isSelected = (selectedChat == null ? void 0 : selectedChat.id) === chat.id;
+                      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                        "div",
+                        {
+                          onClick: () => handleSelectChat(chat),
+                          className: `p-3 rounded-2xl cursor-pointer transition-all flex items-start gap-3 border ${isSelected ? "bg-[#E1FFC7]/80 dark:bg-[#005c4b]/35 border-[#25D366]/50 shadow-xs" : "hover:bg-gray-100/80 dark:hover:bg-[#182229] border-transparent"}`,
+                          children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-full bg-gradient-to-br from-[#075E54] to-[#128C7E] text-white font-extrabold text-sm flex items-center justify-center shrink-0 shadow-xs", children: chat.sender.charAt(0).toUpperCase() }),
+                            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+                              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-1", children: [
+                                /* @__PURE__ */ jsxRuntimeExports.jsx("h4", { className: "font-bold text-xs text-gray-900 dark:text-white truncate", children: chat.sender }),
+                                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-gray-400 shrink-0 font-mono", children: formatChatTime(chat.timestamp) })
+                              ] }),
+                              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-gray-500 dark:text-[#8696a0] line-clamp-2 mt-0.5", children: chat.message }),
+                              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between mt-1.5", children: [
+                                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-gray-400 truncate", children: chat.phoneNumber || "WhatsApp" }),
+                                chat.unread ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-2.5 h-2.5 rounded-full bg-[#25D366] shadow-xs" }) : chat.repliedText ? /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-[10px] font-bold text-[#00a884] dark:text-[#00FF88] flex items-center gap-0.5", children: [
+                                  /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { size: 11 }),
+                                  " Yasubijwe"
+                                ] }) : null
+                              ] })
+                            ] })
+                          ]
+                        },
+                        chat.id
+                      );
+                    }) })
+                  ]
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "div",
+                {
+                  className: `flex-1 flex flex-col min-w-0 bg-white dark:bg-[#202c33] ${selectedChat ? "flex" : "hidden md:flex"}`,
+                  children: selectedChat ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 flex flex-col min-h-0 overflow-y-auto p-4 sm:p-6 space-y-5", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between pb-3 border-b border-gray-100 dark:border-[#2b3942]", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          "button",
+                          {
+                            type: "button",
+                            onClick: () => setSelectedChat(null),
+                            className: "md:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#182229]",
+                            children: /* @__PURE__ */ jsxRuntimeExports.jsx(ArrowLeft, { size: 18 })
+                          }
+                        ),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-11 h-11 rounded-2xl bg-gradient-to-br from-[#075E54] to-[#25D366] text-white font-extrabold text-base flex items-center justify-center shadow-md", children: selectedChat.sender.charAt(0).toUpperCase() }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-extrabold text-sm sm:text-base text-gray-900 dark:text-white", children: selectedChat.sender }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 text-xs text-gray-500 dark:text-[#8696a0]", children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx(Phone, { size: 12, className: "text-[#25D366]" }),
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: recipientPhoneInput || selectedChat.phoneNumber || "Nta nimero ibonetse" })
+                          ] })
+                        ] })
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[11px] text-gray-400 font-mono", children: formatChatTime(selectedChat.timestamp) }) })
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1.5", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[11px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider", children: "Ubutumwa bwakiriwe (Incoming Message)" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-gray-400", children: selectedChat.sender })
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-4 rounded-2xl bg-[#E1FFC7]/60 dark:bg-[#005c4b]/25 border border-[#25D366]/30 text-gray-900 dark:text-white shadow-xs leading-relaxed text-sm relative", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "whitespace-pre-wrap", children: selectedChat.message }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-right mt-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-gray-500 dark:text-gray-400 font-mono", children: formatChatTime(selectedChat.timestamp) }) })
+                      ] })
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3 p-4 rounded-2xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43]", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { size: 16, className: "text-[#25D366]" }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-bold text-gray-800 dark:text-white", children: "Bwira Izi AI uko igusubiriza (AI Reply Prompt)" })
+                        ] }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-[#00a884] dark:text-[#00FF88] font-mono", children: selectedModel })
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1.5", children: [
+                        { label: "Emeza (Confirm)", prompt: "Musubize wemeza ko ubikora kandi nta kibazo." },
+                        { label: "Gushimira (Thank)", prompt: "Musubize umushimira cyane ku butumwa bwe." },
+                        { label: "Gusaba Igihe (Give Time)", prompt: "Musubize ko ugiye kubisuzuma uza kumusubiza mu kanya gato." },
+                        { label: "Ibisobanuro (Details)", prompt: "Musubize umuhe ibisobanuro birambuye kandi bisobanutse neza." },
+                        { label: "Ndi mu nama (Busy)", prompt: "Musubize ko uri mu nama/uhuze, uraza kumuhamagara wifunguye." },
+                        { label: "Kugerayo (On my way)", prompt: "Musubize ko uri mu nzira uza, ugera aho ari mu kanya." }
+                      ].map((preset) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: () => handleGenerateAiDraft(preset.prompt),
+                          disabled: isDrafting,
+                          className: "px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] text-gray-700 dark:text-gray-300 hover:border-[#25D366] hover:text-[#075E54] dark:hover:text-[#00FF88] transition-all cursor-pointer shadow-2xs",
+                          children: preset.label
+                        },
+                        preset.label
+                      )) }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          "input",
+                          {
+                            type: "text",
+                            value: aiInstruction,
+                            onChange: (e) => setAiInstruction(e.target.value),
+                            placeholder: "Urugero: Musubize ko nzamureba ejo saa munani za mugitondo...",
+                            className: "flex-1 bg-white dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-[#313d45] focus:border-[#25D366] focus:outline-none text-xs transition-all shadow-2xs placeholder:text-gray-400",
+                            onKeyDown: (e) => {
+                              if (e.key === "Enter") {
+                                handleGenerateAiDraft();
+                              }
+                            }
+                          }
+                        ),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          "button",
+                          {
+                            type: "button",
+                            onClick: () => handleGenerateAiDraft(),
+                            disabled: isDrafting,
+                            className: "px-4 py-2.5 rounded-xl bg-[#00a884] hover:bg-[#075E54] text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer shrink-0",
+                            children: isDrafting ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                              /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { size: 14, className: "animate-spin" }),
+                              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Birategurwa..." })
+                            ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                              /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { size: 14 }),
+                              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Tegura" })
+                            ] })
+                          }
+                        )
+                      ] })
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "text-xs font-bold text-gray-700 dark:text-gray-300", children: "Igisubizo giteguye (Edit or Review Reply):" }),
+                        replyText && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx(
+                            "button",
+                            {
+                              type: "button",
+                              onClick: copyToClipboard,
+                              className: "text-xs text-gray-500 hover:text-gray-800 dark:hover:text-white flex items-center gap-1 cursor-pointer",
+                              children: copiedDraft ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                                /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { size: 12, className: "text-[#25D366]" }),
+                                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[#25D366]", children: "Byakoporowe" })
+                              ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                                /* @__PURE__ */ jsxRuntimeExports.jsx(Copy, { size: 12 }),
+                                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Koporora" })
+                              ] })
+                            }
+                          ),
+                          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-[10px] text-gray-400 font-mono", children: [
+                            replyText.length,
+                            " inyuguti"
+                          ] })
+                        ] })
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "textarea",
+                        {
+                          value: replyText,
+                          onChange: (e) => setReplyText(e.target.value),
+                          placeholder: "Kanda kuri 'Tegura' hejuru cyangwa wandike igisubizo cyawe hano...",
+                          rows: 4,
+                          className: "w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] p-3.5 rounded-2xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#25D366] focus:outline-none text-xs sm:text-sm leading-relaxed transition-all resize-none shadow-inner"
+                        }
+                      )
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43]", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(Phone, { size: 16, className: "text-[#25D366] shrink-0" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-[10px] font-bold text-gray-400 uppercase", children: "Nimero ya Telefoni yo koherezaho (WhatsApp Number):" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          "input",
+                          {
+                            type: "text",
+                            value: recipientPhoneInput,
+                            onChange: (e) => setRecipientPhoneInput(e.target.value),
+                            placeholder: "e.g. +250788123456 cyangwa 0788123456",
+                            className: "w-full bg-transparent text-gray-900 dark:text-white text-xs font-semibold focus:outline-none"
+                          }
+                        )
+                      ] })
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pt-2 flex items-center justify-end gap-3", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: () => setReplyText(""),
+                          disabled: !replyText,
+                          className: "px-4 py-2.5 rounded-xl text-xs font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-white transition-colors cursor-pointer",
+                          children: "Siba igisubizo"
+                        }
+                      ),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: () => setShowSendConfirm(true),
+                          disabled: !replyText.trim() || isSending,
+                          className: `px-6 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md transition-all flex items-center gap-2 cursor-pointer ${replyText.trim() && !isSending ? "bg-[#25D366] hover:bg-[#20ba59] text-white hover:scale-[1.01]" : "bg-gray-200 dark:bg-[#2a3942] text-gray-400 dark:text-gray-500 cursor-not-allowed"}`,
+                          children: isSending ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { size: 16, className: "animate-spin" }),
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Birakora..." })
+                          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx(Send, { size: 16 }),
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Ohereza kuri WhatsApp" })
+                          ] })
+                        }
+                      )
+                    ] })
+                  ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 flex flex-col items-center justify-center p-8 text-center", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-16 h-16 rounded-full bg-[#25D366]/10 text-[#25D366] flex items-center justify-center mb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSquare, { size: 32 }) }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-bold text-base text-gray-800 dark:text-white", children: "Hitamo ubutumwa ushaka gusubiza" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0] max-w-sm mt-1", children: "Kanda ku butumwa bwa WhatsApp mu rutonde rw'ibumoso kugira ngo usome ubutumwa bwose, Izi AI igutegurire igisubizo cyiza." }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => setShowAddChatModal(true),
+                        className: "mt-4 px-4 py-2 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all",
+                        children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { size: 15 }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Shyiramo ubutumwa bushya" })
+                        ]
+                      }
+                    )
+                  ] })
+                }
+              )
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(AnimatePresence, { children: showSendConfirm && selectedChat && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              motion.div,
+              {
+                initial: { scale: 0.9, opacity: 0 },
+                animate: { scale: 1, opacity: 1 },
+                exit: { scale: 0.9, opacity: 0 },
+                className: "bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-2xl p-6 w-full max-w-sm",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-xl bg-[#25D366]/15 text-[#25D366] flex items-center justify-center shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Send, { size: 20 }) }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("h4", { className: "font-bold text-sm text-gray-900 dark:text-white", children: "Emeza kohereza igisubizo" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-gray-500 dark:text-gray-400", children: [
+                        "Kuri: ",
+                        selectedChat.sender
+                      ] })
+                    ] })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-3 my-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] text-xs text-gray-800 dark:text-[#e9edef] max-h-32 overflow-y-auto italic", children: [
+                    '"',
+                    replyText,
+                    '"'
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-end gap-2 mt-4", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => setShowSendConfirm(false),
+                        className: "px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer",
+                        children: "Reka (Cancel)"
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: handleSendReply,
+                        disabled: isSending,
+                        className: "px-5 py-2 rounded-xl text-xs font-bold bg-[#25D366] hover:bg-[#20ba59] text-white shadow-sm transition-all flex items-center gap-1.5 cursor-pointer",
+                        children: isSending ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { size: 13, className: "animate-spin" }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Kohereza..." })
+                        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { size: 14 }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Emeza Wohereze" })
+                        ] })
+                      }
+                    )
+                  ] })
+                ]
+              }
+            ) }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(AnimatePresence, { children: showAddChatModal && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              motion.div,
+              {
+                initial: { scale: 0.9, opacity: 0 },
+                animate: { scale: 1, opacity: 1 },
+                exit: { scale: 0.9, opacity: 0 },
+                className: "bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-2xl p-6 w-full max-w-md",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between mb-4", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-9 h-9 rounded-xl bg-[#25D366]/15 text-[#25D366] flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { size: 18 }) }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("h4", { className: "font-bold text-sm text-gray-900 dark:text-white", children: "Ongeramo Ubutumwa bwa WhatsApp" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[11px] text-gray-500 dark:text-gray-400", children: "Shyiramo ubutumwa bwo gusubiza ukoresheje Izi AI" })
+                      ] })
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => setShowAddChatModal(false),
+                        className: "p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800",
+                        children: /* @__PURE__ */ jsxRuntimeExports.jsx(X$1, { size: 16 })
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("form", { onSubmit: handleAddNewChat, className: "space-y-3.5", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1", children: "Izina ry'uwakwandikiye (Sender Name):" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "input",
+                        {
+                          type: "text",
+                          value: newChatSender,
+                          onChange: (e) => setNewChatSender(e.target.value),
+                          placeholder: "e.g. Jean Claude, Aline, Eric...",
+                          required: true,
+                          className: "w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-white px-3 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#25D366] focus:outline-none text-xs"
+                        }
+                      )
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1", children: "Nimero ya Telefoni (Phone Number - Optional):" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "input",
+                        {
+                          type: "text",
+                          value: newChatPhone,
+                          onChange: (e) => setNewChatPhone(e.target.value),
+                          placeholder: "e.g. +250788123456",
+                          className: "w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-white px-3 py-2 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#25D366] focus:outline-none text-xs"
+                        }
+                      )
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1", children: "Ubutumwa yohereje (Message text):" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "textarea",
+                        {
+                          value: newChatMessage,
+                          onChange: (e) => setNewChatMessage(e.target.value),
+                          placeholder: "Koporora cyangwa wandike ubutumwa wakiriye kuri WhatsApp hano...",
+                          required: true,
+                          rows: 3,
+                          className: "w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-white p-3 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#25D366] focus:outline-none text-xs resize-none"
+                        }
+                      )
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-[#282828]", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: () => setShowAddChatModal(false),
+                          className: "px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800",
+                          children: "Reka"
+                        }
+                      ),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                        "button",
+                        {
+                          type: "submit",
+                          className: "px-5 py-2 rounded-xl text-xs font-bold bg-[#25D366] hover:bg-[#20ba59] text-white shadow-sm flex items-center gap-1.5",
+                          children: [
+                            /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { size: 14 }),
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Ongeramo" })
+                          ]
+                        }
+                      )
+                    ] })
+                  ] })
+                ]
+              }
+            ) }) })
+          ]
+        }
+      )
+    }
+  ) });
+}
 function s(t2) {
   t2.CapacitorUtils.Synapse = new Proxy(
     {},
@@ -114241,7 +115089,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-ZoEWjdob.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-CtoDS33z.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -115989,8 +116837,8 @@ function App() {
   const [emojiPickerOpen, setEmojiPickerOpen] = reactExports.useState(false);
   const [userName, setUserName] = reactExports.useState(() => localStorage.getItem("kevin_user_name") || localStorage.getItem("kevin_ai_user_name") || "");
   const [tempUserName, setTempUserName] = reactExports.useState(() => localStorage.getItem("kevin_user_name") || localStorage.getItem("kevin_ai_user_name") || "");
-  const [showProfileModal, setShowProfileModal] = reactExports.useState(true);
-  const [authMode, setAuthMode] = reactExports.useState("register");
+  const [showProfileModal, setShowProfileModal] = reactExports.useState(() => !localStorage.getItem("kevin_user_name") && !localStorage.getItem("kevin_ai_user_name"));
+  const [authMode, setAuthMode] = reactExports.useState("login");
   const handleSaveUserName = () => {
     const trimmed = tempUserName.trim();
     if (!trimmed) {
@@ -116002,6 +116850,17 @@ function App() {
     setUserName(trimmed);
     showToastMessage(`✨ Muraho neza ${trimmed}! Izina ryawe ryabitswe.`);
     setShowProfileModal(false);
+  };
+  const handleSaveUserNameFromSettings = () => {
+    const trimmed = tempUserName.trim();
+    if (!trimmed) {
+      showToastMessage("⚠️ Nyamuneka shyiramo izina ryawe!");
+      return;
+    }
+    localStorage.setItem("kevin_user_name", trimmed);
+    localStorage.setItem("kevin_ai_user_name", trimmed);
+    setUserName(trimmed);
+    showToastMessage(`✨ Izina ryahinduwe neza: ${trimmed}`);
   };
   const handleGoogleAuthLogin = async () => {
     try {
@@ -116091,10 +116950,12 @@ function App() {
   const [editingTitle, setEditingTitle] = reactExports.useState("");
   const [chatSearchQuery, setChatSearchQuery] = reactExports.useState("");
   const [showClearConfirm, setShowClearConfirm] = reactExports.useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = reactExports.useState(false);
   const [sessionToDelete, setSessionToDelete] = reactExports.useState(null);
   const [showAbout, setShowAbout] = reactExports.useState(false);
   const [showSettingsModal, setShowSettingsModal] = reactExports.useState(false);
   const [showEmailModal, setShowEmailModal] = reactExports.useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = reactExports.useState(false);
   const [menuOpen, setMenuOpen] = reactExports.useState(false);
   const [previewImage, setPreviewImage] = reactExports.useState(null);
   const [selectedModel, setSelectedModel] = reactExports.useState(() => {
@@ -116802,6 +117663,10 @@ ${briefing.body}`,
     }
     if (showEmailModal) {
       setShowEmailModal(false);
+      return;
+    }
+    if (showWhatsAppModal) {
+      setShowWhatsAppModal(false);
       return;
     }
     if (showAssistantOverlay) {
@@ -117549,6 +118414,23 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
                 {
                   className: "px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200",
                   onClick: () => {
+                    setMenuOpen(false);
+                    setShowWhatsAppModal(true);
+                  },
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSquare, { size: 16, className: "text-[#25D366]" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Subiza WhatsApp (AI Reply)" })
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#25D366]/15 text-[#075E54] dark:text-[#00FF88]", children: "WHATSAPP" })
+                  ]
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "div",
+                {
+                  className: "px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200",
+                  onClick: () => {
                     setNativeAgentStatus(getNativeAgentStatus());
                     setMenuOpen(false);
                     setShowAgentModal(true);
@@ -117625,7 +118507,27 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
               }, children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(Info$1, { size: 16, className: "text-blue-400" }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "About Izi AI" })
-              ] })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "div",
+                {
+                  className: "px-3 py-1.5 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-red-600 dark:text-red-400",
+                  onClick: () => {
+                    setMenuOpen(false);
+                    setShowLogoutConfirm(true);
+                  },
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5 min-w-0", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(User, { size: 16, className: "text-red-500 shrink-0" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: "Logout" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[10px] text-gray-500 dark:text-gray-400 font-normal truncate", children: userName || "User" })
+                      ] })
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 shrink-0", children: "Exit" })
+                  ]
+                }
+              )
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-3 py-1 text-[10px] font-bold text-gray-400 dark:text-gray-400 uppercase tracking-wider flex items-center justify-between", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5", children: [
@@ -117942,6 +118844,41 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
                   "div",
                   {
                     onClick: () => {
+                      setDrawerOpen(false);
+                      setShowWhatsAppModal(true);
+                    },
+                    className: "flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSquare, { size: 15, className: "text-[#25D366]" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Subiza WhatsApp" })
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#25D366]/15 text-[#075E54] dark:text-[#00FF88]", children: "AI REPLY" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "div",
+                  {
+                    onClick: () => {
+                      setDrawerOpen(false);
+                      setShowEmailModal(true);
+                    },
+                    className: "flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(Mail, { size: 15, className: "text-red-500" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Subiza Email (Gmail)" })
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400", children: "GMAIL" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "div",
+                  {
+                    onClick: () => {
+                      setTempUserName(userName);
                       setShowSettingsModal(true);
                       setDrawerOpen(false);
                     },
@@ -117959,32 +118896,6 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
                   "div",
                   {
                     onClick: () => {
-                      localStorage.removeItem("kevin_user_name");
-                      localStorage.removeItem("kevin_ai_user_name");
-                      setUserName("");
-                      setTempUserName("");
-                      setDrawerOpen(false);
-                      setShowProfileModal(true);
-                      showToastMessage("✨ Wasohotse muri konti (Logged out successfully).");
-                    },
-                    className: "flex items-center justify-between p-2 rounded-xl text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer transition-colors",
-                    children: [
-                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-                        /* @__PURE__ */ jsxRuntimeExports.jsx(User, { size: 15 }),
-                        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
-                          "Logout (",
-                          userName || "Account",
-                          ")"
-                        ] })
-                      ] }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400", children: "Exit" })
-                    ]
-                  }
-                ),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                  "div",
-                  {
-                    onClick: () => {
                       setShowAbout(true);
                       setDrawerOpen(false);
                     },
@@ -117995,6 +118906,26 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
                         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Ibyerekeye Izi AI" })
                       ] }),
                       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold text-amber-600", children: "Amakuru" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "div",
+                  {
+                    onClick: () => {
+                      setDrawerOpen(false);
+                      setShowLogoutConfirm(true);
+                    },
+                    className: "flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer transition-colors",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5 min-w-0", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(User, { size: 16, className: "text-red-500 shrink-0" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-semibold text-xs text-red-600 dark:text-red-400", children: "Logout" }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-[11px] text-gray-500 dark:text-gray-400 truncate", children: userName || "User" })
+                        ] })
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 shrink-0", children: "Exit" })
                     ]
                   }
                 )
@@ -118070,6 +119001,56 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
                 onClick: clearAllSessions,
                 className: "px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 text-white shadow-sm transition-colors cursor-pointer",
                 children: "Clear All"
+              }
+            )
+          ] })
+        ]
+      }
+    ) }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(AnimatePresence, { children: showLogoutConfirm && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 backdrop-blur-xs", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      motion.div,
+      {
+        initial: { scale: 0.9, opacity: 0 },
+        animate: { scale: 1, opacity: 1 },
+        exit: { scale: 0.9, opacity: 0 },
+        className: "bg-white dark:bg-[#1e2428] rounded-2xl p-5 max-w-sm w-full shadow-2xl border border-gray-200 dark:border-[#2f3b43]",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-3 mb-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-full bg-amber-500/15 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { size: 22 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-bold text-sm sm:text-base text-gray-900 dark:text-white", children: "Urashaka gusohoka muri konti? (Logout)" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed", children: "Nusohoka uzasabwa kongera kwinjira (Login) kugira ngo ukomeze gukoresha Izi AI kuri iki gikoresho." })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-end gap-2.5 mt-5", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: () => setShowLogoutConfirm(false),
+                className: "px-3.5 py-1.5 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer",
+                children: "Reka (Cancel)"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                type: "button",
+                onClick: () => {
+                  localStorage.removeItem("kevin_user_name");
+                  localStorage.removeItem("kevin_ai_user_name");
+                  setUserName("");
+                  setTempUserName("");
+                  setAuthMode("login");
+                  setShowLogoutConfirm(false);
+                  setShowProfileModal(true);
+                  showToastMessage("⚠️ Wasohotse muri konti yawe.");
+                },
+                className: "px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-sm transition-colors cursor-pointer flex items-center gap-1.5",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(User, { size: 13 }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Sohoka (Logout)" })
+                ]
               }
             )
           ] })
@@ -118917,143 +119898,139 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { onClick: () => setShowAbout(false), className: "bg-[#00a884] hover:bg-[#075E54] text-white font-semibold py-2.5 px-4 rounded-xl w-full transition-colors shadow-md", children: "Funga" })
     ] }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(AnimatePresence, { children: showProfileModal && /* @__PURE__ */ jsxRuntimeExports.jsx(
+    /* @__PURE__ */ jsxRuntimeExports.jsx(AnimatePresence, { children: showProfileModal && /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "div",
       {
-        className: "fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 select-none",
-        onClick: () => {
-          if (userName.trim()) {
-            setShowProfileModal(false);
-          } else {
-            showToastMessage("⚠️ Nyamuneka kora Login cyangwa shyiramo izina ryawe kugira ngo ukomeze!");
-          }
+        className: "fixed inset-0 z-50 flex items-center justify-center p-4 select-none bg-black overflow-y-auto",
+        style: {
+          backgroundImage: `linear-gradient(to bottom, rgba(5, 12, 18, 0.74), rgba(5, 12, 18, 0.86)), url('/assets/aistudio/splash_8c62f0e9.png')`,
+          backgroundPosition: "center",
+          backgroundSize: "cover",
+          backgroundRepeat: "no-repeat"
         },
-        children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          motion.div,
-          {
-            initial: { scale: 0.92, opacity: 0 },
-            animate: { scale: 1, opacity: 1 },
-            exit: { scale: 0.92, opacity: 0 },
-            className: "bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-3xl p-6 sm:p-8 w-full max-w-md relative overflow-hidden",
-            onClick: (e) => e.stopPropagation(),
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-center mb-6", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                  motion.div,
-                  {
-                    animate: { scale: [1, 1.08, 1], rotate: [0, 5, -5, 0] },
-                    transition: { repeat: Infinity, duration: 3.5, ease: "easeInOut" },
-                    className: "w-20 h-20 mx-auto mb-3 rounded-2xl bg-gradient-to-tr from-[#075E54] to-[#00a884] text-white flex items-center justify-center shadow-xl overflow-hidden relative border-2 border-emerald-400/50",
-                    children: [
-                      /* @__PURE__ */ jsxRuntimeExports.jsx(
-                        "img",
-                        {
-                          src: "/assets/aistudio/splash_8c62f0e9.png",
-                          alt: "Izi AI Logo",
-                          className: "w-full h-full object-cover"
-                        }
-                      ),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-1 right-1 w-3 h-3 rounded-full bg-[#00FF88] animate-ping" })
-                    ]
-                  }
-                ),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-extrabold text-xl sm:text-2xl text-gray-900 dark:text-white", children: authMode === "register" ? "Create Your Account" : "Sign in to Izi AI" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs sm:text-sm text-gray-500 dark:text-[#8696a0] mt-1", children: "Your intelligent Rwandan AI assistant • Fast & powerful" })
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-gray-100 dark:bg-[#111b21] mb-6", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "button",
-                  {
-                    type: "button",
-                    onClick: () => setAuthMode("register"),
-                    className: `py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${authMode === "register" ? "bg-white dark:bg-[#202c33] text-[#075E54] dark:text-[#00FF88] shadow-sm" : "text-gray-500 dark:text-[#8696a0] hover:text-gray-900 dark:hover:text-white"}`,
-                    children: "Create Account"
-                  }
-                ),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "button",
-                  {
-                    type: "button",
-                    onClick: () => setAuthMode("login"),
-                    className: `py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${authMode === "login" ? "bg-white dark:bg-[#202c33] text-[#075E54] dark:text-[#00FF88] shadow-sm" : "text-gray-500 dark:text-[#8696a0] hover:text-gray-900 dark:hover:text-white"}`,
-                    children: "Sign In"
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
-                {
-                  type: "button",
-                  onClick: handleGoogleAuthLogin,
-                  className: "gsi-material-button w-full shadow-sm justify-center",
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "gsi-material-button-state" }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "gsi-material-button-content-wrapper", children: [
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "gsi-material-button-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { version: "1.1", xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 48 48", style: { display: "block" }, children: [
-                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#EA4335", d: "M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" }),
-                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#4285F4", d: "M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" }),
-                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#FBBC05", d: "M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" }),
-                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#34A853", d: "M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" }),
-                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "none", d: "M0 0h48v48H0z" })
-                      ] }) }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "gsi-material-button-contents", children: "Sign in with Google" }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { display: "none" }, children: "Sign in with Google" })
-                    ] })
-                  ]
-                }
-              ) }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center my-4 text-gray-400 dark:text-[#8696a0]", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 border-t border-gray-200 dark:border-[#313d45]" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs uppercase tracking-wider font-semibold", children: "Or with name" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 border-t border-gray-200 dark:border-[#313d45]" })
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5", children: "Your Name or Nickname:" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(
-                    "input",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 bg-radial from-cyan-500/10 via-transparent to-black/60 pointer-events-none" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            motion.div,
+            {
+              initial: { scale: 0.92, opacity: 0, y: 15 },
+              animate: { scale: 1, opacity: 1, y: 0 },
+              exit: { scale: 0.92, opacity: 0, y: 15 },
+              transition: { type: "spring", damping: 25, stiffness: 260 },
+              className: "bg-[#0b141a]/90 backdrop-blur-2xl border border-cyan-500/35 shadow-[0_0_60px_rgba(0,168,132,0.22)] rounded-3xl p-6 sm:p-8 w-full max-w-md relative overflow-hidden text-white",
+              onClick: (e) => e.stopPropagation(),
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute -top-24 -right-24 w-48 h-48 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute -bottom-24 -left-24 w-48 h-48 bg-[#00FF88]/15 rounded-full blur-3xl pointer-events-none" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-center mb-6 relative z-10", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    motion.div,
                     {
-                      type: "text",
-                      value: tempUserName,
-                      onChange: (e) => setTempUserName(e.target.value),
-                      placeholder: "e.g. Kevin, Alice, Jean...",
-                      required: true,
-                      className: "w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-3 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-sm transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500 shadow-inner",
-                      onKeyDown: (e) => {
-                        if (e.key === "Enter") {
-                          handleSaveUserName();
-                        }
-                      },
-                      autoFocus: true
+                      animate: { scale: [1, 1.06, 1], rotate: [0, 4, -4, 0] },
+                      transition: { repeat: Infinity, duration: 4, ease: "easeInOut" },
+                      className: "w-24 h-24 mx-auto mb-3 rounded-2xl bg-black/60 text-white flex items-center justify-center shadow-2xl overflow-hidden relative border-2 border-cyan-400/60 ring-4 ring-cyan-500/20",
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          "img",
+                          {
+                            src: "/assets/aistudio/splash_8c62f0e9.png",
+                            alt: "Izi AI Logo",
+                            className: "w-full h-full object-cover"
+                          }
+                        ),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-[#00FF88] animate-ping" })
+                      ]
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-extrabold text-2xl sm:text-3xl text-white tracking-tight", children: authMode === "login" ? "Log in to Izi AI" : "Create Your Account" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs sm:text-sm text-cyan-200/80 mt-1", children: "Your intelligent Rwandan AI assistant • Fast & powerful" })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/50 border border-white/10 mb-5 relative z-10", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => setAuthMode("login"),
+                      className: `py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${authMode === "login" ? "bg-gradient-to-r from-[#075E54] to-[#00a884] text-white shadow-md" : "text-gray-400 hover:text-white"}`,
+                      children: "Log In"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => setAuthMode("register"),
+                      className: `py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${authMode === "register" ? "bg-gradient-to-r from-[#075E54] to-[#00a884] text-white shadow-md" : "text-gray-400 hover:text-white"}`,
+                      children: "Create Account"
                     }
                   )
                 ] }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pt-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-5 relative z-10", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   "button",
                   {
                     type: "button",
-                    onClick: handleSaveUserName,
-                    disabled: !tempUserName.trim(),
-                    className: `w-full py-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer ${tempUserName.trim() ? "bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] dark:hover:bg-[#008f6f] text-white hover:scale-[1.01]" : "bg-gray-200 dark:bg-[#2a3942] text-gray-400 dark:text-gray-500 cursor-not-allowed"}`,
+                    onClick: handleGoogleAuthLogin,
+                    className: "gsi-material-button w-full shadow-lg justify-center border border-white/15 hover:border-cyan-400/50 transition-colors",
                     children: [
-                      /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { size: 16 }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: authMode === "register" ? "Create Account & Start" : "Sign In" })
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "gsi-material-button-state" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "gsi-material-button-content-wrapper", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "gsi-material-button-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { version: "1.1", xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 48 48", style: { display: "block" }, children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#EA4335", d: "M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#4285F4", d: "M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#FBBC05", d: "M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#34A853", d: "M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "none", d: "M0 0h48v48H0z" })
+                        ] }) }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "gsi-material-button-contents", children: "Sign in with Google" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { display: "none" }, children: "Sign in with Google" })
+                      ] })
                     ]
                   }
-                ) })
-              ] }),
-              userName.trim() && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-4 text-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-                "button",
-                {
-                  type: "button",
-                  onClick: () => setShowProfileModal(false),
-                  className: "text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 underline cursor-pointer",
-                  children: "Reka (Cancel)"
-                }
-              ) })
-            ]
-          }
-        )
+                ) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center my-4 text-gray-400 relative z-10", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 border-t border-white/10" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs uppercase tracking-wider font-semibold text-gray-400", children: "Or with name" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 border-t border-white/10" })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4 relative z-10", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-bold text-gray-200 mb-1.5", children: "Your Name or Nickname:" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "input",
+                      {
+                        type: "text",
+                        value: tempUserName,
+                        onChange: (e) => setTempUserName(e.target.value),
+                        placeholder: "e.g. Kevin, Alice, Jean...",
+                        required: true,
+                        className: "w-full bg-black/40 text-white placeholder-gray-400 px-3.5 py-3 rounded-xl border border-white/15 focus:border-[#00FF88] focus:ring-1 focus:ring-[#00FF88] focus:outline-none text-sm transition-all shadow-inner",
+                        onKeyDown: (e) => {
+                          if (e.key === "Enter") {
+                            handleSaveUserName();
+                          }
+                        },
+                        autoFocus: true
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pt-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: handleSaveUserName,
+                      disabled: !tempUserName.trim(),
+                      className: `w-full py-3.5 rounded-xl text-sm font-extrabold shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${tempUserName.trim() ? "bg-gradient-to-r from-[#00a884] to-[#00FF88] text-black hover:opacity-95 hover:scale-[1.01] active:scale-[0.99] font-black" : "bg-white/10 text-gray-500 cursor-not-allowed border border-white/5"}`,
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { size: 18 }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: authMode === "login" ? "Log In" : "Create Account" })
+                      ]
+                    }
+                  ) })
+                ] })
+              ]
+            }
+          )
+        ]
       }
     ) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(AnimatePresence, { children: showCustomInstructionsModal && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4", onClick: () => setShowCustomInstructionsModal(false), children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -119218,24 +120195,45 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
             )
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1.5", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              "div",
-              {
-                onClick: () => {
-                  setTempUserName(userName);
-                  setShowSettingsModal(false);
-                  setShowProfileModal(true);
-                },
-                className: "flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors",
-                children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(User, { size: 16, className: "text-emerald-500" }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Izina ryawe (Profile)" })
-                  ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[11px] font-medium text-gray-400 dark:text-gray-500 truncate max-w-[120px]", children: userName || "Ntago ryashyizweho" })
-                ]
-              }
-            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-3 rounded-2xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] space-y-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-[#e9edef]", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(User, { size: 16, className: "text-emerald-500" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Izina ryawe (Nickname)" })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] text-gray-400 dark:text-[#8696a0]", children: "Hindura hano" })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "input",
+                  {
+                    type: "text",
+                    value: tempUserName,
+                    onChange: (e) => setTempUserName(e.target.value),
+                    placeholder: "Shyiramo izina ryawe...",
+                    className: "flex-1 bg-white dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] px-3 py-2 rounded-xl border border-gray-300 dark:border-[#3a4750] focus:border-[#00a884] focus:outline-none text-xs transition-all shadow-2xs placeholder:text-gray-400 dark:placeholder:text-gray-500",
+                    onKeyDown: (e) => {
+                      if (e.key === "Enter") {
+                        handleSaveUserNameFromSettings();
+                      }
+                    }
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: handleSaveUserNameFromSettings,
+                    disabled: !tempUserName.trim() || tempUserName.trim() === userName,
+                    className: `px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${tempUserName.trim() && tempUserName.trim() !== userName ? "bg-[#00a884] hover:bg-[#075E54] text-white shadow-xs" : "bg-gray-200 dark:bg-[#2a3942] text-gray-400 dark:text-gray-500 cursor-not-allowed"}`,
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { size: 14 }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Bika" })
+                    ]
+                  }
+                )
+              ] })
+            ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs(
               "div",
               {
@@ -119322,6 +120320,23 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
                     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Subiza Email (Gmail)" })
                   ] }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400", children: "GMAIL" })
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "div",
+              {
+                onClick: () => {
+                  setShowSettingsModal(false);
+                  setShowWhatsAppModal(true);
+                },
+                className: "flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2.5", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(MessageSquare, { size: 16, className: "text-[#25D366]" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Subiza WhatsApp (AI Reply)" })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#25D366]/15 text-[#075E54] dark:text-[#00FF88]", children: "WHATSAPP" })
                 ]
               }
             ),
@@ -120288,6 +121303,15 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
       {
         isOpen: showEmailModal,
         onClose: () => setShowEmailModal(false),
+        selectedModel,
+        onToast: showToastMessage
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      WhatsAppReplyModal,
+      {
+        isOpen: showWhatsAppModal,
+        onClose: () => setShowWhatsAppModal(false),
         selectedModel,
         onToast: showToastMessage
       }
