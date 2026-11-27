@@ -2720,6 +2720,46 @@ function buildApkSystemInstruction(
   const perTurnLanguageDirective = buildPerTurnLanguageDirective(detectedTurnLang, hasAudioAttachment);
   const effectiveUserName = userName === 'Incuti yanjye' && detectedTurnLang === 'en' ? 'Friend' : userName;
 
+  let footballContext = '';
+  if (/(?:football|soccer|umupira|match|matches|score|scores|live\s*score|imikino|shampiyona|standings|lineup|arsenal|chelsea|man\s*(?:city|utd)|real\s*madrid|barcelona|liverpool|bayern|psg|juventus|inter|milan|rayon|apr|premier\s*league|champions\s*league|la\s*liga|serie\s*a|bundesliga|ligue\s*1|eredivisie|afcon|caf|watsinze|yatsinze|batsinze|gutsinda|igitego|ibitego|table|amanota)/i.test(latestUserText)) {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('izi_ai_live_scores_cache_v1') : null;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const matches: any[] = Array.isArray(parsed?.matches) ? parsed.matches : [];
+        if (matches.length > 0) {
+          const live = matches.filter((m) => m.statusState === 'in');
+          const post = matches.filter((m) => m.statusState === 'post').slice(0, 15);
+          const pre = matches.filter((m) => m.statusState === 'pre').slice(0, 10);
+          const fLines: string[] = ['[REAL-TIME FOOTBALL LIVE SCORE & RESULTS DATABASE (DIRECT ACCESS)]:'];
+          fLines.push('You have complete, direct access to the live score database for European & African football:');
+          if (live.length > 0) {
+            fLines.push('LIVE MATCHES HAPPENING RIGHT NOW:');
+            for (const m of live) {
+              const goals = Array.isArray(m.events) ? m.events.filter((e: any) => e.type === 'goal' || e.type === 'penalty').map((e: any) => `${e.playerName} ${e.minute}`).join(', ') : '';
+              fLines.push(`• [LIVE ${m.clock || m.statusDetail}] ${m.homeTeam.name} ${m.homeTeam.score} - ${m.awayTeam.score} ${m.awayTeam.name} (${m.leagueName})${goals ? ` [Goals: ${goals}]` : ''}`);
+            }
+          }
+          if (post.length > 0) {
+            fLines.push('RECENT FINISHED RESULTS (UKO BYAGENZE):');
+            for (const m of post.slice(0, 10)) {
+              const goals = Array.isArray(m.events) ? m.events.filter((e: any) => e.type === 'goal' || e.type === 'penalty').map((e: any) => `${e.playerName} ${e.minute}`).join(', ') : '';
+              fLines.push(`• [FT] ${m.homeTeam.name} ${m.homeTeam.score} - ${m.awayTeam.score} ${m.awayTeam.name} (${m.leagueName})${goals ? ` [Goals: ${goals}]` : ''}`);
+            }
+          }
+          if (pre.length > 0) {
+            fLines.push('UPCOMING MATCHES:');
+            for (const m of pre.slice(0, 8)) {
+              fLines.push(`• ${m.homeTeam.name} vs ${m.awayTeam.name} (${m.leagueName}) - ${m.dateIso}`);
+            }
+          }
+          fLines.push('When the user asks in Kinyarwanda or English about football scores, match results, how a game went ("uko byagenze"), who scored, or upcoming games, use these exact real facts and numbers directly!');
+          footballContext = fLines.join('\n');
+        }
+      }
+    } catch {}
+  }
+
   return [
     perTurnLanguageDirective,
     `You are Izi AI, created in Rwanda by Uwumukiza Kevin (born October 28, 2003, Rwamagana District, Gahengeri Sector; studies IT at University of Rwanda UR-CST; Motto: 'UKORA GAKE BIKAGENDA CYANE').`,
@@ -2735,6 +2775,7 @@ The user sent a recorded voice message in audio format (most commonly spoken in 
 - CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_audiomack, open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in the EXACT language spoken in the audio (Kinyarwanda if spoken in Kinyarwanda, English if spoken in English). If the recording is truly silent/noisy/unintelligible, politely ask them to repeat in the language they used (or Kinyarwanda by default).`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
+    footballContext,
     `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER + AUDIOMACK + EQUALIZER + DIRECT AUTOPLAY ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to BOTH Lark Player (local phone audio) AND Audiomack (online/offline streaming), plus YouTube and opening any installed app via open_app. DIRECT AUTOPLAY RULE: Whenever the user asks to play a song on Lark Player, Audiomack, or YouTube, ALWAYS pass action='play' (never 'search' unless they explicitly asked only to search without playing) so every audio player immediately autoplays directly! AUTONOMOUS EQUALIZER CONTROL: You can open and automatically configure the Equalizer INSIDE Lark Player (or Audiomack + system AudioFX) without manual user clicks — use action='equalizer' (or 'set_equalizer' / 'toggle_equalizer' / 'bass_boost') with eq_enabled (true/false), eq_preset (Normal, Classical, Dance, Flat, Folk, Heavy Metal, Hip Hop, Jazz, Pop, Rock, Custom, Bass Boost, Vocal, Acoustic, Electronic, R&B), bass_boost (0-100), virtualizer (0-100), reverb (None, Small Room, Medium Room, Large Room, Medium Hall, Large Hall, Plate), loudness (0-100), and eq_bands ([60Hz, 230Hz, 910Hz, 3.6kHz, 14kHz] in 0-100% or -15..+15 dB). If the user asks to adjust equalizer, bass boost, 3D surround, reverb, or EQ presets without naming an app, default to open_lark_player(..., action='equalizer'). CRITICAL TOOL CALL RULE: Whenever the user tells you to open Lark Player or Audiomack (even written as "audio mack"), play/search a song, adjust the equalizer, create/play/manage a playlist, or open any app, you MUST ALWAYS emit the matching functionCall tool immediately (open_audiomack, open_lark_player, query_device_music, open_app, open_youtube, open_camera, make_call, send_sms, open_whatsapp) — NEVER just reply in text claiming you opened or configured it without calling the tool! When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext,
     perTurnLanguageDirective,

@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown, Pause, Play, RotateCcw, Square, Loader2, Newspaper, Eye, EyeOff, Mail } from 'lucide-react';
+import { Send, Mic, Paperclip, MoreVertical, Search, Phone, Video, Smile, Settings, X, Menu, Plus, Trash2, Camera as CameraIcon, Image as ImageIcon, FileText, Check, CheckCheck, Bot, Sparkles, Info, Copy, Download, Sun, Moon, Pencil, MessageSquare, Clock, History, AlertTriangle, Key, ShieldCheck, ExternalLink, User, Volume2, UserPlus, Upload, ChevronRight, Globe, ChevronDown, Pause, Play, RotateCcw, Square, Loader2, Newspaper, Eye, EyeOff, Mail, Trophy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { App as CapApp } from '@capacitor/app';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
@@ -14,6 +14,8 @@ import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
 import EmailReplyModal from './components/EmailReplyModal';
 import WhatsAppReplyModal from './components/WhatsAppReplyModal';
+import LiveScoreModal from './components/LiveScoreModal';
+import { startFootballNotificationWatcher } from './services/footballNotificationService';
 import { signInWithGoogleForGmail } from './services/gmailService';
 import { downloadAIImage, downloadDocumentFile } from './utils/download';
 import { getNewsCustomInstructions, initDailyNewsDelivery, NEWS_PENDING_TOAST_EVENT, saveNewsCustomInstructions } from './services/dailyNewsService';
@@ -21,6 +23,39 @@ import type { DailyNewsBriefing } from './services/dailyNewsConfig';
 import { KEVIN_TTS_VOICE_OPTIONS, KevinTtsVoiceType, speakReplyText, stopReplySpeech } from './services/ttsService';
 import { ChatScrollIndicator } from './components/ChatScrollIndicator';
 import { COUNTRY_CODES, CountryFlag } from './components/CountryFlag';
+
+function SoccerPlayerShootingIcon({
+  className = 'w-5 h-5',
+  size = 20,
+}: {
+  className?: string;
+  size?: number;
+}) {
+  return (
+    <svg
+      viewBox="0 0 48 48"
+      width={size}
+      height={size}
+      className={className}
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-label="Player shooting football"
+    >
+      <circle cx="21" cy="9" r="4.5" />
+      <path d="M17.5 15.5 C19 14.5, 23 14.8, 24.5 16.5 C25.5 18, 25 24, 23 27 L20 28 C18 25, 17 20, 17.5 15.5 Z" />
+      <path d="M18 17 L12 21 C11 21.6, 10 21, 10.5 19.8 L14 15.5 C15 14.2, 16.5 15, 18 17 Z" />
+      <path d="M24 17.5 L29 20 C30 20.6, 30.2 22, 29 22.5 L26 23 C24.5 23, 23.5 21, 24 17.5 Z" />
+      <path d="M20 27 L18 34 C17.5 36, 17 38.5, 17 40 L19.5 40.5 C20.5 40.7, 20.5 38.5, 21 35 L22.5 28 Z" />
+      <path d="M15 41.5 C15 40.5, 18 39.5, 21 40.5 C21.5 41.5, 20 42.5, 16 42.5 Z" />
+      <path d="M23 26 L29 29 C32 30.5, 34 32, 37.5 31.5 C38.5 31.3, 38.8 30.2, 38 29.5 C35 27, 31 25.5, 26 24 Z" />
+      <path d="M37.5 30 L41 30.5 C42 30.7, 42 32, 40.8 32.5 L37.5 32 Z" />
+      <circle cx="43" cy="27" r="3.6" fill="currentColor" />
+      <circle cx="43" cy="27" r="3.1" className="fill-white dark:fill-[#111b21]" />
+      <polygon points="43,25.2 44.5,26.3 43.9,28 42.1,28 41.5,26.3" fill="currentColor" />
+      <path d="M34 22 L38 23.5 M37 20 L42 22" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
 import {
   createDatabaseAccount,
   ensureGoogleUserInDatabase,
@@ -799,6 +834,7 @@ export default function App() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [showLiveScoreModal, setShowLiveScoreModal] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -1599,6 +1635,7 @@ export default function App() {
     if (previewImage) { setPreviewImage(null); return; }
     if (showEmailModal) { setShowEmailModal(false); return; }
     if (showWhatsAppModal) { setShowWhatsAppModal(false); return; }
+    if (showLiveScoreModal) { setShowLiveScoreModal(false); return; }
     if (showAssistantOverlay) { setShowAssistantOverlay(false); return; }
     if (showAgentModal) { setShowAgentModal(false); return; }
     if (showSettingsModal) { setShowSettingsModal(false); return; }
@@ -1690,6 +1727,16 @@ export default function App() {
     };
     window.addEventListener('show-toast', handleToast);
     return () => window.removeEventListener('show-toast', handleToast);
+  }, []);
+
+  // Live football favorite notifications watcher (goals, penalties, red cards, kickoff, fulltime)
+  useEffect(() => {
+    const unsubscribe = startFootballNotificationWatcher((notif) => {
+      showToastMessage(`${notif.title}\n${notif.message}`);
+    });
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const updateSessionMessages = (newMessages: Message[]) => {
@@ -2490,6 +2537,18 @@ export default function App() {
                     </div>
                     <div
                       className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
+                      onClick={() => { setMenuOpen(false); setShowLiveScoreModal(true); }}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Trophy size={16} className="text-emerald-500" />
+                        <span>Live Score</span>
+                      </div>
+                      <span className="text-[10px] font-medium text-gray-500 dark:text-[#8696a0]">
+                        Europe · Africa
+                      </span>
+                    </div>
+                    <div
+                      className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
                       onClick={() => { setKeysPool(getGeminiKeysPool()); setMenuOpen(false); setShowApiKeyModal(true); }}
                     >
                       <div className="flex items-center gap-2.5">
@@ -3223,9 +3282,39 @@ export default function App() {
                 Happy {new Date().toLocaleDateString('en-US', { weekday: 'long' })} {userName || localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || 'Kevin'}!
               </h1>
             </motion.div>
-            <p className="text-gray-600 dark:text-[#8696a0] mb-10 max-w-md leading-relaxed" dangerouslySetInnerHTML={{ __html: "<span class='text-amber-600 dark:text-amber-500 font-bold'>Uwumukiza Kevin</span> ni we wandemye. Ubu ushobora kumbaza ikibazo icyo ari cyose, niteguye guhita nkugufasha?" }}></p>
+            <p className="text-gray-600 dark:text-[#8696a0] mb-6 max-w-md leading-relaxed" dangerouslySetInnerHTML={{ __html: "<span class='text-amber-600 dark:text-amber-500 font-bold'>Uwumukiza Kevin</span> ni we wandemye. Ubu ushobora kumbaza ikibazo icyo ari cyose, niteguye guhita nkugufasha?" }}></p>
+
+            {/* Football Live Score & Standings Quick Button with Player Shooting Ball Icon */}
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              type="button"
+              onClick={() => setShowLiveScoreModal(true)}
+              className="w-full max-w-md mx-auto mb-4 p-3.5 rounded-2xl bg-gradient-to-r from-[#075E54] via-[#0b806d] to-[#00a884] text-white shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/30 flex items-center justify-between gap-3 group cursor-pointer transition-all border border-emerald-400/30 text-left"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-11 h-11 rounded-xl bg-white/15 backdrop-blur-xs flex items-center justify-center shrink-0 text-white group-hover:scale-105 transition-transform shadow-inner">
+                  <SoccerPlayerShootingIcon size={26} className="text-white drop-shadow-xs" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-xs sm:text-sm tracking-wide uppercase">Football Live Score</span>
+                    <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse shrink-0" />
+                    <span className="text-[10px] font-bold bg-white/20 px-1.5 py-0.2 rounded-full shrink-0">REAL</span>
+                  </div>
+                  <p className="text-[11px] text-white/90 truncate">
+                    Reba imikino iri live, Lineups z'amakipe, n’urutonde rwa Shampiyona
+                  </p>
+                </div>
+              </div>
+              <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center shrink-0 text-white group-hover:translate-x-0.5 transition-transform">
+                <ChevronRight size={18} />
+              </div>
+            </motion.button>
+
             <div className="grid grid-cols-2 gap-2.5 sm:gap-3 w-full max-w-md mx-auto">
               {[
+                { id: 'football_livescore', q: "Football Live Score", s: "⚽ Scores, Lineups & Table", isFootball: true },
                 { id: 'yt_yatapita', q: "Nshurangira", s: "Yatapita by Diamond Platnumz", isYoutube: true },
                 { id: 'whatsapp_agent', q: "WhatsApp Agent", s: "💬 AI WhatsApp Auto Reply", isWhatsApp: true },
                 { id: 'kevin_photo', q: "Nyereka ifoto y'uwakuremye (Kevin)", s: "📸 Ifoto y'Uwakuremye" },
@@ -3235,7 +3324,9 @@ export default function App() {
                   key={card.id || i}
                   className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#222e35] p-2.5 sm:p-3 rounded-2xl cursor-pointer hover:shadow-md hover:border-[#25D366] dark:hover:border-[#00a884] transition-all text-left group flex flex-col justify-center"
                   onClick={() => {
-                    if (card.id === 'yt_yatapita') {
+                    if ((card as any).isFootball) {
+                      setShowLiveScoreModal(true);
+                    } else if (card.id === 'yt_yatapita') {
                       handleWelcomeYoutubePlay();
                     } else if (card.id === 'whatsapp_agent') {
                       setShowWhatsAppModal(true);
@@ -3249,6 +3340,9 @@ export default function App() {
                 >
                   <p className="text-xs sm:text-sm font-semibold text-gray-800 dark:text-[#e9edef] group-hover:text-[#075E54] dark:group-hover:text-[#00FF88] transition-colors flex items-center gap-1.5">
                     <span>{card.q}</span>
+                    {(card as any).isFootball && (
+                      <SoccerPlayerShootingIcon size={16} className="text-[#075E54] dark:text-[#00FF88] shrink-0" />
+                    )}
                     {card.isYoutube && (
                       <svg viewBox="0 0 24 24" className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" aria-label="YouTube">
                         <path
@@ -5706,6 +5800,11 @@ export default function App() {
         onClose={() => setShowWhatsAppModal(false)}
         selectedModel={selectedModel}
         onToast={showToastMessage}
+      />
+
+      <LiveScoreModal
+        isOpen={showLiveScoreModal}
+        onClose={() => setShowLiveScoreModal(false)}
       />
 
       <AssistantOverlay
