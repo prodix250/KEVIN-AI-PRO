@@ -3284,34 +3284,6 @@ export default function App() {
             </motion.div>
             <p className="text-gray-600 dark:text-[#8696a0] mb-6 max-w-md leading-relaxed" dangerouslySetInnerHTML={{ __html: "<span class='text-amber-600 dark:text-amber-500 font-bold'>Uwumukiza Kevin</span> ni we wandemye. Ubu ushobora kumbaza ikibazo icyo ari cyose, niteguye guhita nkugufasha?" }}></p>
 
-            {/* Football Live Score & Standings Quick Button with Player Shooting Ball Icon */}
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              type="button"
-              onClick={() => setShowLiveScoreModal(true)}
-              className="w-full max-w-md mx-auto mb-4 p-3.5 rounded-2xl bg-gradient-to-r from-[#075E54] via-[#0b806d] to-[#00a884] text-white shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/30 flex items-center justify-between gap-3 group cursor-pointer transition-all border border-emerald-400/30 text-left"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-11 h-11 rounded-xl bg-white/15 backdrop-blur-xs flex items-center justify-center shrink-0 text-white group-hover:scale-105 transition-transform shadow-inner">
-                  <SoccerPlayerShootingIcon size={26} className="text-white drop-shadow-xs" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-extrabold text-xs sm:text-sm tracking-wide uppercase">Football Live Score</span>
-                    <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse shrink-0" />
-                    <span className="text-[10px] font-bold bg-white/20 px-1.5 py-0.2 rounded-full shrink-0">REAL</span>
-                  </div>
-                  <p className="text-[11px] text-white/90 truncate">
-                    Reba imikino iri live, Lineups z'amakipe, n’urutonde rwa Shampiyona
-                  </p>
-                </div>
-              </div>
-              <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center shrink-0 text-white group-hover:translate-x-0.5 transition-transform">
-                <ChevronRight size={18} />
-              </div>
-            </motion.button>
-
             <div className="grid grid-cols-2 gap-2.5 sm:gap-3 w-full max-w-md mx-auto">
               {[
                 { id: 'football_livescore', q: "Football Live Score", s: "⚽ Scores, Lineups & Table", isFootball: true },

@@ -2483,7 +2483,6 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
         customInstructionsContext,
         audioInstruction,
         contactsContext,
-        agentContext,
         footballContext,
         realTimeContext,
         turnLanguageDirective,
