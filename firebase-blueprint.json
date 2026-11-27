@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public-safe user account profile and authentication method metadata (no PII stored here).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the account owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name shown in the Izi AI workspace.",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "method": {
+          "type": "string",
+          "description": "Authentication method used to register the account.",
+          "enum": ["google", "email", "phone"],
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was last updated."
+        }
+      },
+      "required": ["uid", "displayName", "method", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII document containing user email, phone number, and normalized identifier strictly accessible only by the owner.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the account owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "method": {
+          "type": "string",
+          "description": "Authentication method associated with this account.",
+          "enum": ["google", "email", "phone"],
+          "maxLength": 16
+        },
+        "identifier": {
+          "type": "string",
+          "description": "Normalized email address or E.164 phone number.",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Optional email address of the user.",
+          "maxLength": 160
+        },
+        "phone": {
+          "type": "string",
+          "description": "Optional E.164 phone number with country code.",
+          "maxLength": 32,
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Optional profile avatar URL from Google Sign-In.",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when private info was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when private info was last updated."
+        }
+      },
+      "required": ["uid", "method", "identifier", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Registered Izi AI user profile document verifying the user has created an account in the database."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Isolated PII subcollection (document ID 'info') accessible strictly by the owning authenticated user."
+    }
+  }
+}

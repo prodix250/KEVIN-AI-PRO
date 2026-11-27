@@ -20,6 +20,14 @@ import { getNewsCustomInstructions, initDailyNewsDelivery, NEWS_PENDING_TOAST_EV
 import type { DailyNewsBriefing } from './services/dailyNewsConfig';
 import { KEVIN_TTS_VOICE_OPTIONS, KevinTtsVoiceType, speakReplyText, stopReplySpeech } from './services/ttsService';
 import { ChatScrollIndicator } from './components/ChatScrollIndicator';
+import { COUNTRY_CODES, CountryFlag } from './components/CountryFlag';
+import {
+  createDatabaseAccount,
+  ensureGoogleUserInDatabase,
+  loginWithDatabaseAccount,
+  signOutFirebaseAuth,
+} from './services/firebaseClient';
+import loginBgImg from './assets/login_bg.png';
 
 const THEME_LIGHT_DEFAULT_MIGRATION_KEY = 'kevin_ai_theme_light_default_migrated';
 
@@ -277,12 +285,25 @@ const SearchSourcesBadge = ({ sources }: { sources: GroundingSource[] }) => {
   );
 };
 
+const NEWS_CHANNEL_SESSION_ID = 1000000001;
+const NEWS_CHANNEL_TITLE = '📰 Amakuru ya Izi AI';
+
+function normalizePhoneWithCountryCode(countryCode: string, rawPhone: string): string {
+  const digits = rawPhone.replace(/\D/g, '');
+  const stripped = digits.replace(/^0+/, '');
+  return `${countryCode}${stripped || digits}`;
+}
+
 type ChatSession = {
   id: number;
   title: string;
   messages: Message[];
   timestamp: number;
+  isNewsChannel?: boolean;
 };
+
+const isNewsChannelSession = (s: ChatSession): boolean =>
+  s.id === NEWS_CHANNEL_SESSION_ID || s.isNewsChannel === true;
 
 export default function App() {
   const assistantStartVoiceRef = useRef<() => Promise<void>>(async () => undefined);
@@ -462,12 +483,16 @@ export default function App() {
       const numId = Number(savedId);
       if (sessions.some(s => s.id === numId)) return numId;
     }
-    return sessions[0].id;
+    const firstRegular = sessions.find(s => !isNewsChannelSession(s));
+    return (firstRegular || sessions[0]).id;
   });
+  const currentSessionIdRef = useRef<number>(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
+
   const [messages, setMessages] = useState<Message[]>(() => {
     const savedId = localStorage.getItem('kevin_current_session_id');
     const numId = savedId ? Number(savedId) : null;
-    const current = sessions.find(s => s.id === numId) || sessions[0];
+    const current = sessions.find(s => s.id === numId) || sessions.find(s => !isNewsChannelSession(s)) || sessions[0];
     return current ? current.messages : sessions[0].messages;
   });
 
@@ -514,21 +539,128 @@ export default function App() {
   const [attachmentPopupOpen, setAttachmentPopupOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [userName, setUserName] = useState<string>(() => localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || '');
+  const [userAccountLabel, setUserAccountLabel] = useState<string>(() => localStorage.getItem('kevin_user_account') || localStorage.getItem('kevin_user_name') || '');
   const [tempUserName, setTempUserName] = useState<string>(() => localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || '');
   const [showProfileModal, setShowProfileModal] = useState<boolean>(() => !localStorage.getItem('kevin_user_name') && !localStorage.getItem('kevin_ai_user_name'));
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginCountryCode, setLoginCountryCode] = useState('+250');
+  const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginPhoneNickname, setLoginPhoneNickname] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
 
-  const handleSaveUserName = () => {
-    const trimmed = tempUserName.trim();
-    if (!trimmed) {
-      showToastMessage("⚠️ Nyamuneka shyiramo izina ryawe kugira ngo ukomeze!");
+  const selectedCountry =
+    COUNTRY_CODES.find((c) => c.code === loginCountryCode) || COUNTRY_CODES[0];
+
+  const handleEmailOrPhoneAuth = async () => {
+    if (isAuthSubmitting) return;
+    setLoginError('');
+    setCountryDropdownOpen(false);
+    let identifier = '';
+    let displayName = '';
+
+    if (loginMethod === 'email') {
+      const cleanEmail = loginEmail.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        setLoginError('Shyiramo email yuzuye kandi yemewe (urugero: izina@gmail.com).');
+        return;
+      }
+      identifier = cleanEmail;
+      displayName = cleanEmail.split('@')[0] || cleanEmail;
+    } else {
+      const digitsOnly = loginPhone.replace(/\D/g, '');
+      const stripped = digitsOnly.replace(/^0+/, '');
+      if (stripped.length < 7 || stripped.length > 14) {
+        setLoginError('Shyiramo nimero ya telefone yuzuye (imibare 7–14).');
+        return;
+      }
+      identifier = normalizePhoneWithCountryCode(loginCountryCode, loginPhone);
+      const cleanNick = loginPhoneNickname.trim().slice(0, 100);
+      if (authMode === 'register' && !cleanNick) {
+        setLoginError('Shyiramo izina ryawe (Nickname) kugira ngo ritaba nimero ya telefone.');
+        return;
+      }
+      if (cleanNick && /^\+?[0-9\s-]{6,}$/.test(cleanNick)) {
+        setLoginError('Nickname igomba kuba izina (urugero: Kevin), atari nimero ya telefone.');
+        return;
+      }
+      displayName = cleanNick;
+    }
+
+    if (loginPassword.length < 6) {
+      setLoginError('Ijambo ry’ibanga (Password) rigomba kugira nibura inyuguti 6.');
       return;
     }
-    localStorage.setItem('kevin_user_name', trimmed);
-    localStorage.setItem('kevin_ai_user_name', trimmed);
-    setUserName(trimmed);
-    showToastMessage(`✨ Muraho neza ${trimmed}! Izina ryawe ryabitswe.`);
-    setShowProfileModal(false);
+
+    setIsAuthSubmitting(true);
+    try {
+      const accountResult =
+        authMode === 'register'
+          ? await createDatabaseAccount({
+              method: loginMethod,
+              identifier,
+              displayName,
+              password: loginPassword,
+            })
+          : await loginWithDatabaseAccount({
+              method: loginMethod,
+              identifier,
+              password: loginPassword,
+              preferredDisplayName: loginMethod === 'phone' ? displayName : undefined,
+            });
+
+      localStorage.setItem('kevin_user_name', accountResult.displayName);
+      localStorage.setItem('kevin_ai_user_name', accountResult.displayName);
+      localStorage.setItem('kevin_user_account', accountResult.identifier);
+      setUserName(accountResult.displayName);
+      setUserAccountLabel(accountResult.identifier);
+      setTempUserName(accountResult.displayName);
+      setLoginPassword('');
+      setLoginPhoneNickname('');
+      setLoginError('');
+      setCountryDropdownOpen(false);
+      setShowProfileModal(false);
+      showToastMessage(`✨ Ikaze kuri Izi AI, ${accountResult.displayName}!`);
+    } catch (err: any) {
+      const code = String(err?.code || '');
+      const msg = String(err?.message || '');
+      if (code === 'auth/email-already-in-use') {
+        setLoginError('Iyi konti isanzwe iri muri database! Kanda "Log In" kugira ngo winjire.');
+      } else if (code === 'auth/user-not-found' || code === 'izi/account-not-in-database') {
+        setLoginError('Nta konti ufite muri database! Banza ukande "Create Account" ufungure konti yawe.');
+      } else if (code === 'auth/wrong-password') {
+        setLoginError('Ijambo ry’ibanga (Password) si ryo. Ongera ugerageze.');
+      } else if (code === 'auth/invalid-credential') {
+        setLoginError(
+          'Nta konti ufite muri database cyangwa Password si yo. Niba utarakora konti, banza ukande "Create Account".'
+        );
+      } else if (code === 'auth/weak-password') {
+        setLoginError('Ijambo ry’ibanga rigomba kugira nibura inyuguti 6.');
+      } else if (code === 'auth/operation-not-allowed') {
+        setLoginError(
+          'Kwinjira na Email/Phone birasaba kubyemerera muri Firebase Console (Authentication → Sign-in method → Email/Password). Koresha "Sign in with Google" cyangwa ubyemereze.'
+        );
+      } else if (code === 'auth/too-many-requests') {
+        setLoginError('Wagerageje kenshi cyane. Tegereza akanya gato wongere ugerageze.');
+      } else if (code === 'auth/network-request-failed') {
+        setLoginError('Nta murongo wa interineti uhagije. Reba interineti yawe wongere ugerageze.');
+      } else if (msg.includes('Missing or insufficient permissions')) {
+        setLoginError('Database yanze uburenganzira (PERMISSION_DENIED). Ongera ugerageze.');
+      } else {
+        setLoginError(
+          authMode === 'login'
+            ? 'Nta konti ibonetse muri database. Banza ukande "Create Account" uyifungure.'
+            : 'Gufungura konti muri database byanze. Ongera ugerageze.'
+        );
+      }
+    } finally {
+      setIsAuthSubmitting(false);
+    }
   };
 
   const handleSaveUserNameFromSettings = () => {
@@ -546,10 +678,21 @@ export default function App() {
   const handleGoogleAuthLogin = async () => {
     try {
       const result = await signInWithGoogleForGmail();
+      try {
+        await ensureGoogleUserInDatabase(result.user);
+      } catch (dbSyncErr) {
+        console.warn('Google profile Firestore sync note:', dbSyncErr);
+      }
       const nameToUse = result.user.displayName || result.user.email || 'Umukoresha';
+      const accountStr = result.user.email || nameToUse;
       localStorage.setItem('kevin_user_name', nameToUse);
       localStorage.setItem('kevin_ai_user_name', nameToUse);
+      localStorage.setItem('kevin_user_account', accountStr);
       setUserName(nameToUse);
+      setUserAccountLabel(accountStr);
+      setTempUserName(nameToUse);
+      setLoginError('');
+      setCountryDropdownOpen(false);
       setShowProfileModal(false);
       showToastMessage(`✨ Ikaze kuri Izi AI, ${nameToUse}!`);
     } catch (err: any) {
@@ -651,6 +794,8 @@ export default function App() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<number | null>(null);
   const [showAbout, setShowAbout] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showAccountPopover, setShowAccountPopover] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
@@ -817,15 +962,17 @@ export default function App() {
       };
 
       setSessions((prevSessions) => {
-        const targetSessionId = currentSessionId;
-        const exists = prevSessions.some((s) => s.id === targetSessionId);
-        if (exists) {
+        const existingNews = prevSessions.find(isNewsChannelSession);
+        if (existingNews) {
           return prevSessions.map((s) => {
-            if (s.id === targetSessionId) {
+            if (isNewsChannelSession(s)) {
               const alreadyHas = s.messages.some((m) => m.id.startsWith(`news_${briefing.slotId}`));
               if (alreadyHas) return s;
               return {
                 ...s,
+                id: NEWS_CHANNEL_SESSION_ID,
+                title: NEWS_CHANNEL_TITLE,
+                isNewsChannel: true,
                 messages: [...s.messages, newsMsg],
                 timestamp: Date.now(),
               };
@@ -834,27 +981,30 @@ export default function App() {
           });
         }
         return [
+          ...prevSessions,
           {
-            id: Date.now(),
-            title: briefing.title,
+            id: NEWS_CHANNEL_SESSION_ID,
+            title: NEWS_CHANNEL_TITLE,
+            isNewsChannel: true,
             messages: [newsMsg],
             timestamp: Date.now(),
           },
-          ...prevSessions,
         ];
       });
 
-      setMessages((prev) => {
-        if (prev.some((m) => m.id.startsWith(`news_${briefing.slotId}`))) return prev;
-        return [...prev, newsMsg];
-      });
+      if (currentSessionIdRef.current === NEWS_CHANNEL_SESSION_ID) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id.startsWith(`news_${briefing.slotId}`))) return prev;
+          return [...prev, newsMsg];
+        });
+        setTimeout(() => {
+          if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+          }
+        }, 140);
+      }
 
       setActiveNewsPopup(briefing);
-      setTimeout(() => {
-        if (chatContainerRef.current) {
-          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-        }
-      }, 140);
     };
 
     const cleanupNews = initDailyNewsDelivery(deliverBriefing);
@@ -871,7 +1021,7 @@ export default function App() {
       cleanupNews();
       window.removeEventListener(NEWS_PENDING_TOAST_EVENT, onNewsEvent);
     };
-  }, [isDedicatedAssistantOverlay, currentSessionId]);
+  }, [isDedicatedAssistantOverlay]);
 
   useEffect(() => {
     if (!activeNewsPopup) return;
@@ -1448,6 +1598,7 @@ export default function App() {
     if (showCustomInstructionsModal) { setShowCustomInstructionsModal(false); return; }
     if (showNewsInstructionsModal) { setShowNewsInstructionsModal(false); return; }
     if (showAbout) { setShowAbout(false); return; }
+    if (showHelpModal) { setShowHelpModal(false); return; }
     if (showClearConfirm) { setShowClearConfirm(false); return; }
     if (menuOpen) { setMenuOpen(false); return; }
     if (attachmentPopupOpen) { setAttachmentPopupOpen(false); return; }
@@ -1467,7 +1618,7 @@ export default function App() {
         }
         return { ...s, messages: currentMsgs, title, timestamp: s.timestamp || Date.now() };
       });
-      const existingEmpty = updatedSessions.find(s => s.id !== currentSessionId && s.messages.length === 0);
+      const existingEmpty = updatedSessions.find(s => s.id !== currentSessionId && !isNewsChannelSession(s) && s.messages.length === 0);
       if (existingEmpty) {
         saveChatHistory(updatedSessions);
         setSessions(updatedSessions);
@@ -1556,12 +1707,50 @@ export default function App() {
     setSessions(prev => prev.map(s => s.id === id ? { ...s, title: newTitle.trim() } : s));
   };
   
+  const openNewsChannel = () => {
+    stopReplySpeech();
+    setVoiceMenuMsgId(null);
+    const existingNews = sessions.find(isNewsChannelSession);
+    if (!existingNews) {
+      const created: ChatSession = {
+        id: NEWS_CHANNEL_SESSION_ID,
+        title: NEWS_CHANNEL_TITLE,
+        isNewsChannel: true,
+        messages: [],
+        timestamp: Date.now(),
+      };
+      setSessions((prev) => [...prev, created]);
+      setCurrentSessionId(NEWS_CHANNEL_SESSION_ID);
+      setMessages([]);
+    } else {
+      if (existingNews.id !== NEWS_CHANNEL_SESSION_ID) {
+        setSessions((prev) =>
+          prev.map((s) =>
+            isNewsChannelSession(s)
+              ? { ...s, id: NEWS_CHANNEL_SESSION_ID, title: NEWS_CHANNEL_TITLE, isNewsChannel: true }
+              : s
+          )
+        );
+      }
+      setCurrentSessionId(NEWS_CHANNEL_SESSION_ID);
+      setMessages(existingNews.messages);
+    }
+    setDrawerOpen(false);
+    setTimeout(() => {
+      if (chatContainerRef.current) {
+        chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      }
+    }, 140);
+  };
+
   const deleteSession = (id: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (sessions.length <= 1) {
+    const regularRemaining = sessions.filter(s => s.id !== id && !isNewsChannelSession(s));
+    if (regularRemaining.length === 0) {
       const newId = Date.now();
       const fresh: ChatSession = { id: newId, title: "New Chat", messages: [], timestamp: Date.now() };
-      setSessions([fresh]);
+      const newsChan = sessions.find(isNewsChannelSession);
+      setSessions(newsChan && id !== newsChan.id ? [fresh, newsChan] : [fresh]);
       setCurrentSessionId(newId);
       setMessages([]);
       setSessionToDelete(null);
@@ -1570,8 +1759,8 @@ export default function App() {
     const newSessions = sessions.filter(s => s.id !== id);
     setSessions(newSessions);
     if (currentSessionId === id) {
-      setCurrentSessionId(newSessions[0].id);
-      setMessages(newSessions[0].messages);
+      setCurrentSessionId(regularRemaining[0].id);
+      setMessages(regularRemaining[0].messages);
     }
     setSessionToDelete(null);
     showToastMessage("Chat deleted.");
@@ -1585,7 +1774,8 @@ export default function App() {
       messages: [],
       timestamp: timestamp,
     };
-    setSessions([freshSession]);
+    const newsChan = sessions.find(isNewsChannelSession);
+    setSessions(newsChan ? [freshSession, newsChan] : [freshSession]);
     setCurrentSessionId(timestamp);
     setMessages([]);
     setShowClearConfirm(false);
@@ -1594,6 +1784,7 @@ export default function App() {
 
   const getGroupedSessions = () => {
     const filtered = sessions.filter(s => {
+      if (isNewsChannelSession(s)) return false;
       if (!chatSearchQuery.trim()) return true;
       const q = chatSearchQuery.toLowerCase();
       const matchTitle = s.title.toLowerCase().includes(q);
@@ -2277,26 +2468,28 @@ export default function App() {
                     </div>
                     <div
                       className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
-                      onClick={() => { setMenuOpen(false); setShowEmailModal(true); }}
+                      onClick={() => { setMenuOpen(false); setShowWhatsAppModal(true); }}
                     >
                       <div className="flex items-center gap-2.5">
-                        <Mail size={16} className="text-red-500" />
-                        <span>Subiza Email (Gmail)</span>
+                        <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0 text-[#25D366]" fill="currentColor">
+                          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-2.646-1.025-5.13-2.887-6.99-1.863-1.86-4.345-2.888-6.99-2.888-5.449 0-9.886 4.434-9.889 9.885-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.124-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                        </svg>
+                        <span>WhatsApp Agent</span>
                       </div>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400">
-                        GMAIL
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#25D366]/15 text-[#075E54] dark:text-[#00FF88]">
+                        AGENT
                       </span>
                     </div>
                     <div
                       className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
-                      onClick={() => { setMenuOpen(false); setShowWhatsAppModal(true); }}
+                      onClick={() => { setKeysPool(getGeminiKeysPool()); setMenuOpen(false); setShowApiKeyModal(true); }}
                     >
                       <div className="flex items-center gap-2.5">
-                        <MessageSquare size={16} className="text-[#25D366]" />
-                        <span>Subiza WhatsApp (AI Reply)</span>
+                        <Key size={16} className="text-amber-500" />
+                        <span>Injiza Izi API Keys</span>
                       </div>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#25D366]/15 text-[#075E54] dark:text-[#00FF88]">
-                        WHATSAPP
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                        API KEYS
                       </span>
                     </div>
                     <div
@@ -2367,25 +2560,6 @@ export default function App() {
                         </div>
                       </div>
                     )}
-                    <div className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl cursor-pointer flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200" onClick={() => { setShowAbout(true); setMenuOpen(false); }}>
-                      <Info size={16} className="text-blue-400" />
-                      <span>About Izi AI</span>
-                    </div>
-                    <div 
-                      className="px-3 py-1.5 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl cursor-pointer flex items-center justify-between gap-2.5 text-xs font-semibold text-red-600 dark:text-red-400" 
-                      onClick={() => { setMenuOpen(false); setShowLogoutConfirm(true); }}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <User size={16} className="text-red-500 shrink-0" />
-                        <div className="min-w-0">
-                          <div>Logout</div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400 font-normal truncate">
-                            {userName || 'User'}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 shrink-0">Exit</span>
-                    </div>
                   </div>
 
                   {/* AI Model Selector Section inside 3-dots Menu */}
@@ -2495,9 +2669,7 @@ export default function App() {
                   type="button"
                   onClick={() => {
                     setActiveNewsPopup(null);
-                    if (chatContainerRef.current) {
-                      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-                    }
+                    openNewsChannel();
                   }}
                   className="px-2.5 py-1 rounded-lg bg-[#00a884] hover:bg-[#008f6f] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
                 >
@@ -2590,6 +2762,41 @@ export default function App() {
                   </button>
                 )}
               </div>
+
+              {/* Pinned Dedicated Single News Channel */}
+              {(() => {
+                const newsChan = sessions.find(isNewsChannelSession);
+                const newsCount = newsChan?.messages.length || 0;
+                const isNewsActive = currentSessionId === NEWS_CHANNEL_SESSION_ID;
+                return (
+                  <button
+                    type="button"
+                    onClick={openNewsChannel}
+                    className={`w-full mb-3 p-2.5 rounded-xl flex items-center justify-between gap-2 text-left transition-all cursor-pointer border ${
+                      isNewsActive
+                        ? 'bg-[#E1FFC7]/90 dark:bg-[#005c4b]/50 border-[#25D366]/50 dark:border-[#00a884]/60 shadow-xs'
+                        : 'bg-emerald-50/70 dark:bg-[#1f2c34]/80 hover:bg-emerald-100/70 dark:hover:bg-[#24333d] border-emerald-200/70 dark:border-[#2f3b43]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#075E54] to-[#00a884] text-white flex items-center justify-center shrink-0 shadow-xs">
+                        <Newspaper size={16} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-gray-900 dark:text-white truncate">
+                          Amakuru ya Izi AI
+                        </div>
+                        <div className="text-[10px] text-gray-500 dark:text-[#8696a0] truncate">
+                          {newsCount > 0 ? `${newsCount} amakuru yose ari hano` : 'Ahaza amakuru yose buri munsi'}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#00a884]/15 text-[#075E54] dark:text-[#00FF88] shrink-0">
+                      {newsCount > 0 ? newsCount : 'NEWS'}
+                    </span>
+                  </button>
+                );
+              })()}
 
               {/* Chat History List (Chronologically Grouped like ChatGPT) */}
               <div className="flex-1 overflow-y-auto pr-1 space-y-4 scrollbar-thin">
@@ -2733,33 +2940,7 @@ export default function App() {
                     <Trash2 size={15} />
                     <span>Clear All Chats</span>
                   </div>
-                  <span className="text-[10px] text-gray-400 dark:text-gray-500">{sessions.length} chats</span>
-                </div>
-
-                <div 
-                  onClick={() => { setDrawerOpen(false); setShowWhatsAppModal(true); }}
-                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <MessageSquare size={15} className="text-[#25D366]" />
-                    <span>Subiza WhatsApp</span>
-                  </div>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#25D366]/15 text-[#075E54] dark:text-[#00FF88]">
-                    AI REPLY
-                  </span>
-                </div>
-
-                <div 
-                  onClick={() => { setDrawerOpen(false); setShowEmailModal(true); }}
-                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Mail size={15} className="text-red-500" />
-                    <span>Subiza Email (Gmail)</span>
-                  </div>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400">
-                    GMAIL
-                  </span>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500">{sessions.filter(s => !isNewsChannelSession(s)).length} chats</span>
                 </div>
 
                 <div 
@@ -2785,22 +2966,71 @@ export default function App() {
                 </div>
 
                 <div 
-                  onClick={() => {
-                    setDrawerOpen(false);
-                    setShowLogoutConfirm(true);
-                  }}
-                  className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer transition-colors"
+                  onClick={() => { setShowHelpModal(true); setDrawerOpen(false); }}
+                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <User size={16} className="text-red-500 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="font-semibold text-xs text-red-600 dark:text-red-400">Logout</div>
-                      <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-                        {userName || 'User'}
+                  <div className="flex items-center gap-2">
+                    <Info size={15} className="text-cyan-500" />
+                    <span>Help & Support</span>
+                  </div>
+                  <ChevronRight size={14} className="text-gray-400 dark:text-gray-500" />
+                </div>
+
+                {/* ChatGPT Account Popover Card at bottom */}
+                <div className="relative pt-1">
+                  {showAccountPopover && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowAccountPopover(false)} />
+                      <div className="absolute bottom-full left-0 right-0 mb-2 bg-[#fcfcfc] dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] rounded-2xl shadow-2xl p-2 z-50 text-gray-800 dark:text-[#e9edef] space-y-1">
+                        <div className="px-3 py-2 border-b border-gray-200 dark:border-[#2f3b43] text-xs font-medium text-gray-500 dark:text-gray-400 truncate">
+                          {userAccountLabel || userName || 'Personal Account'}
+                        </div>
+                        <div className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl flex items-center justify-between cursor-pointer text-xs font-semibold">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-[#075E54] text-white flex items-center justify-center text-[10px]">
+                              {(userName || userAccountLabel || 'U')[0].toUpperCase()}
+                            </span>
+                            <span>Personal account</span>
+                          </div>
+                          <Check size={14} className="text-[#00FF88]" />
+                        </div>
+                        <div 
+                          onClick={() => { setShowAccountPopover(false); setDrawerOpen(false); setLoginError(''); setShowProfileModal(true); }}
+                          className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-[#202c33] rounded-xl flex items-center gap-2 cursor-pointer text-xs font-semibold text-[#075E54] dark:text-[#00FF88]"
+                        >
+                          <Plus size={14} />
+                          <span>Add account</span>
+                        </div>
+                        <div 
+                          onClick={() => { setShowAccountPopover(false); setDrawerOpen(false); setShowLogoutConfirm(true); }}
+                          className="px-3 py-2 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl flex items-center gap-2 cursor-pointer text-xs font-semibold text-red-600 dark:text-red-400 border-t border-gray-200 dark:border-[#2f3b43]"
+                        >
+                          <User size={14} />
+                          <span>Log out</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div 
+                    onClick={() => setShowAccountPopover(!showAccountPopover)}
+                    className="flex items-center justify-between p-2.5 rounded-2xl bg-gray-100 dark:bg-[#202c33] hover:bg-gray-200/80 dark:hover:bg-[#28353d] cursor-pointer transition-all border border-gray-200 dark:border-[#2f3b43]"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-[#075E54] text-white flex items-center justify-center font-bold text-xs shrink-0">
+                        {(userName || userAccountLabel || 'U')[0].toUpperCase()}
+                      </div>
+                      <div className="min-w-0 text-left">
+                        <div className="font-bold text-xs text-gray-900 dark:text-white truncate">
+                          {userAccountLabel || userName || 'Personal Account'}
+                        </div>
+                        <div className="text-[10px] text-gray-500 dark:text-[#8696a0]">
+                          Personal account
+                        </div>
                       </div>
                     </div>
+                    <ChevronRight size={14} className={`text-gray-400 transition-transform ${showAccountPopover ? 'rotate-90' : ''}`} />
                   </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 shrink-0">Exit</span>
                 </div>
               </div>
             </motion.div>
@@ -2920,11 +3150,18 @@ export default function App() {
                   onClick={() => {
                     localStorage.removeItem('kevin_user_name');
                     localStorage.removeItem('kevin_ai_user_name');
+                    localStorage.removeItem('kevin_user_account');
                     setUserName('');
+                    setUserAccountLabel('');
                     setTempUserName('');
+                    setLoginPassword('');
+                    setLoginPhoneNickname('');
+                    setLoginError('');
+                    setCountryDropdownOpen(false);
                     setAuthMode('login');
                     setShowLogoutConfirm(false);
                     setShowProfileModal(true);
+                    void signOutFirebaseAuth();
                     showToastMessage("⚠️ Wasohotse muri konti yawe.");
                   }}
                   className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
@@ -2942,6 +3179,26 @@ export default function App() {
       <div className="relative flex-1 min-h-0 flex flex-col">
       <main ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 relative chat-scroll-area">
         {(messages.length === 0 || (messages.length === 1 && messages[0].sender === 'kevin' && messages[0].text.includes("Hello! I'm Izi AI"))) ? (
+          currentSessionId === NEWS_CHANNEL_SESSION_ID ? (
+            <div className="flex flex-col items-center justify-center min-h-[75%] text-center py-10 px-4">
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[#075E54] to-[#00a884] text-white flex items-center justify-center shadow-xl mb-5">
+                <Newspaper size={36} />
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white mb-2">
+                📰 Amakuru ya Izi AI
+              </h2>
+              <p className="text-sm text-gray-600 dark:text-[#8696a0] max-w-md leading-relaxed">
+                Hano ni ho amakuru mashya yose azajya aza buri gihe (06:00, 12:00, 15:00, 18:00, 20:00) atabangamiye ibiganiro byawe bya buri munsi.
+              </p>
+              <button
+                type="button"
+                onClick={startNewChat}
+                className="mt-6 px-4 py-2 rounded-xl bg-[#00a884] hover:bg-[#075E54] text-white text-xs font-bold shadow-sm transition-colors cursor-pointer"
+              >
+                Subira mu biganiro (New Chat)
+              </button>
+            </div>
+          ) : (
           <div className="flex flex-col items-center justify-center min-h-[80%] text-center py-10 px-4">
             <div className="mb-6 animate-float">
               <div className="relative w-32 h-32 flex items-center justify-center shadow-xl shadow-emerald-500/20 ring-4 ring-emerald-500/20 rounded-full p-4 bg-emerald-500/10 backdrop-blur-sm">
@@ -2962,7 +3219,7 @@ export default function App() {
             <div className="grid grid-cols-2 gap-2.5 sm:gap-3 w-full max-w-md mx-auto">
               {[
                 { id: 'yt_yatapita', q: "Nshurangira", s: "Yatapita by Diamond Platnumz", isYoutube: true },
-                { id: 'img_rwanda', q: "Nkorera ifoto y'umusozi mwiza mu Rwanda", s: "🎨 Kora Ifoto (AI Image)" },
+                { id: 'whatsapp_agent', q: "WhatsApp Agent", s: "💬 AI WhatsApp Auto Reply", isWhatsApp: true },
                 { id: 'kevin_photo', q: "Nyereka ifoto y'uwakuremye (Kevin)", s: "📸 Ifoto y'Uwakuremye" },
                 { id: 'email_reply', q: "Subiza ubutumwa kuri Email", s: "📧 Soma & usubize Emails" },
               ].map((card, i) => (
@@ -2972,6 +3229,8 @@ export default function App() {
                   onClick={() => {
                     if (card.id === 'yt_yatapita') {
                       handleWelcomeYoutubePlay();
+                    } else if (card.id === 'whatsapp_agent') {
+                      setShowWhatsAppModal(true);
                     } else if (card.id === 'email_reply') {
                       setShowEmailModal(true);
                     } else {
@@ -2991,12 +3250,18 @@ export default function App() {
                         <path fill="#FFFFFF" d="M9.545 15.568V8.432L15.818 12z" />
                       </svg>
                     )}
+                    {card.isWhatsApp && (
+                      <svg viewBox="0 0 24 24" className="w-4 h-4 sm:w-5 sm:h-5 shrink-0 text-[#25D366]" fill="currentColor" aria-label="WhatsApp">
+                        <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-2.646-1.025-5.13-2.887-6.99-1.863-1.86-4.345-2.888-6.99-2.888-5.449 0-9.886 4.434-9.889 9.885-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.124-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                      </svg>
+                    )}
                   </p>
                   <p className="text-[10px] sm:text-xs text-gray-500 dark:text-[#8696a0] mt-1">{card.s}</p>
                 </div>
               ))}
             </div>
           </div>
+          )
         ) : (
           <div className="space-y-4">
             <AnimatePresence>
@@ -3815,47 +4080,130 @@ export default function App() {
         </div>
       )}
 
+      {/* Help & Support Modal */}
+      <AnimatePresence>
+        {showHelpModal && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowHelpModal(false)}>
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }} 
+              className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-2xl p-6 w-full max-w-sm" 
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Info size={18} className="text-cyan-500" />
+                  <span>Ubufasha (Help & Support)</span>
+                </h3>
+                <button onClick={() => setShowHelpModal(false)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="text-xs text-gray-600 dark:text-[#d1d7db] mb-4">
+                Niba ufite ikibazo cyangwa ukeneye ubufasha bwihuse kuri Izi AI, twandikire kuri izi mbuga zikurikira:
+              </p>
+
+              <div className="space-y-2.5">
+                {/* WhatsApp */}
+                <a
+                  href="https://wa.me/250791266464?text=Muraho%20Kevin%2C%20ndashaka%20ubufasha%20kuri%20Izi%20AI"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] hover:border-[#25D366] transition-all group cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0 text-[#25D366]" fill="currentColor">
+                      <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-2.646-1.025-5.13-2.887-6.99-1.863-1.86-4.345-2.888-6.99-2.888-5.449 0-9.886 4.434-9.889 9.885-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.124-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                    </svg>
+                    <div>
+                      <div className="font-bold text-xs text-gray-900 dark:text-white group-hover:text-[#25D366]">WhatsApp Support</div>
+                      <div className="text-[11px] text-gray-500">0791266464</div>
+                    </div>
+                  </div>
+                  <ExternalLink size={14} className="text-gray-400 group-hover:text-[#25D366]" />
+                </a>
+
+                {/* Instagram */}
+                <a
+                  href="https://www.instagram.com/prodix_250?cnvx=MXNndHlmN2hkaGVoMw=="
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] hover:border-pink-500 transition-all group cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0 text-pink-500" fill="currentColor">
+                      <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                    </svg>
+                    <div>
+                      <div className="font-bold text-xs text-gray-900 dark:text-white group-hover:text-pink-500">Instagram Support</div>
+                      <div className="text-[11px] text-gray-500">@prodix_250</div>
+                    </div>
+                  </div>
+                  <ExternalLink size={14} className="text-gray-400 group-hover:text-pink-500" />
+                </a>
+
+                {/* Telegram */}
+                <a
+                  href="https://t.me/Prodi_x"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] hover:border-sky-500 transition-all group cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0 text-sky-500" fill="currentColor">
+                      <path d="M12 0c-6.627 0-12 5.373-12 12s5.373 12 12 12 12-5.373 12-12-5.373-12-12-12zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.14-.261.26-.548.26l.196-3.053 5.56-5.022c.242-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.658-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
+                    </svg>
+                    <div>
+                      <div className="font-bold text-xs text-gray-900 dark:text-white group-hover:text-sky-500">Telegram Support</div>
+                      <div className="text-[11px] text-gray-500">t.me/Prodi_x</div>
+                    </div>
+                  </div>
+                  <ExternalLink size={14} className="text-gray-400 group-hover:text-sky-500" />
+                </a>
+              </div>
+
+              <button onClick={() => setShowHelpModal(false)} className="mt-5 bg-[#00a884] hover:bg-[#075E54] text-white font-semibold py-2.5 px-4 rounded-xl w-full transition-colors shadow-md text-xs cursor-pointer">Funga</button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Login or Create Account / User Profile Modal */}
       <AnimatePresence>
         {showProfileModal && (
           <div 
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 select-none bg-black overflow-y-auto"
-            style={{
-              backgroundImage: `linear-gradient(to bottom, rgba(5, 12, 18, 0.74), rgba(5, 12, 18, 0.86)), url('/assets/aistudio/splash_8c62f0e9.png')`,
-              backgroundPosition: 'center',
-              backgroundSize: 'cover',
-              backgroundRepeat: 'no-repeat',
-            }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 select-none bg-[#04090d] overflow-y-auto"
           >
             {/* Ambient spectral glow effect */}
-            <div className="absolute inset-0 bg-radial from-cyan-500/10 via-transparent to-black/60 pointer-events-none" />
+            <div className="absolute inset-0 bg-radial from-cyan-500/10 via-transparent to-black/80 pointer-events-none" />
 
             <motion.div 
               initial={{ scale: 0.92, opacity: 0, y: 15 }} 
               animate={{ scale: 1, opacity: 1, y: 0 }} 
               exit={{ scale: 0.92, opacity: 0, y: 15 }} 
               transition={{ type: 'spring', damping: 25, stiffness: 260 }}
-              className="bg-[#0b141a]/90 backdrop-blur-2xl border border-cyan-500/35 shadow-[0_0_60px_rgba(0,168,132,0.22)] rounded-3xl p-6 sm:p-8 w-full max-w-md relative overflow-hidden text-white" 
+              className="bg-[#071017]/60 backdrop-blur-xs border border-cyan-500/35 shadow-[0_0_60px_rgba(0,168,132,0.22)] rounded-3xl p-6 sm:p-8 w-full max-w-md relative text-white" 
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Decorative background glow inside the card */}
-              <div className="absolute -top-24 -right-24 w-48 h-48 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-[#00FF88]/15 rounded-full blur-3xl pointer-events-none" />
+              {/* Transparent login card background image behind UI & Sign in with Google */}
+              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
+                <img
+                  src={loginBgImg}
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute inset-0 w-full h-full object-cover object-center opacity-45 select-none"
+                />
+                <div className="absolute inset-0 bg-gradient-to-b from-[#050c12]/35 via-[#050c12]/30 to-[#050c12]/65" />
 
-              {/* Header Branding */}
-              <div className="text-center mb-6 relative z-10">
-                <motion.div
-                  animate={{ scale: [1, 1.06, 1], rotate: [0, 4, -4, 0] }}
-                  transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
-                  className="w-24 h-24 mx-auto mb-3 rounded-2xl bg-black/60 text-white flex items-center justify-center shadow-2xl overflow-hidden relative border-2 border-cyan-400/60 ring-4 ring-cyan-500/20"
-                >
-                  <img 
-                    src="/assets/aistudio/splash_8c62f0e9.png" 
-                    alt="Izi AI Logo" 
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-[#00FF88] animate-ping"></div>
-                </motion.div>
+                {/* Decorative background glow inside the card */}
+                <div className="absolute -top-24 -right-24 w-48 h-48 bg-cyan-500/20 rounded-full blur-3xl" />
+                <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-[#00FF88]/15 rounded-full blur-3xl" />
+              </div>
+
+              {/* Header Branding (animated box removed cleanly per user preference) */}
+              <div className="text-center mb-6 pt-1 relative z-10">
                 <h3 className="font-extrabold text-2xl sm:text-3xl text-white tracking-tight">
                   {authMode === 'login' ? 'Log in to Izi AI' : 'Create Your Account'}
                 </h3>
@@ -3868,7 +4216,7 @@ export default function App() {
               <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/50 border border-white/10 mb-5 relative z-10">
                 <button
                   type="button"
-                  onClick={() => setAuthMode('login')}
+                  onClick={() => { setAuthMode('login'); setLoginError(''); setCountryDropdownOpen(false); }}
                   className={`py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                     authMode === 'login'
                       ? 'bg-gradient-to-r from-[#075E54] to-[#00a884] text-white shadow-md'
@@ -3879,7 +4227,7 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setAuthMode('register')}
+                  onClick={() => { setAuthMode('register'); setLoginError(''); setCountryDropdownOpen(false); }}
                   className={`py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                     authMode === 'register'
                       ? 'bg-gradient-to-r from-[#075E54] to-[#00a884] text-white shadow-md'
@@ -3916,47 +4264,202 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="flex items-center my-4 text-gray-400 relative z-10">
-                <div className="flex-1 border-t border-white/10"></div>
-                <span className="px-3 text-xs uppercase tracking-wider font-semibold text-gray-400">Or with name</span>
-                <div className="flex-1 border-t border-white/10"></div>
+              <div className="flex items-center my-4 text-gray-300 relative z-10">
+                <div className="flex-1 border-t border-white/15"></div>
+                <span className="px-3 text-xs uppercase tracking-wider font-semibold text-gray-300">Or continue with</span>
+                <div className="flex-1 border-t border-white/15"></div>
               </div>
 
-              {/* Form Input */}
-              <div className="space-y-4 relative z-10">
+              {/* Login Method Switcher: Email vs Phone */}
+              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/45 border border-white/15 mb-4 relative z-10">
+                <button
+                  type="button"
+                  onClick={() => { setLoginMethod('email'); setLoginError(''); }}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    loginMethod === 'email'
+                      ? 'bg-white/20 text-white border border-cyan-400/50 shadow-sm'
+                      : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  <Mail size={14} />
+                  <span>Email</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setLoginMethod('phone'); setLoginError(''); }}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    loginMethod === 'phone'
+                      ? 'bg-white/20 text-white border border-[#00FF88]/50 shadow-sm'
+                      : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  <Phone size={14} />
+                  <span>Phone Number</span>
+                </button>
+              </div>
+
+              {/* Form Inputs (No autoFocus so mobile keyboard only opens on user tap) */}
+              <div className="space-y-3.5 relative z-10">
+                {loginMethod === 'email' ? (
+                  <div>
+                    <label className="block text-xs font-bold text-gray-100 mb-1.5">
+                      Email Address:
+                    </label>
+                    <input
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      value={loginEmail}
+                      onChange={(e) => { setLoginEmail(e.target.value); setLoginError(''); }}
+                      placeholder="name@example.com"
+                      className="w-full bg-black/45 text-white placeholder-gray-400 px-3.5 py-2.5 rounded-xl border border-white/20 focus:border-[#00FF88] focus:ring-1 focus:ring-[#00FF88] focus:outline-none text-sm transition-all shadow-inner"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleEmailOrPhoneAuth();
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-3.5 relative z-20">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-100 mb-1.5">
+                        Nickname (Izina ryawe){authMode === 'register' ? ':' : ' (Optional):'}
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={100}
+                        autoComplete="nickname"
+                        value={loginPhoneNickname}
+                        onChange={(e) => { setLoginPhoneNickname(e.target.value); setLoginError(''); }}
+                        placeholder="Urugero: Kevin"
+                        className="w-full bg-black/45 text-white placeholder-gray-400 px-3.5 py-2.5 rounded-xl border border-white/20 focus:border-[#00FF88] focus:ring-1 focus:ring-[#00FF88] focus:outline-none text-sm transition-all shadow-inner"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleEmailOrPhoneAuth();
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-100 mb-1.5">
+                        Phone Number:
+                      </label>
+                      <div className="flex items-center gap-2 relative">
+                        <div className="relative shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setCountryDropdownOpen((prev) => !prev)}
+                            aria-label="Country code"
+                            aria-expanded={countryDropdownOpen}
+                            className="bg-black/60 hover:bg-black/75 text-white px-2.5 py-2.5 rounded-xl border border-white/20 focus:border-[#00FF88] focus:outline-none text-xs font-semibold flex items-center gap-2 cursor-pointer transition-colors"
+                          >
+                            <CountryFlag iso={selectedCountry.iso} />
+                            <span>{selectedCountry.code}</span>
+                            <ChevronDown size={13} className={`text-gray-300 transition-transform ${countryDropdownOpen ? 'rotate-180' : ''}`} />
+                          </button>
+
+                          {countryDropdownOpen && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-30"
+                                onClick={() => setCountryDropdownOpen(false)}
+                              />
+                              <div className="absolute left-0 bottom-full mb-1.5 w-60 max-h-56 overflow-y-auto bg-[#0b141a]/95 backdrop-blur-md border border-cyan-500/35 rounded-xl shadow-2xl p-1.5 z-40">
+                                {COUNTRY_CODES.map((c) => {
+                                  const isSelected = c.code === loginCountryCode;
+                                  return (
+                                    <button
+                                      key={`${c.iso}-${c.code}`}
+                                      type="button"
+                                      onClick={() => {
+                                        setLoginCountryCode(c.code);
+                                        setCountryDropdownOpen(false);
+                                        setLoginError('');
+                                      }}
+                                      className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-xs transition-colors cursor-pointer ${
+                                        isSelected
+                                          ? 'bg-[#00a884]/25 text-[#00FF88] font-bold'
+                                          : 'text-gray-100 hover:bg-white/10'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <CountryFlag iso={c.iso} />
+                                        <span className="truncate">{c.name}</span>
+                                      </div>
+                                      <span className="font-mono text-[11px] text-cyan-300 shrink-0">{c.code}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <input
+                          type="tel"
+                          inputMode="tel"
+                          autoComplete="tel-national"
+                          value={loginPhone}
+                          onChange={(e) => { setLoginPhone(e.target.value); setLoginError(''); }}
+                          placeholder="788 123 456"
+                          className="flex-1 min-w-0 bg-black/45 text-white placeholder-gray-400 px-3.5 py-2.5 rounded-xl border border-white/20 focus:border-[#00FF88] focus:ring-1 focus:ring-[#00FF88] focus:outline-none text-sm transition-all shadow-inner"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleEmailOrPhoneAuth();
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
-                  <label className="block text-xs font-bold text-gray-200 mb-1.5">
-                    Your Name or Nickname:
+                  <label className="block text-xs font-bold text-gray-100 mb-1.5">
+                    Password:
                   </label>
-                  <input 
-                    type="text"
-                    value={tempUserName}
-                    onChange={(e) => setTempUserName(e.target.value)}
-                    placeholder="e.g. Kevin, Alice, Jean..."
-                    required
-                    className="w-full bg-black/40 text-white placeholder-gray-400 px-3.5 py-3 rounded-xl border border-white/15 focus:border-[#00FF88] focus:ring-1 focus:ring-[#00FF88] focus:outline-none text-sm transition-all shadow-inner"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        handleSaveUserName();
-                      }
-                    }}
-                    autoFocus
-                  />
+                  <div className="relative">
+                    <input
+                      type={showLoginPassword ? 'text' : 'password'}
+                      autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+                      value={loginPassword}
+                      onChange={(e) => { setLoginPassword(e.target.value); setLoginError(''); }}
+                      placeholder="••••••"
+                      className="w-full bg-black/45 text-white placeholder-gray-400 px-3.5 py-2.5 pr-10 rounded-xl border border-white/20 focus:border-[#00FF88] focus:ring-1 focus:ring-[#00FF88] focus:outline-none text-sm transition-all shadow-inner"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleEmailOrPhoneAuth();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword((p) => !p)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-white cursor-pointer"
+                      aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
 
-                <div className="pt-2">
+                {loginError && (
+                  <div className="text-xs text-red-300 bg-red-950/60 border border-red-400/40 rounded-xl px-3 py-2">
+                    {loginError}
+                  </div>
+                )}
+
+                <div className="pt-1">
                   <button 
                     type="button"
-                    onClick={handleSaveUserName}
-                    disabled={!tempUserName.trim()}
-                    className={`w-full py-3.5 rounded-xl text-sm font-extrabold shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                      tempUserName.trim()
-                        ? 'bg-gradient-to-r from-[#00a884] to-[#00FF88] text-black hover:opacity-95 hover:scale-[1.01] active:scale-[0.99] font-black'
-                        : 'bg-white/10 text-gray-500 cursor-not-allowed border border-white/5'
-                    }`}
+                    disabled={isAuthSubmitting}
+                    onClick={handleEmailOrPhoneAuth}
+                    className="w-full py-3.5 rounded-xl text-sm font-black shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer bg-gradient-to-r from-[#00a884] to-[#00FF88] text-black hover:opacity-95 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <Check size={18} />
-                    <span>{authMode === 'login' ? 'Log In' : 'Create Account'}</span>
+                    {isAuthSubmitting ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Check size={18} />
+                    )}
+                    <span>
+                      {isAuthSubmitting
+                        ? 'Tegereza...'
+                        : authMode === 'login'
+                          ? 'Log In'
+                          : 'Create Account'}
+                    </span>
                   </button>
                 </div>
               </div>
@@ -4242,11 +4745,13 @@ export default function App() {
                   className="flex items-center justify-between p-2.5 rounded-xl text-xs font-medium text-gray-700 dark:text-[#e9edef] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#111b21] cursor-pointer transition-colors"
                 >
                   <div className="flex items-center gap-2.5">
-                    <MessageSquare size={16} className="text-[#25D366]" />
-                    <span>Subiza WhatsApp (AI Reply)</span>
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0 text-[#25D366]" fill="currentColor">
+                      <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-2.646-1.025-5.13-2.887-6.99-1.863-1.86-4.345-2.888-6.99-2.888-5.449 0-9.886 4.434-9.889 9.885-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.124-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                    </svg>
+                    <span>WhatsApp Agent</span>
                   </div>
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#25D366]/15 text-[#075E54] dark:text-[#00FF88]">
-                    WHATSAPP
+                    AGENT
                   </span>
                 </div>
 

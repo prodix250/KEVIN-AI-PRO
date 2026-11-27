@@ -47,10 +47,12 @@
   "devDependencies": {
     "@capacitor/assets": "^4.0.0",
     "@capacitor/cli": "^8.6.0",
+    "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.2",
+    "eslint": "^10.15.0",
     "gh-pages": "^6.3.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.23.12",

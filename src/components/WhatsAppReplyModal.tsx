@@ -41,6 +41,27 @@ interface WhatsAppReplyModalProps {
   onToast: (message: string) => void;
 }
 
+const WHATSAPP_AVATARS = [
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80',
+];
+
+function getWhatsAppAvatarUrl(name: string): string {
+  if (!name) return WHATSAPP_AVATARS[0];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % WHATSAPP_AVATARS.length;
+  return WHATSAPP_AVATARS[index];
+}
+
 export default function WhatsAppReplyModal({
   isOpen,
   onClose,
@@ -129,7 +150,7 @@ export default function WhatsAppReplyModal({
       );
       setReplyText(draft);
     } catch (err: any) {
-      onToast(`⚠️ Byanze gutegura igisubizo: ${err?.message || 'Error'}`);
+      onToast(`⚠️ AI Draft Error: ${err?.message || 'Error'}`);
     } finally {
       setIsDrafting(false);
     }
@@ -147,15 +168,15 @@ export default function WhatsAppReplyModal({
       setShowSendConfirm(false);
       onToast(
         res.method === 'native_app'
-          ? `💬 Igisubizo cyohererejwe ${selectedChat.sender} kuri WhatsApp!`
-          : `💬 WhatsApp yafunguwe kuri ${selectedChat.sender} kugira ngo wohereze!`
+          ? `💬 Reply sent successfully to ${selectedChat.sender} via WhatsApp!`
+          : `💬 WhatsApp opened for ${selectedChat.sender} to send reply!`
       );
       setChats(getStoredWhatsAppChats());
       setSelectedChat((prev) =>
         prev ? { ...prev, unread: false, repliedText: replyText.trim() } : null
       );
     } catch (err: any) {
-      onToast(`⚠️ Byanze kohereza: ${err?.message || 'Error'}`);
+      onToast(`⚠️ Send error: ${err?.message || 'Error'}`);
     } finally {
       setIsSending(false);
     }
@@ -164,7 +185,7 @@ export default function WhatsAppReplyModal({
   const handleAddNewChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newChatSender.trim() || !newChatMessage.trim()) {
-      onToast('⚠️ Shyiramo izina ry’uwakwandikiye n’ubutumwa yohereje.');
+      onToast('⚠️ Please enter sender name and incoming message.');
       return;
     }
     const created = addIncomingWhatsAppChat(
@@ -180,7 +201,7 @@ export default function WhatsAppReplyModal({
     setNewChatPhone('');
     setNewChatMessage('');
     setShowAddChatModal(false);
-    onToast(`✅ Ubutumwa bwa ${created.sender} bwashyizwemo neza!`);
+    onToast(`✅ Message from ${created.sender} added successfully!`);
   };
 
   const filteredChats = chats.filter((c) => {
@@ -232,19 +253,21 @@ export default function WhatsAppReplyModal({
             <div className="flex items-center justify-between px-4 py-3.5 border-b border-gray-200 dark:border-[#2f3b43] bg-[#f8fafc] dark:bg-[#182229] shrink-0">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-2xl bg-[#25D366]/15 text-[#25D366] flex items-center justify-center shrink-0 shadow-xs">
-                  <MessageSquare size={22} />
+                  <svg viewBox="0 0 24 24" className="w-6 h-6 shrink-0 text-[#25D366]" fill="currentColor">
+                    <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-2.646-1.025-5.13-2.887-6.99-1.863-1.86-4.345-2.888-6.99-2.888-5.449 0-9.886 4.434-9.889 9.885-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.124-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                  </svg>
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="font-bold text-sm sm:text-base text-gray-900 dark:text-white truncate">
-                      Subiza ubutumwa kuri WhatsApp
+                      WhatsApp AI Reply Assistant
                     </h3>
                     <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-[#25D366]/15 text-[#075E54] dark:text-[#00FF88] shrink-0">
                       WHATSAPP
                     </span>
                   </div>
                   <p className="text-[11px] text-gray-500 dark:text-[#8696a0] truncate">
-                    Soma ubutumwa butasomwe, utegure igisubizo na AI, ucyoherereze kuri WhatsApp
+                    Read unread messages, generate smart AI replies, and send via WhatsApp
                   </p>
                 </div>
               </div>
@@ -255,7 +278,7 @@ export default function WhatsAppReplyModal({
                   onClick={refreshChats}
                   disabled={isRefreshing}
                   className="p-2 rounded-xl text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-[#222c33] transition-colors cursor-pointer"
-                  title="Ongera ushake ubutumwa (Refresh)"
+                  title="Refresh messages"
                 >
                   <RefreshCw size={17} className={isRefreshing ? 'animate-spin text-[#25D366]' : ''} />
                 </button>
@@ -263,10 +286,10 @@ export default function WhatsAppReplyModal({
                   type="button"
                   onClick={() => setShowAddChatModal(true)}
                   className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 text-[#075E54] dark:text-[#00FF88] text-xs font-bold transition-all cursor-pointer"
-                  title="Shyiramo ubutumwa bushya wahawe"
+                  title="Add incoming message"
                 >
                   <Plus size={15} />
-                  <span>Ongeramo</span>
+                  <span>Add Chat</span>
                 </button>
                 <button
                   type="button"
@@ -294,7 +317,7 @@ export default function WhatsAppReplyModal({
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Shakisha umuntu cyangwa ubutumwa..."
+                      placeholder="Search sender or message..."
                       className="w-full bg-gray-100 dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] pl-9 pr-8 py-2 rounded-xl text-xs border border-transparent focus:border-[#25D366] focus:outline-none transition-all placeholder:text-gray-400"
                     />
                     {searchQuery && (
@@ -313,14 +336,14 @@ export default function WhatsAppReplyModal({
                 <div className="grid grid-cols-2 p-1.5 mx-3 my-2 rounded-xl bg-gray-100 dark:bg-[#202c33] gap-1 text-xs font-bold">
                   <button
                     type="button"
-                    onClick={() => setFilterMode('unread')}
+                    onClick={() => filterMode !== 'unread' && setFilterMode('unread')}
                     className={`py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                       filterMode === 'unread'
                         ? 'bg-white dark:bg-[#111b21] text-[#075E54] dark:text-[#00FF88] shadow-xs'
                         : 'text-gray-500 hover:text-gray-900 dark:text-gray-400'
                     }`}
                   >
-                    <span>Butasomwe</span>
+                    <span>Unread</span>
                     {unreadCount > 0 && (
                       <span className="w-4 h-4 rounded-full bg-[#25D366] text-white text-[10px] flex items-center justify-center">
                         {unreadCount}
@@ -329,14 +352,14 @@ export default function WhatsAppReplyModal({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFilterMode('all')}
+                    onClick={() => filterMode !== 'all' && setFilterMode('all')}
                     className={`py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                       filterMode === 'all'
                         ? 'bg-white dark:bg-[#111b21] text-[#075E54] dark:text-[#00FF88] shadow-xs'
                         : 'text-gray-500 hover:text-gray-900 dark:text-gray-400'
                     }`}
                   >
-                    <span>Byose ({chats.length})</span>
+                    <span>All ({chats.length})</span>
                   </button>
                 </div>
 
@@ -348,12 +371,12 @@ export default function WhatsAppReplyModal({
                         <MessageSquare size={22} />
                       </div>
                       <p className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                        Nta butumwa bubonetse
+                        No messages found
                       </p>
                       <p className="text-[11px] text-gray-400 mt-1">
                         {filterMode === 'unread'
-                          ? 'Ubutumwa bwose butasomwe bwarangiye.'
-                          : 'Nta butumwa bwa WhatsApp burakoreshwa.'}
+                          ? 'All unread messages have been replied.'
+                          : 'No WhatsApp messages available.'}
                       </p>
                       <button
                         type="button"
@@ -361,12 +384,13 @@ export default function WhatsAppReplyModal({
                         className="mt-3 px-3 py-1.5 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 text-[#075E54] dark:text-[#00FF88] text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1"
                       >
                         <Plus size={13} />
-                        <span>Ongeramo ubutumwa</span>
+                        <span>Add message</span>
                       </button>
                     </div>
                   ) : (
                     filteredChats.map((chat) => {
                       const isSelected = selectedChat?.id === chat.id;
+                      const avatarUrl = getWhatsAppAvatarUrl(chat.sender);
                       return (
                         <div
                           key={chat.id}
@@ -377,8 +401,18 @@ export default function WhatsAppReplyModal({
                               : 'hover:bg-gray-100/80 dark:hover:bg-[#182229] border-transparent'
                           }`}
                         >
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#075E54] to-[#128C7E] text-white font-extrabold text-sm flex items-center justify-center shrink-0 shadow-xs">
-                            {chat.sender.charAt(0).toUpperCase()}
+                          <div className="w-11 h-11 rounded-full bg-[#25D366]/20 text-[#25D366] font-extrabold text-sm flex items-center justify-center shrink-0 shadow-xs overflow-hidden border border-[#25D366]/40 relative">
+                            <img
+                              src={avatarUrl}
+                              alt={chat.sender}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                            <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-[#075E54] dark:text-[#00FF88] bg-emerald-900/10" style={{ display: 'none' }}>
+                              {chat.sender.charAt(0).toUpperCase()}
+                            </span>
                           </div>
 
                           <div className="flex-1 min-w-0">
@@ -403,7 +437,7 @@ export default function WhatsAppReplyModal({
                                 <span className="w-2.5 h-2.5 rounded-full bg-[#25D366] shadow-xs"></span>
                               ) : chat.repliedText ? (
                                 <span className="text-[10px] font-bold text-[#00a884] dark:text-[#00FF88] flex items-center gap-0.5">
-                                  <CheckCircle2 size={11} /> Yasubijwe
+                                  <CheckCircle2 size={11} /> Replied
                                 </span>
                               ) : null}
                             </div>
@@ -417,14 +451,14 @@ export default function WhatsAppReplyModal({
 
               {/* Right Column: Active Conversation & AI Reply Composer */}
               <div
-                className={`flex-1 flex flex-col min-w-0 bg-white dark:bg-[#202c33] ${
+                className={`flex-1 flex flex-col min-w-0 bg-white dark:bg-[#202c33] overflow-y-auto ${
                   selectedChat ? 'flex' : 'hidden md:flex'
                 }`}
               >
                 {selectedChat ? (
-                  <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-4 sm:p-6 space-y-5">
+                  <div className="flex-1 flex flex-col min-h-0 p-4 sm:p-6 space-y-5 overflow-y-auto">
                     {/* Selected Contact Header */}
-                    <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-[#2b3942]">
+                    <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-[#2b3942] shrink-0">
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
@@ -433,8 +467,15 @@ export default function WhatsAppReplyModal({
                         >
                           <ArrowLeft size={18} />
                         </button>
-                        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#075E54] to-[#25D366] text-white font-extrabold text-base flex items-center justify-center shadow-md">
-                          {selectedChat.sender.charAt(0).toUpperCase()}
+                        <div className="w-12 h-12 rounded-full bg-[#25D366]/20 text-[#25D366] font-extrabold text-base flex items-center justify-center shadow-md overflow-hidden border border-[#25D366]/40 relative shrink-0">
+                          <img
+                            src={getWhatsAppAvatarUrl(selectedChat.sender)}
+                            alt={selectedChat.sender}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                          />
                         </div>
                         <div>
                           <h3 className="font-extrabold text-sm sm:text-base text-gray-900 dark:text-white">
@@ -442,7 +483,7 @@ export default function WhatsAppReplyModal({
                           </h3>
                           <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-[#8696a0]">
                             <Phone size={12} className="text-[#25D366]" />
-                            <span>{recipientPhoneInput || selectedChat.phoneNumber || 'Nta nimero ibonetse'}</span>
+                            <span>{recipientPhoneInput || selectedChat.phoneNumber || 'No phone number'}</span>
                           </div>
                         </div>
                       </div>
@@ -455,10 +496,10 @@ export default function WhatsAppReplyModal({
                     </div>
 
                     {/* Incoming Message Card */}
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 shrink-0">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider">
-                          Ubutumwa bwakiriwe (Incoming Message)
+                          Incoming Message
                         </span>
                         <span className="text-[10px] text-gray-400">
                           {selectedChat.sender}
@@ -475,12 +516,12 @@ export default function WhatsAppReplyModal({
                     </div>
 
                     {/* AI Prompt / Instruction & Quick Tone buttons */}
-                    <div className="space-y-3 p-4 rounded-2xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43]">
+                    <div className="space-y-3 p-4 rounded-2xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] shrink-0">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Sparkles size={16} className="text-[#25D366]" />
                           <span className="text-xs font-bold text-gray-800 dark:text-white">
-                            Bwira Izi AI uko igusubiriza (AI Reply Prompt)
+                            AI Reply Assistant & Tone Prompt
                           </span>
                         </div>
                         <span className="text-[10px] text-[#00a884] dark:text-[#00FF88] font-mono">
@@ -488,22 +529,22 @@ export default function WhatsAppReplyModal({
                         </span>
                       </div>
 
-                      {/* Quick Presets */}
+                      {/* Quick Presets (Only Kinyarwanda words as requested) */}
                       <div className="flex flex-wrap gap-1.5">
                         {[
-                          { label: 'Emeza (Confirm)', prompt: 'Musubize wemeza ko ubikora kandi nta kibazo.' },
-                          { label: 'Gushimira (Thank)', prompt: 'Musubize umushimira cyane ku butumwa bwe.' },
-                          { label: 'Gusaba Igihe (Give Time)', prompt: 'Musubize ko ugiye kubisuzuma uza kumusubiza mu kanya gato.' },
-                          { label: 'Ibisobanuro (Details)', prompt: 'Musubize umuhe ibisobanuro birambuye kandi bisobanutse neza.' },
-                          { label: 'Ndi mu nama (Busy)', prompt: 'Musubize ko uri mu nama/uhuze, uraza kumuhamagara wifunguye.' },
-                          { label: 'Kugerayo (On my way)', prompt: 'Musubize ko uri mu nzira uza, ugera aho ari mu kanya.' },
+                          { label: 'Emeza', prompt: 'Musubize wemeza ko ubikora kandi nta kibazo.' },
+                          { label: 'Gushimira', prompt: 'Musubize umushimira cyane ku butumwa bwe.' },
+                          { label: 'Gusaba Igihe', prompt: 'Musubize ko ugiye kubisuzuma uza kumusubiza mu kanya gato.' },
+                          { label: 'Ibisobanuro', prompt: 'Musubize umuhe ibisobanuro birambuye kandi bisobanutse neza.' },
+                          { label: 'Ndi mu nama', prompt: 'Musubize ko uri mu nama/uhuze, uraza kumuhamagara wifunguye.' },
+                          { label: 'Kugerayo', prompt: 'Musubize ko uri mu nzira uza, ugera aho ari mu kanya.' },
                         ].map((preset) => (
                           <button
                             key={preset.label}
                             type="button"
                             onClick={() => handleGenerateAiDraft(preset.prompt)}
                             disabled={isDrafting}
-                            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] text-gray-700 dark:text-gray-300 hover:border-[#25D366] hover:text-[#075E54] dark:hover:text-[#00FF88] transition-all cursor-pointer shadow-2xs"
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] text-gray-800 dark:text-gray-200 hover:border-[#25D366] hover:text-[#075E54] dark:hover:text-[#00FF88] transition-all cursor-pointer shadow-2xs"
                           >
                             {preset.label}
                           </button>
@@ -516,7 +557,7 @@ export default function WhatsAppReplyModal({
                           type="text"
                           value={aiInstruction}
                           onChange={(e) => setAiInstruction(e.target.value)}
-                          placeholder="Urugero: Musubize ko nzamureba ejo saa munani za mugitondo..."
+                          placeholder="Type custom instructions for AI reply..."
                           className="flex-1 bg-white dark:bg-[#202c33] text-gray-900 dark:text-[#e9edef] px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-[#313d45] focus:border-[#25D366] focus:outline-none text-xs transition-all shadow-2xs placeholder:text-gray-400"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
@@ -533,12 +574,12 @@ export default function WhatsAppReplyModal({
                           {isDrafting ? (
                             <>
                               <Loader2 size={14} className="animate-spin" />
-                              <span>Birategurwa...</span>
+                              <span>Drafting...</span>
                             </>
                           ) : (
                             <>
                               <Sparkles size={14} />
-                              <span>Tegura</span>
+                              <span>Generate</span>
                             </>
                           )}
                         </button>
@@ -546,10 +587,10 @@ export default function WhatsAppReplyModal({
                     </div>
 
                     {/* Reply Draft Textarea */}
-                    <div className="space-y-2">
+                    <div className="space-y-2 shrink-0">
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                          Igisubizo giteguye (Edit or Review Reply):
+                          Review or Edit Reply Draft:
                         </label>
                         {replyText && (
                           <div className="flex items-center gap-2">
@@ -561,17 +602,17 @@ export default function WhatsAppReplyModal({
                               {copiedDraft ? (
                                 <>
                                   <Check size={12} className="text-[#25D366]" />
-                                  <span className="text-[#25D366]">Byakoporowe</span>
+                                  <span className="text-[#25D366]">Copied</span>
                                 </>
                               ) : (
                                 <>
                                   <Copy size={12} />
-                                  <span>Koporora</span>
+                                  <span>Copy</span>
                                 </>
                               )}
                             </button>
                             <span className="text-[10px] text-gray-400 font-mono">
-                              {replyText.length} inyuguti
+                              {replyText.length} chars
                             </span>
                           </div>
                         )}
@@ -580,38 +621,38 @@ export default function WhatsAppReplyModal({
                       <textarea
                         value={replyText}
                         onChange={(e) => setReplyText(e.target.value)}
-                        placeholder="Kanda kuri 'Tegura' hejuru cyangwa wandike igisubizo cyawe hano..."
+                        placeholder="Click 'Generate' above or type your reply draft here..."
                         rows={4}
                         className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] p-3.5 rounded-2xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#25D366] focus:outline-none text-xs sm:text-sm leading-relaxed transition-all resize-none shadow-inner"
                       />
                     </div>
 
                     {/* Destination Phone Input if missing */}
-                    <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43]">
+                    <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] shrink-0">
                       <Phone size={16} className="text-[#25D366] shrink-0" />
                       <div className="flex-1 min-w-0">
                         <label className="block text-[10px] font-bold text-gray-400 uppercase">
-                          Nimero ya Telefoni yo koherezaho (WhatsApp Number):
+                          WhatsApp Phone Number:
                         </label>
                         <input
                           type="text"
                           value={recipientPhoneInput}
                           onChange={(e) => setRecipientPhoneInput(e.target.value)}
-                          placeholder="e.g. +250788123456 cyangwa 0788123456"
+                          placeholder="e.g. +250788123456"
                           className="w-full bg-transparent text-gray-900 dark:text-white text-xs font-semibold focus:outline-none"
                         />
                       </div>
                     </div>
 
                     {/* Bottom Action Buttons */}
-                    <div className="pt-2 flex items-center justify-end gap-3">
+                    <div className="pt-2 pb-6 flex items-center justify-end gap-3 shrink-0">
                       <button
                         type="button"
                         onClick={() => setReplyText('')}
                         disabled={!replyText}
                         className="px-4 py-2.5 rounded-xl text-xs font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-white transition-colors cursor-pointer"
                       >
-                        Siba igisubizo
+                        Clear Draft
                       </button>
                       <button
                         type="button"
@@ -626,12 +667,12 @@ export default function WhatsAppReplyModal({
                         {isSending ? (
                           <>
                             <Loader2 size={16} className="animate-spin" />
-                            <span>Birakora...</span>
+                            <span>Sending...</span>
                           </>
                         ) : (
                           <>
                             <Send size={16} />
-                            <span>Ohereza kuri WhatsApp</span>
+                            <span>Send via WhatsApp</span>
                           </>
                         )}
                       </button>
@@ -643,10 +684,10 @@ export default function WhatsAppReplyModal({
                       <MessageSquare size={32} />
                     </div>
                     <h3 className="font-bold text-base text-gray-800 dark:text-white">
-                      Hitamo ubutumwa ushaka gusubiza
+                      Select a message to reply
                     </h3>
                     <p className="text-xs text-gray-500 dark:text-[#8696a0] max-w-sm mt-1">
-                      Kanda ku butumwa bwa WhatsApp mu rutonde rw'ibumoso kugira ngo usome ubutumwa bwose, Izi AI igutegurire igisubizo cyiza.
+                      Choose an incoming WhatsApp message from the list on the left to read and generate smart AI replies.
                     </p>
                     <button
                       type="button"
@@ -654,7 +695,7 @@ export default function WhatsAppReplyModal({
                       className="mt-4 px-4 py-2 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
                     >
                       <Plus size={15} />
-                      <span>Shyiramo ubutumwa bushya</span>
+                      <span>Add new message</span>
                     </button>
                   </div>
                 )}
@@ -677,10 +718,10 @@ export default function WhatsAppReplyModal({
                       </div>
                       <div>
                         <h4 className="font-bold text-sm text-gray-900 dark:text-white">
-                          Emeza kohereza igisubizo
+                          Confirm Reply Send
                         </h4>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Kuri: {selectedChat.sender}
+                          To: {selectedChat.sender}
                         </p>
                       </div>
                     </div>
@@ -695,7 +736,7 @@ export default function WhatsAppReplyModal({
                         onClick={() => setShowSendConfirm(false)}
                         className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
                       >
-                        Reka (Cancel)
+                        Cancel
                       </button>
                       <button
                         type="button"
@@ -706,12 +747,12 @@ export default function WhatsAppReplyModal({
                         {isSending ? (
                           <>
                             <Loader2 size={13} className="animate-spin" />
-                            <span>Kohereza...</span>
+                            <span>Sending...</span>
                           </>
                         ) : (
                           <>
                             <Check size={14} />
-                            <span>Emeza Wohereze</span>
+                            <span>Confirm & Send</span>
                           </>
                         )}
                       </button>
@@ -738,10 +779,10 @@ export default function WhatsAppReplyModal({
                         </div>
                         <div>
                           <h4 className="font-bold text-sm text-gray-900 dark:text-white">
-                            Ongeramo Ubutumwa bwa WhatsApp
+                            Add WhatsApp Message
                           </h4>
                           <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                            Shyiramo ubutumwa bwo gusubiza ukoresheje Izi AI
+                            Paste or add incoming WhatsApp message for AI reply
                           </p>
                         </div>
                       </div>
@@ -757,7 +798,7 @@ export default function WhatsAppReplyModal({
                     <form onSubmit={handleAddNewChat} className="space-y-3.5">
                       <div>
                         <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                          Izina ry'uwakwandikiye (Sender Name):
+                          Sender Name:
                         </label>
                         <input
                           type="text"
@@ -771,7 +812,7 @@ export default function WhatsAppReplyModal({
 
                       <div>
                         <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                          Nimero ya Telefoni (Phone Number - Optional):
+                          Phone Number (Optional):
                         </label>
                         <input
                           type="text"
@@ -784,12 +825,12 @@ export default function WhatsAppReplyModal({
 
                       <div>
                         <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                          Ubutumwa yohereje (Message text):
+                          Incoming Message:
                         </label>
                         <textarea
                           value={newChatMessage}
                           onChange={(e) => setNewChatMessage(e.target.value)}
-                          placeholder="Koporora cyangwa wandike ubutumwa wakiriye kuri WhatsApp hano..."
+                          placeholder="Paste or type the WhatsApp message received here..."
                           required
                           rows={3}
                           className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-white p-3 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#25D366] focus:outline-none text-xs resize-none"
@@ -802,14 +843,14 @@ export default function WhatsAppReplyModal({
                           onClick={() => setShowAddChatModal(false)}
                           className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
                         >
-                          Reka
+                          Cancel
                         </button>
                         <button
                           type="submit"
                           className="px-5 py-2 rounded-xl text-xs font-bold bg-[#25D366] hover:bg-[#20ba59] text-white shadow-sm flex items-center gap-1.5"
                         >
                           <Plus size={14} />
-                          <span>Ongeramo</span>
+                          <span>Add Message</span>
                         </button>
                       </div>
                     </form>

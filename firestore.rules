@@ -1,0 +1,140 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Hardened Global Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAllowedMethodForAuth(method) {
+      return (method == 'google' && request.auth.token.email_verified == true) ||
+             method == 'email' ||
+             method == 'phone';
+    }
+
+    // --- Validation Blueprints (Anti-Update-Gap) ---
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'method', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['uid', 'displayName', 'method', 'createdAt', 'updatedAt']) &&
+             data.uid is string &&
+             data.uid.size() >= 1 &&
+             data.uid.size() <= 128 &&
+             data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+             data.uid == userId &&
+             data.uid == request.auth.uid &&
+             data.displayName is string &&
+             data.displayName.size() >= 1 &&
+             data.displayName.size() <= 100 &&
+             data.method is string &&
+             data.method.size() <= 16 &&
+             data.method in ['google', 'email', 'phone'] &&
+             isAllowedMethodForAuth(data.method) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateInfo(data, userId) {
+      return data.keys().hasAll(['uid', 'method', 'identifier', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['uid', 'method', 'identifier', 'email', 'phone', 'photoURL', 'createdAt', 'updatedAt']) &&
+             data.uid is string &&
+             data.uid.size() >= 1 &&
+             data.uid.size() <= 128 &&
+             data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+             data.uid == userId &&
+             data.uid == request.auth.uid &&
+             data.method is string &&
+             data.method.size() <= 16 &&
+             data.method in ['google', 'email', 'phone'] &&
+             isAllowedMethodForAuth(data.method) &&
+             data.identifier is string &&
+             data.identifier.size() >= 3 &&
+             data.identifier.size() <= 160 &&
+             (!('email' in data) || (data.email is string && data.email.size() >= 3 && data.email.size() <= 160)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 32 && data.phone.matches('^\\+[1-9][0-9]{6,14}$'))) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500)) &&
+             ((data.method == 'phone' && ('phone' in data) && data.identifier == data.phone && request.auth.token.email == ('phone.' + data.phone.replace('^\\+', '') + '@iziai.app')) ||
+              ((data.method == 'email' || data.method == 'google') && data.identifier == request.auth.token.email && (!('email' in data) || data.email == request.auth.token.email))) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    // --- Collection: /users/{userId} (Public-safe account profile) ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && isOwner(userId);
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        isOwner(userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/users/$(userId)/private/info);
+
+      allow update: if isSignedIn() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        isOwner(userId) &&
+        incoming().uid == existing().uid &&
+        incoming().method == existing().method &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']);
+
+      allow delete: if false;
+
+      // --- Subcollection: /users/{userId}/private/{docId} (Strict PII Isolation) ---
+      match /private/{docId} {
+        allow get: if isSignedIn() && isValidId(userId) && docId == 'info' && isOwner(userId);
+        allow list: if false;
+
+        allow create: if isSignedIn() &&
+          isValidId(userId) &&
+          docId == 'info' &&
+          isValidUserPrivateInfo(incoming(), userId) &&
+          isOwner(userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          existsAfter(/databases/$(database)/documents/users/$(userId));
+
+        allow update: if isSignedIn() &&
+          isValidId(userId) &&
+          docId == 'info' &&
+          isValidUserPrivateInfo(incoming(), userId) &&
+          isOwner(userId) &&
+          exists(/databases/$(database)/documents/users/$(userId)) &&
+          incoming().uid == existing().uid &&
+          incoming().method == existing().method &&
+          incoming().identifier == existing().identifier &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['photoURL', 'updatedAt']);
+
+        allow delete: if false;
+      }
+    }
+  }
+}
