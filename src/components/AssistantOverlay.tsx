@@ -876,7 +876,8 @@ export default function AssistantOverlay({
   const executeQuickCallOrSend = (name: string, phone: string) => {
     if (!action) return;
     const cleanPhone = action.name === 'open_whatsapp' ? formatWhatsAppPhoneNumber(phone) : sanitizePhoneNumber(phone);
-    if (!isLikelyPhoneNumber(cleanPhone)) return;
+    if (!isLikelyPhoneNumber(cleanPhone) || (action.name === 'open_whatsapp' && (cleanPhone.length < 9 || cleanPhone.length > 15))) return;
+    const waAppUri = `whatsapp://send?phone=${cleanPhone}&text=${encodeURIComponent(action.messageText || '')}`;
     const updated: DeviceAction = {
       ...action,
       phoneNumber: cleanPhone,
@@ -891,12 +892,12 @@ export default function AssistantOverlay({
         ? `tel:${cleanPhone}`
         : action.name === 'send_sms'
           ? `sms:${cleanPhone}?body=${encodeURIComponent(action.messageText || '')}`
-          : `https://wa.me/${formatWhatsAppPhoneNumber(cleanPhone)}?text=${encodeURIComponent(action.messageText || '')}`,
+          : waAppUri,
       fallbackUrl: action.name === 'make_call'
         ? `tel:${cleanPhone}`
         : action.name === 'send_sms'
           ? `sms:${cleanPhone}`
-          : `https://wa.me/${formatWhatsAppPhoneNumber(cleanPhone)}?text=${encodeURIComponent(action.messageText || '')}`,
+          : waAppUri,
       contactMatches: undefined,
       status: 'executed',
     };

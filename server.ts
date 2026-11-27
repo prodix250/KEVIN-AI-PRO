@@ -62,11 +62,12 @@ const KEVIN_SYSTEM_INSTRUCTION = `You are Izi AI,
   * Seamlessly understand Rwandan conversational code-switching (Kinyarwanda naturally mixed with French or English words like 'bro', 'courage', 'bon', 'merci', 'please', 'app', 'link', 'call', 'stage', 'pro').
   * Understand colloquial phrasing and modern Rwandan youth expressions effortlessly and reply with warmth, intelligence, and modern emojis (💡, 🚀, 💻, ✨, 🇷🇼, 😊).
 
-3. MULTILINGUAL FLUENCY:
-- If the user writes or speaks Kinyarwanda, reply in rich, natural, authentic Kinyarwanda.
-- If the user writes or speaks English, reply in clean, modern English.
+3. MULTILINGUAL FLUENCY & 100% PER-TURN LANGUAGE SWITCHING:
+- ALWAYS reply in the EXACT language of the user's LATEST message (100% match, zero exceptions).
+- If the user writes or speaks in Kinyarwanda (even mixed with English/French tech words), reply 100% in rich, natural, authentic Kinyarwanda.
+- If the user writes or speaks in English, reply 100% in clean, natural English.
+- MID-CONVERSATION SWITCHING RULE: Even if earlier turns in the conversation history were in Kinyarwanda, as soon as the user sends a message in English, switch IMMEDIATELY and reply 100% in English. Likewise, if they switch from English to Kinyarwanda, switch IMMEDIATELY and reply 100% in Kinyarwanda.
 - If the user writes or speaks French or Swahili, reply fluently in that language.
-- Seamlessly mirror the user's language, mood, and tone.
 
 4. VOICE NOTE & AUDIO PROCESSING (IKINYARWANDA VOICE UNDERSTANDING):
 - When the user sends a voice note or recorded audio message:
@@ -122,6 +123,139 @@ You are a full autonomous agent with direct permission-backed control over apps 
   * When the user asks to play a song/artist/album/mixtape/trending track on Audiomack (e.g. 'fungura audiomack', 'curanga ... kuri audiomack', 'play ... on audiomack'), ALWAYS call open_audiomack(query, song_title, artist, playlist_name, action='play') immediately so it opens and autoplays directly!
   * You can perform ALL Audiomack actions via open_audiomack: open, play, search, create_playlist, add_to_playlist, play_playlist, list_playlists, download, favorite (like), repost, follow, queue, add_to_queue, play_next, pause, resume, toggle, stop, next, previous, fast_forward, rewind, seek, shuffle, repeat, equalizer, set_equalizer, toggle_equalizer, bass_boost, sleep_timer, lyrics, share, open_tab (home, feed, trending, search, library, playlists, downloads, favorites, offline), volume_up, volume_down, set_volume, mute, unmute, now_playing.
 - Calls & Other Apps: Use make_call, open_camera, or open_app ONLY when explicitly requested by the user (never guess or fabricate targets when uncertain).`;
+
+type ServerTurnDetectedLanguage = 'rw' | 'en' | 'fr' | 'sw' | 'auto';
+
+function detectServerTurnLanguage(rawText: string): ServerTurnDetectedLanguage {
+  const cleaned = String(rawText || '')
+    .replace(/\[PRELIMINARY STT DRAFT[^\]]*\]:/gi, '')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .trim();
+  if (!cleaned) return 'auto';
+
+  const lower = cleaned.toLowerCase();
+
+  if (/(?:\b(?:in|into|to|speak|reply\s+in|answer\s+in|write\s+in|explain\s+in|switch\s+to)\s+english\b|\b(?:mu|muri|vuga|subiza\s+mu)\s*(?:i)?cyongereza\b|\bmuri\s+english\b)/i.test(lower)) {
+    return 'en';
+  }
+  if (/(?:\b(?:in|into|to|speak|reply\s+in|answer\s+in|write\s+in|explain\s+in|switch\s+to)\s+kinyarwanda\b|\b(?:mu|muri|vuga|subiza\s+mu)\s*(?:i)?kinyarwanda\b)/i.test(lower)) {
+    return 'rw';
+  }
+  if (/(?:\b(?:in|into|to|en|speak|reply\s+in)\s+(?:french|français|francais)\b|\b(?:mu|muri)\s*(?:i)?gifaransa\b)/i.test(lower)) {
+    return 'fr';
+  }
+  if (/(?:\b(?:in|into|to|kwa|speak|reply\s+in)\s+(?:swahili|kiswahili)\b|\b(?:mu|muri)\s*(?:i)?giswahili\b)/i.test(lower)) {
+    return 'sw';
+  }
+
+  const rwExactWords = new Set([
+    'muraho', 'amakuru', 'bite', 'mwaramutse', 'mwiriwe', 'ijoro', 'urakoze', 'wakoze', 'murakoze', 'mwakoze',
+    'yego', 'oya', 'ntabwo', 'nta', 'ntacyo', 'ndabona', 'ndumva', 'nshaka', 'ndashaka', 'nkunda', 'ndakunda',
+    'mbwira', 'mfasha', 'sobanura', 'kora', 'nkorera', 'unkorere', 'subiza', 'vuga', 'soma', 'andika', 'fungura',
+    'funga', 'hamagara', 'ohereza', 'curanga', 'shushanya', 'reka', 'dore', 'ngaho', 'nyamuneka', 'bimeze',
+    'umeze', 'meze', 'muri', 'kuri', 'kuva', 'kugera', 'kubera', 'kugira', 'ngo', 'kandi', 'cyangwa', 'ariko',
+    'ubwo', 'rero', 'rwose', 'cyane', 'neza', 'gusa', 'byose', 'hose', 'bose', 'abantu', 'umuntu', 'ikintu',
+    'ibintu', 'iki', 'inde', 'nde', 'ryari', 'hehe', 'gute', 'kuki', 'uko', 'niba', 'ko', 'ari', 'hari',
+    'yanjye', 'yawe', 'yanje', 'wanjye', 'wawe', 'byanjye', 'byawe', 'icyo', 'ibyo', 'iyo', 'aho', 'ikihe',
+    'iyihe', 'ibihe', 'amafranga', 'amafaranga', 'ifoto', 'indirimbo', 'ubutumwa', 'ikibazo', 'igisubizo',
+    'porogaramu', 'ikoranabuhanga', 'cyiza', 'mwiza', 'nziza', 'meza', 'byiza', 'mfite', 'ufite', 'afite',
+    'dufite', 'mufite', 'bafite', 'ndi', 'uri', 'turi', 'bari', 'nzi', 'sinzi', 'uzi', 'ntuzi', 'azi', 'tuzi',
+    'ndimo', 'urimo', 'arimo', 'turimo', 'murimo', 'barimo', 'ngomba', 'ugomba', 'agomba', 'tugomba', 'mugomba',
+    'bagomba', 'nkeneye', 'ukeneye', 'akeneye', 'dukeneye', 'bakeneye', 'nakoze', 'yakoze', 'twakoze', 'bakoze',
+    'nzakora', 'uzakora', 'azakora', 'tuzakora', 'wowe', 'jyewe', 'njye', 'twebwe', 'mwebwe', 'nawe', 'nanjye',
+    'yanyu', 'yabo', 'ryawe', 'ryanjye', 'cyawe', 'cyanjye', 'byabo', 'nkaho', 'kuko', 'kugirango', 'kujya',
+    'biri', 'ziri', 'kiri', 'hano', 'hariya', 'ejo', 'ubu', 'none', 'cyera', 'vuba', 'gato', 'rwanda',
+  ]);
+  const rwConnectors = new Set(['ni', 'na', 'ya', 'wa', 'za', 'ba', 'rya', 'cya', 'bya', 'kwa', 'mwa', 'twa']);
+  const enExactWords = new Set([
+    'the', 'is', 'are', 'am', 'was', 'were', 'be', 'been', 'being', 'what', 'why', 'how', 'when', 'where',
+    'who', 'which', 'whose', 'whom', 'can', 'could', 'would', 'should', 'will', 'shall', 'may', 'might', 'must',
+    'do', 'does', 'did', 'have', 'has', 'had', 'this', 'that', 'these', 'those', 'with', 'from', 'into', 'onto',
+    'about', 'between', 'through', 'during', 'before', 'after', 'because', 'although', 'however', 'therefore',
+    'actually', 'really', 'very', 'please', 'thank', 'thanks', 'sorry', 'hello', 'hi', 'hey', 'good', 'morning',
+    'afternoon', 'evening', 'night', 'today', 'tomorrow', 'yesterday', 'explain', 'describe', 'tell', 'show',
+    'help', 'write', 'create', 'build', 'make', 'fix', 'give', 'need', 'want', 'like', 'know', 'think',
+    'understand', 'mean', 'means', 'meaning', 'english', 'question', 'answer', 'example', 'examples', 'step',
+    'steps', 'difference', 'compare', 'summary', 'summarize', 'translate', 'your', 'you', 'my', 'me', 'we',
+    'us', 'they', 'them', 'their', 'our', 'his', 'her', 'its', 'there', 'here', 'not', "don't", "doesn't",
+    "didn't", "won't", "can't", "couldn't", "shouldn't", "wouldn't", "isn't", "aren't", "what's", "how's",
+    "it's", "i'm", "you're", "we're", "they're", 'yes', 'no', 'okay', 'sure', 'fine', 'great', 'nice',
+    'if', 'and', 'or', 'but', 'for', 'of', 'to', 'in', 'on', 'at', 'as', 'an', 'i',
+  ]);
+  const frExactWords = new Set([
+    'bonjour', 'salut', 'bonsoir', 'merci', 'comment', 'pourquoi', 'quand', 'avec', 'dans', 'pour', 'est',
+    'sont', 'suis', 'nous', 'vous', 'ils', 'elles', 'mais', 'ou', 'donc', 'alors', 'oui', 'non', 'sil',
+    "s'il", 'plait', 'plaît', 'parlez', 'francais', 'français', 'expliquer', 'ecrire', 'écrire', 'quel', 'quelle',
+  ]);
+  const swExactWords = new Set([
+    'habari', 'mambo', 'jambo', 'shikamoo', 'asante', 'tafadhali', 'ndiyo', 'hapana', 'sawa', 'kwamba',
+    'lakini', 'naomba', 'eleza', 'msaada', 'karibu', 'vipi', 'sasa', 'leo', 'kesho', 'jana', 'nini', 'kwanini',
+  ]);
+
+  const tokens = lower.split(/[\s,.;:!?()[\]{}"“”«»<>\\/]+/).filter(Boolean);
+  let rwScore = 0;
+  let enScore = 0;
+  let frScore = 0;
+  let swScore = 0;
+
+  for (const tok of tokens) {
+    if (rwExactWords.has(tok) || /^(?:nda|ndi|ntabwo|ntacyo|ntib|nshak|urakoz|wakoz|mwaram|mwiriw|mbwir|mfash|sobanur|fungur|oherez|hamagar|curang|shushany)/.test(tok)) {
+      rwScore += 2;
+    } else if (rwConnectors.has(tok)) {
+      rwScore += 1;
+    }
+    if (enExactWords.has(tok)) {
+      enScore += tok.length <= 2 ? 1 : 2;
+    }
+    if (frExactWords.has(tok)) {
+      frScore += 2;
+    }
+    if (swExactWords.has(tok)) {
+      swScore += 2;
+    }
+  }
+
+  if (rwScore === 0 && enScore === 0 && frScore === 0 && swScore === 0) {
+    return 'auto';
+  }
+  if (rwScore > 0 && rwScore >= enScore && rwScore >= frScore && rwScore >= swScore) {
+    return 'rw';
+  }
+  if (enScore > rwScore && enScore >= frScore && enScore >= swScore) {
+    return 'en';
+  }
+  if (frScore > rwScore && frScore > enScore && frScore >= swScore) {
+    return 'fr';
+  }
+  if (swScore > rwScore && swScore > enScore && swScore > frScore) {
+    return 'sw';
+  }
+  return 'auto';
+}
+
+function buildServerPerTurnLanguageDirective(lang: ServerTurnDetectedLanguage, hasAudioAttachment = false): string {
+  if (lang === 'en') {
+    return `[STRICT PER-TURN LANGUAGE LOCK: ENGLISH — MANDATORY OVERRIDE]
+The user's LATEST message is in ENGLISH. Even if earlier turns in this conversation were in Kinyarwanda or another language, you MUST switch immediately and write 100% of your reply ONLY in clear, natural ENGLISH. Never reply in Kinyarwanda unless the user specifically asks for a Kinyarwanda translation/example.`;
+  }
+  if (lang === 'rw') {
+    return `[STRICT PER-TURN LANGUAGE LOCK: KINYARWANDA — MANDATORY OVERRIDE]
+Ubutumwa bwa NYUMA bw'ukoresha buri mu KINYARWANDA. Niyo ibiganiro byabanje byaba byari mu Cyongereza cyangwa urundi rurimi, UGOMBA guhita uhindura ugasubiza 100% mu KINYARWANDA cy'umwimerere gusa.`;
+  }
+  if (lang === 'fr') {
+    return `[STRICT PER-TURN LANGUAGE LOCK: FRENCH — MANDATORY OVERRIDE]
+The user's LATEST message is in FRENCH. Regardless of earlier conversation history, write 100% of your reply in natural FRENCH only.`;
+  }
+  if (lang === 'sw') {
+    return `[STRICT PER-TURN LANGUAGE LOCK: SWAHILI — MANDATORY OVERRIDE]
+The user's LATEST message is in SWAHILI. Regardless of earlier conversation history, write 100% of your reply in natural SWAHILI only.`;
+  }
+  return `[STRICT PER-TURN LANGUAGE MATCHING — MANDATORY]
+Detect the EXACT language of the user's LATEST ${hasAudioAttachment ? 'voice audio or text message' : 'message'} ONLY and NEVER carry over a different language from previous turns:
+- If the LATEST message is in Kinyarwanda (or Kinyarwanda mixed with tech words), reply 100% in authentic Rwandan Kinyarwanda.
+- If the LATEST message is in English, switch immediately and reply 100% in natural English.
+- If the LATEST message is in French or Swahili, reply 100% in that exact language.`;
+}
 
 const deviceActionDeclarations: FunctionDeclaration[] = [
   {
@@ -1565,25 +1699,29 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
         timeZone: 'Africa/Kigali',
       })}.]`;
 
-      const safeUserName = typeof userName === 'string' && userName.trim() ? userName.trim() : 'Incuti yanjye';
-      const usernameContext = `The person currently chatting with you is named '${safeUserName}'. Always address them politely by their name during the conversation to make it personal and natural.`;
-      const customInstructionsContext = typeof customInstructions === 'string' && customInstructions.trim()
-        ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions.trim()}\nFollow these instructions in addition to the core Izi AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
-        : '';
-      const audioInstruction = hasAudioAttachment
-        ? `[KINYARWANDA VOICE NOTE & AUDIO COMPREHENSION]:
-- The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, or Kinyarwanda mixed with French/English).
-- ALWAYS listen directly to the attached raw audio recording as your PRIMARY source of truth—even if a preliminary text transcript draft is also provided. If the preliminary transcript misheard any Kinyarwanda word, prefix, Rwandan name, or command, trust what you hear in the raw audio!
-- Pay close attention to authentic Kinyarwanda phonetics, prefixes, consonant clusters, and Rwandan names without mishearing Kinyarwanda speech as unrelated English words.
-- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: NEVER execute or call any device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera, open_app) UNLESS the user's voice message explicitly and unmistakably commanded that exact action in the audio.
-- If the audio is a greeting, a normal question, or a conversation, DO NOT trigger any tool — reply naturally in fluent, authentic Kinyarwanda. If the audio is completely silent or unintelligible, politely ask them in Kinyarwanda to repeat clearly.
-- NEVER invent a phone number, contact name, song, or message that was not clearly spoken.`
-        : '';
       const latestUserText = Array.isArray(contents) && contents.length > 0
         ? ((contents[contents.length - 1] as any)?.parts || [])
             .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
             .join(' ')
             .trim()
+        : '';
+      const turnLang = detectServerTurnLanguage(latestUserText);
+      const turnLanguageDirective = buildServerPerTurnLanguageDirective(turnLang, Boolean(hasAudioAttachment));
+      const safeUserName = typeof userName === 'string' && userName.trim()
+        ? userName.trim()
+        : (turnLang === 'en' ? 'Friend' : 'Incuti yanjye');
+      const usernameContext = `The person currently chatting with you is named '${safeUserName}'. Always address them politely by their name during the conversation to make it personal and natural.`;
+      const customInstructionsContext = typeof customInstructions === 'string' && customInstructions.trim()
+        ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions.trim()}\nFollow these instructions in addition to the core Izi AI persona, without ignoring the creator profile, language fluency, real-time context, or other system requirements.`
+        : '';
+      const audioInstruction = hasAudioAttachment
+        ? `[KINYARWANDA & MULTILINGUAL VOICE NOTE COMPREHENSION]:
+- The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, English, or Kinyarwanda mixed with French/English).
+- ALWAYS listen directly to the attached raw audio recording as your PRIMARY source of truth—even if a preliminary text transcript draft is also provided. If the preliminary transcript misheard any Kinyarwanda word, prefix, Rwandan name, or command, trust what you hear in the raw audio!
+- Pay close attention to authentic Kinyarwanda phonetics, prefixes, consonant clusters, and Rwandan names without mishearing Kinyarwanda speech as unrelated English words.
+- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: NEVER execute or call any device tool (make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera, open_app) UNLESS the user's voice message explicitly and unmistakably commanded that exact action in the audio.
+- If the audio is a greeting, a normal question, or a conversation, DO NOT trigger any tool — reply naturally in the EXACT language spoken by the user in the audio (Kinyarwanda if spoken in Kinyarwanda, English if spoken in English). If the audio is completely silent or unintelligible, politely ask them to repeat clearly in their language.
+- NEVER invent a phone number, contact name, song, or message that was not clearly spoken.`
         : '';
       const needsContacts = Boolean(hasAudioAttachment) || /(?:hamagar|terefon|oherez)|\b(call|dial|sms|message|ubutumwa|send|whatsapp|wa|contact|nimero|number)\b/i.test(latestUserText);
       const userQueryTokens = latestUserText
@@ -1620,6 +1758,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
       const agentContext = `[AGENT PERMISSIONS: autoSend=${Boolean(agentPermissions?.autoSend)}, autoCall=${agentPermissions?.autoCall !== false}, autoPlayYouTube=${agentPermissions?.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(agentPermissions?.whatsappAutoReply)}, whatsappAutoReplyPaused=${waPausedRemainingMin > 0}${waPausedRemainingMin > 0 ? ` (${waPausedRemainingMin} min remaining)` : ''}. Execute device tool calls ONLY when explicitly and clearly requested by the user.]`;
 
       const systemInstruction = [
+        turnLanguageDirective,
         KEVIN_SYSTEM_INSTRUCTION,
         usernameContext,
         customInstructionsContext,
@@ -1627,6 +1766,7 @@ If silent, noisy, or unsure, return {"wake":false,"command":"","transcript":""}.
         contactsContext,
         agentContext,
         realTimeContext,
+        turnLanguageDirective,
       ].filter(Boolean).join('\n\n');
 
       const sanitizedContents: any[] = [];

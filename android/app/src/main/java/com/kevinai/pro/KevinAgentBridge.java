@@ -548,37 +548,149 @@ public class KevinAgentBridge {
     }
 
     @JavascriptInterface
+    public boolean replyToWhatsAppNotification(String notificationKey, String message) {
+        return KevinNotificationListenerService.replyToNotificationByKey(activity, notificationKey, message);
+    }
+
+    @JavascriptInterface
+    public String verifyWhatsAppRecipientJson(String queryOrPhone) {
+        JSONObject out = new JSONObject();
+        try {
+            String waPkg = findInstalledWhatsAppPackage();
+            boolean hasContactsPerm = ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_CONTACTS)
+                    == PackageManager.PERMISSION_GRANTED;
+            out.put("whatsappInstalled", waPkg != null);
+            out.put("whatsappPackage", waPkg != null ? waPkg : "");
+            out.put("hasContactsPermission", hasContactsPerm);
+            out.put("hasAccessibility", isAccessibilityEnabled());
+            out.put("hasNotificationAccess", isNotificationListenerEnabled());
+
+            String input = queryOrPhone != null ? queryOrPhone.trim() : "";
+            String formattedPhone = formatWhatsAppNumber(input);
+            boolean inputHasLetters = input.matches(".*[\\p{L}].*");
+            boolean existsInContacts = false;
+            boolean existsOnWhatsApp = false;
+            String resolvedName = "";
+            String resolvedPhone = inputHasLetters ? "" : formattedPhone;
+
+            if (hasContactsPerm && !TextUtils.isEmpty(input)) {
+                String normalizedQuery = normalizeForSearch(input);
+                String tailDigits = formattedPhone.length() >= 9
+                        ? formattedPhone.substring(formattedPhone.length() - 9)
+                        : formattedPhone;
+
+                String[] phoneProj = new String[] {
+                        ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+                        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                        ContactsContract.CommonDataKinds.Phone.NUMBER
+                };
+                Set<Long> matchedContactIds = new LinkedHashSet<>();
+
+                try (Cursor cursor = activity.getContentResolver().query(
+                        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                        phoneProj,
+                        null,
+                        null,
+                        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
+                )) {
+                    if (cursor != null) {
+                        int idIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID);
+                        int nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME);
+                        int numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER);
+                        while (cursor.moveToNext()) {
+                            long cid = idIdx >= 0 ? cursor.getLong(idIdx) : -1L;
+                            String name = nameIdx >= 0 ? cursor.getString(nameIdx) : "";
+                            String rawNum = numIdx >= 0 ? cursor.getString(numIdx) : "";
+                            String contactDigits = formatWhatsAppNumber(rawNum);
+                            boolean matched = false;
+                            if (!inputHasLetters && !TextUtils.isEmpty(tailDigits) && contactDigits.endsWith(tailDigits)) {
+                                matched = true;
+                            } else if (inputHasLetters && !TextUtils.isEmpty(normalizedQuery)
+                                    && normalizeForSearch(name).contains(normalizedQuery)) {
+                                matched = true;
+                            }
+                            if (matched) {
+                                existsInContacts = true;
+                                if (cid > 0) matchedContactIds.add(cid);
+                                if (TextUtils.isEmpty(resolvedName) && !TextUtils.isEmpty(name)) {
+                                    resolvedName = name.trim();
+                                }
+                                if (TextUtils.isEmpty(resolvedPhone) && !TextUtils.isEmpty(contactDigits)) {
+                                    resolvedPhone = contactDigits;
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                if (!matchedContactIds.isEmpty()) {
+                    String[] dataProj = new String[] {
+                            ContactsContract.Data.CONTACT_ID,
+                            ContactsContract.Data.MIMETYPE,
+                            ContactsContract.Data.DATA1,
+                            ContactsContract.Data.DATA3
+                    };
+                    String waSel = ContactsContract.Data.MIMETYPE + " IN (?, ?)";
+                    String[] waArgs = new String[] {
+                            "vnd.android.cursor.item/vnd.com.whatsapp.profile",
+                            "vnd.android.cursor.item/vnd.com.whatsapp.w4b.profile"
+                    };
+                    try (Cursor waCursor = activity.getContentResolver().query(
+                            ContactsContract.Data.CONTENT_URI,
+                            dataProj,
+                            waSel,
+                            waArgs,
+                            null
+                    )) {
+                        if (waCursor != null) {
+                            int cidIdx = waCursor.getColumnIndex(ContactsContract.Data.CONTACT_ID);
+                            int d1Idx = waCursor.getColumnIndex(ContactsContract.Data.DATA1);
+                            while (waCursor.moveToNext()) {
+                                long cid = cidIdx >= 0 ? waCursor.getLong(cidIdx) : -1L;
+                                if (matchedContactIds.contains(cid)) {
+                                    existsOnWhatsApp = true;
+                                    String waJid = d1Idx >= 0 ? waCursor.getString(d1Idx) : "";
+                                    if (!TextUtils.isEmpty(waJid) && waJid.contains("@")) {
+                                        String jidDigits = waJid.substring(0, waJid.indexOf('@')).replaceAll("[^\\d]", "");
+                                        if (jidDigits.length() >= 9) {
+                                            resolvedPhone = jidDigits;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            out.put("existsInContacts", existsInContacts);
+            out.put("existsOnWhatsApp", existsOnWhatsApp);
+            out.put("resolvedName", resolvedName);
+            out.put("resolvedPhone", resolvedPhone);
+        } catch (Exception ignored) {}
+        return out.toString();
+    }
+
+    @JavascriptInterface
     public boolean sendWhatsApp(String phoneNumber, String message) {
         if (TextUtils.isEmpty(phoneNumber)) return false;
+        String cleanDigits = formatWhatsAppNumber(phoneNumber);
+        if (cleanDigits.length() < 9 || cleanDigits.length() > 15) return false;
+        String waPkg = findInstalledWhatsAppPackage();
+        if (waPkg == null) return false;
+
         activity.runOnUiThread(() -> {
             try {
                 KevinAgentPrefs.armPendingWhatsAppSend(activity, 20_000L);
-                String cleanDigits = formatWhatsAppNumber(phoneNumber);
                 String encodedText = Uri.encode(message != null ? message : "");
-                String waPkg = findInstalledWhatsAppPackage();
-
                 String directSchemeUri = "whatsapp://send?phone="
                         + Uri.encode(cleanDigits)
                         + "&text=" + encodedText;
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(directSchemeUri));
-                if (waPkg != null) {
-                    intent.setPackage(waPkg);
-                }
+                intent.setPackage(waPkg);
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                try {
-                    activity.startActivity(intent);
-                    return;
-                } catch (Exception ignored) {}
-
-                String webUri = "https://api.whatsapp.com/send?phone="
-                        + Uri.encode(cleanDigits)
-                        + "&text=" + encodedText;
-                Intent fallback = new Intent(Intent.ACTION_VIEW, Uri.parse(webUri));
-                if (waPkg != null) {
-                    fallback.setPackage(waPkg);
-                }
-                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                activity.startActivity(fallback);
+                activity.startActivity(intent);
             } catch (Exception ignored) {}
         });
         return true;

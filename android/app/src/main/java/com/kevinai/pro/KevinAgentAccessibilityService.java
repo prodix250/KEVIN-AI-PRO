@@ -60,10 +60,15 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         try {
             if ("com.whatsapp".equals(pkg) || "com.whatsapp.w4b".equals(pkg)) {
                 if (KevinAgentPrefs.isPendingWhatsAppSend(this)) {
+                    if (hasWhatsAppInvalidRecipientDialog(root)) {
+                        KevinAgentPrefs.clearPendingWhatsAppSend(this);
+                        return;
+                    }
                     if (tryClickWhatsAppSend(root, pkg)) {
                         KevinAgentPrefs.clearPendingWhatsAppSend(this);
                         return;
                     }
+                    scheduleActiveWindowPoll(pkg, 420L);
                 }
                 if (KevinAgentPrefs.isWhatsAppScanActive(this)
                         && KevinAgentPrefs.isWhatsAppAutoReplyCurrentlyActive(this)) {
@@ -86,6 +91,30 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
         }
     }
 
+    private boolean hasWhatsAppInvalidRecipientDialog(AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        CharSequence textSeq = node.getText();
+        if (textSeq != null) {
+            String lower = textSeq.toString().toLowerCase(Locale.ROOT);
+            if (lower.contains("isn't on whatsapp")
+                    || lower.contains("is not on whatsapp")
+                    || lower.contains("not on whatsapp")
+                    || lower.contains("not registered on whatsapp")) {
+                return true;
+            }
+        }
+        int childCount = node.getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                boolean found = hasWhatsAppInvalidRecipientDialog(child);
+                child.recycle();
+                if (found) return true;
+            }
+        }
+        return false;
+    }
+
     private void scheduleActiveWindowPoll(final String expectedPkg, long delayMs) {
         if (TextUtils.isEmpty(expectedPkg)) return;
         if (pendingWindowPollRunnable != null) {
@@ -98,7 +127,15 @@ public class KevinAgentAccessibilityService extends AccessibilityService {
             try {
                 CharSequence pkgSeq = freshRoot.getPackageName();
                 String activePkg = pkgSeq != null ? pkgSeq.toString() : "";
-                if ("com.google.android.youtube".equals(expectedPkg)
+                if (("com.whatsapp".equals(expectedPkg) || "com.whatsapp.w4b".equals(expectedPkg))
+                        && expectedPkg.equals(activePkg)
+                        && KevinAgentPrefs.isPendingWhatsAppSend(KevinAgentAccessibilityService.this)) {
+                    if (hasWhatsAppInvalidRecipientDialog(freshRoot)) {
+                        KevinAgentPrefs.clearPendingWhatsAppSend(KevinAgentAccessibilityService.this);
+                    } else if (tryClickWhatsAppSend(freshRoot, activePkg)) {
+                        KevinAgentPrefs.clearPendingWhatsAppSend(KevinAgentAccessibilityService.this);
+                    }
+                } else if ("com.google.android.youtube".equals(expectedPkg)
                         && "com.google.android.youtube".equals(activePkg)
                         && KevinAgentPrefs.isPendingYouTubePlay(KevinAgentAccessibilityService.this)) {
                     if (tryClickFirstYouTubeResult(freshRoot, activePkg)) {

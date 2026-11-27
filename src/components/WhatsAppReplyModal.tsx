@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   MessageSquare,
@@ -22,6 +22,8 @@ import {
   ExternalLink,
   Copy,
   Check,
+  ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   WhatsAppChatItem,
@@ -32,6 +34,7 @@ import {
   markWhatsAppChatAsRead,
   draftWhatsAppReplyWithAI,
   sendWhatsAppReplyAction,
+  verifyWhatsAppRecipient,
 } from '../services/whatsappService';
 
 interface WhatsAppReplyModalProps {
@@ -156,8 +159,24 @@ export default function WhatsAppReplyModal({
     }
   };
 
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  const recipientVerification = useMemo(() => {
+    if (!selectedChat) return null;
+    return verifyWhatsAppRecipient(selectedChat, recipientPhoneInput);
+  }, [selectedChat, recipientPhoneInput, isOpen]);
+
   const handleSendReply = async () => {
     if (!selectedChat || !replyText.trim()) return;
+    setSendError(null);
+    const verification = verifyWhatsAppRecipient(selectedChat, recipientPhoneInput);
+    if (!verification.verified) {
+      const msg = verification.reason || 'Uwahoze ategerejwe ntabwo abonetse kuri WhatsApp.';
+      setSendError(msg);
+      onToast(`⚠️ ${msg}`);
+      return;
+    }
+
     setIsSending(true);
     try {
       const res = await sendWhatsAppReplyAction(
@@ -166,17 +185,29 @@ export default function WhatsAppReplyModal({
         recipientPhoneInput.trim()
       );
       setShowSendConfirm(false);
+      setSendError(null);
       onToast(
-        res.method === 'native_app'
-          ? `💬 Reply sent successfully to ${selectedChat.sender} via WhatsApp!`
-          : `💬 WhatsApp opened for ${selectedChat.sender} to send reply!`
+        res.method === 'native_direct'
+          ? `💬 Igisubizo cyoherejwe ako kanya kuri WhatsApp ya ${res.recipientName}!`
+          : res.method === 'native_app'
+            ? `💬 Igisubizo cyoherejwe muri WhatsApp App kuri ${res.recipientName}!`
+            : `💬 WhatsApp App ifunguwe kuri ${res.recipientName} ngo ubutumwa bugende ako kanya!`
       );
       setChats(getStoredWhatsAppChats());
       setSelectedChat((prev) =>
-        prev ? { ...prev, unread: false, repliedText: replyText.trim() } : null
+        prev
+          ? {
+              ...prev,
+              unread: false,
+              repliedText: replyText.trim(),
+              phoneNumber: res.recipientPhone ? `+${res.recipientPhone}` : prev.phoneNumber,
+            }
+          : null
       );
     } catch (err: any) {
-      onToast(`⚠️ Send error: ${err?.message || 'Error'}`);
+      const msg = err?.message || 'Ntibyashobotse kohereza muri WhatsApp App.';
+      setSendError(msg);
+      onToast(`⚠️ ${msg}`);
     } finally {
       setIsSending(false);
     }
@@ -656,7 +687,10 @@ export default function WhatsAppReplyModal({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setShowSendConfirm(true)}
+                        onClick={() => {
+                          setSendError(null);
+                          setShowSendConfirm(true);
+                        }}
                         disabled={!replyText.trim() || isSending}
                         className={`px-6 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md transition-all flex items-center gap-2 cursor-pointer ${
                           replyText.trim() && !isSending
@@ -716,15 +750,49 @@ export default function WhatsAppReplyModal({
                       <div className="w-10 h-10 rounded-xl bg-[#25D366]/15 text-[#25D366] flex items-center justify-center shrink-0">
                         <Send size={20} />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <h4 className="font-bold text-sm text-gray-900 dark:text-white">
                           Confirm Reply Send
                         </h4>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          To: {selectedChat.sender}
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                          To: {recipientVerification?.resolvedName || selectedChat.sender}
+                          {recipientVerification?.resolvedPhone ? ` (+${recipientVerification.resolvedPhone})` : ''}
                         </p>
                       </div>
                     </div>
+
+                    {recipientVerification && (
+                      <div
+                        className={`p-2.5 mb-3 rounded-xl border text-[11px] flex items-start gap-2 ${
+                          recipientVerification.verified
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+                        }`}
+                      >
+                        {recipientVerification.verified ? (
+                          <ShieldCheck size={15} className="shrink-0 mt-0.5 text-[#25D366]" />
+                        ) : (
+                          <AlertTriangle size={15} className="shrink-0 mt-0.5 text-red-500" />
+                        )}
+                        <span className="leading-snug">
+                          {recipientVerification.verified
+                            ? recipientVerification.viaNotification
+                              ? 'Yemejwe kuri WhatsApp App (Direct Notification Reply ako kanya).'
+                              : recipientVerification.existsOnWhatsApp
+                                ? 'Yemejwe muri Contacts & WhatsApp App — ubutumwa burahita bwoherezwa.'
+                                : recipientVerification.existsInContacts
+                                  ? 'Yemejwe muri Contacts — irahita yohereza muri WhatsApp App.'
+                                  : 'Nimero yemewe — irahita yohereza muri WhatsApp App.'
+                            : recipientVerification.reason}
+                        </span>
+                      </div>
+                    )}
+
+                    {sendError && (
+                      <div className="p-2.5 mb-3 rounded-xl bg-red-500/10 border border-red-500/30 text-[11px] text-red-600 dark:text-red-300">
+                        {sendError}
+                      </div>
+                    )}
 
                     <div className="p-3 my-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] text-xs text-gray-800 dark:text-[#e9edef] max-h-32 overflow-y-auto italic">
                       "{replyText}"
@@ -733,7 +801,10 @@ export default function WhatsAppReplyModal({
                     <div className="flex items-center justify-end gap-2 mt-4">
                       <button
                         type="button"
-                        onClick={() => setShowSendConfirm(false)}
+                        onClick={() => {
+                          setSendError(null);
+                          setShowSendConfirm(false);
+                        }}
                         className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
                       >
                         Cancel
@@ -741,8 +812,12 @@ export default function WhatsAppReplyModal({
                       <button
                         type="button"
                         onClick={handleSendReply}
-                        disabled={isSending}
-                        className="px-5 py-2 rounded-xl text-xs font-bold bg-[#25D366] hover:bg-[#20ba59] text-white shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                        disabled={isSending || !recipientVerification?.verified}
+                        className={`px-5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 ${
+                          !isSending && recipientVerification?.verified
+                            ? 'bg-[#25D366] hover:bg-[#20ba59] text-white cursor-pointer'
+                            : 'bg-gray-200 dark:bg-[#2a3942] text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                        }`}
                       >
                         {isSending ? (
                           <>

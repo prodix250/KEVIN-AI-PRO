@@ -393,6 +393,16 @@ export function formatWhatsAppPhoneNumber(raw: string): string {
   return digits;
 }
 
+export function isValidWhatsAppTargetNumber(raw: string): boolean {
+  const digits = formatWhatsAppPhoneNumber(raw).replace(/[^\d]/g, '');
+  if (digits.length < 9 || digits.length > 15) return false;
+  if (/^(\d)\1{6,}$/.test(digits)) return false;
+  if (digits.startsWith('250')) {
+    return /^2507[2389]\d{7}$/.test(digits);
+  }
+  return true;
+}
+
 export interface GroundingSource {
   title: string;
   url: string;
@@ -1152,16 +1162,36 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
     const rawPhone = action.phoneNumber || action.args?.phone_number || '';
     const phone = formatWhatsAppPhoneNumber(rawPhone);
     const msg = action.messageText || action.args?.message || '';
-    if (!isLikelyPhoneNumber(phone)) return false;
-    playWhatsAppSound('send');
+    if (!isValidWhatsAppTargetNumber(phone)) {
+      action.status = 'contact_not_found';
+      return false;
+    }
+
+    if (bridge?.verifyWhatsAppRecipientJson) {
+      try {
+        const verifyRaw = bridge.verifyWhatsAppRecipientJson(phone);
+        const verified = JSON.parse(verifyRaw || '{}') as { whatsappInstalled?: boolean };
+        if (verified && verified.whatsappInstalled === false) {
+          action.status = 'needs_permission';
+          return false;
+        }
+      } catch {
+        // continue to bridge.sendWhatsApp
+      }
+    }
+
     if (bridge?.sendWhatsApp) {
-      bridge.sendWhatsApp(phone, msg);
+      const sent = Boolean(bridge.sendWhatsApp(phone, msg));
+      if (!sent) {
+        action.status = 'contact_not_found';
+        return false;
+      }
+      playWhatsAppSound('send');
     } else {
-      const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+      playWhatsAppSound('send');
+      const waAppUrl = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(msg)}`;
       const link = document.createElement('a');
-      link.href = waUrl;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
+      link.href = waAppUrl;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1169,7 +1199,7 @@ export function runDeviceAction(action: DeviceAction, forceExecute = false): boo
     action.status = 'executed';
     appendAgentOutbox({
       channel: 'whatsapp',
-      recipient: action.contactName ? `${action.contactName} (${phone})` : phone,
+      recipient: action.contactName ? `${action.contactName} (+${phone})` : `+${phone}`,
       message: msg,
       status: 'sent',
     });
@@ -1368,28 +1398,62 @@ export function executeDeviceAction(name: string, args: Record<string, any>): De
           status: 'choose_contact',
         };
       } else {
-        return {
-          name,
-          args,
-          label: name === "make_call"
-            ? `Hamagara ${resolvedName}`
-            : `${name === "send_sms" ? "SMS" : "WhatsApp"} → ${resolvedName}`,
-          contactName: resolvedName,
-          messageText,
-          status: 'contact_not_found',
-        };
+        let verifiedFromBridge = false;
+        if (name === "open_whatsapp" && typeof window !== 'undefined') {
+          const bridge = (window as any).KevinAgentBridge;
+          if (bridge?.verifyWhatsAppRecipientJson) {
+            try {
+              const raw = bridge.verifyWhatsAppRecipientJson(resolvedName);
+              const info = JSON.parse(raw || '{}') as {
+                existsInContacts?: boolean;
+                resolvedPhone?: string;
+                resolvedName?: string;
+              };
+              if (info.existsInContacts && info.resolvedPhone && isValidWhatsAppTargetNumber(info.resolvedPhone)) {
+                resolvedPhone = sanitizePhoneNumber(info.resolvedPhone);
+                resolvedName = info.resolvedName?.trim() || resolvedName;
+                verifiedFromBridge = true;
+              }
+            } catch {}
+          }
+        }
+        if (!verifiedFromBridge) {
+          return {
+            name,
+            args,
+            label: name === "make_call"
+              ? `Hamagara ${resolvedName}`
+              : `${name === "send_sms" ? "SMS" : "WhatsApp"} → ${resolvedName}`,
+            contactName: resolvedName,
+            messageText,
+            status: 'contact_not_found',
+          };
+        }
       }
     }
 
     const finalPhone = name === "open_whatsapp"
       ? formatWhatsAppPhoneNumber(resolvedPhone || rawPhoneNumber)
       : (resolvedPhone || rawPhoneNumber);
+
+    if (name === "open_whatsapp" && !isValidWhatsAppTargetNumber(finalPhone)) {
+      return {
+        name,
+        args,
+        label: `WhatsApp → ${resolvedName || rawPhoneNumber || 'Numero ntibaho'}`,
+        contactName: resolvedName,
+        messageText,
+        status: 'contact_not_found',
+      };
+    }
+
     label = name === "make_call"
       ? `Hamagara ${resolvedName ? `${resolvedName} (${finalPhone})` : finalPhone}`
       : name === "send_sms"
         ? `SMS → ${resolvedName ? `${resolvedName} (${finalPhone})` : finalPhone}`
-        : `WhatsApp → ${resolvedName ? `${resolvedName} (${finalPhone})` : finalPhone}`;
+        : `WhatsApp → ${resolvedName ? `${resolvedName} (+${finalPhone})` : `+${finalPhone}`}`;
 
+    const waAppUri = `whatsapp://send?phone=${finalPhone}&text=${encodeURIComponent(messageText || '')}`;
     const actionObj: DeviceAction = {
       name,
       args: { ...args, phone_number: finalPhone, contact_name: resolvedName },
@@ -1397,8 +1461,8 @@ export function executeDeviceAction(name: string, args: Record<string, any>): De
       phoneNumber: finalPhone,
       contactName: resolvedName,
       messageText,
-      url: name === "open_whatsapp" ? `https://wa.me/${finalPhone}?text=${encodeURIComponent(messageText || '')}` : undefined,
-      fallbackUrl: name === "open_whatsapp" ? `https://wa.me/${finalPhone}?text=${encodeURIComponent(messageText || '')}` : undefined,
+      url: name === "open_whatsapp" ? waAppUri : undefined,
+      fallbackUrl: name === "open_whatsapp" ? waAppUri : undefined,
       status: 'executed',
     };
 
@@ -1887,7 +1951,13 @@ function actionConfirmation(action: DeviceAction): string {
     }
   }
   if (action.name === 'open_whatsapp') {
-    return `💚 WhatsApp ifunguwe kuri **${action.contactName || action.phoneNumber}**!`;
+    if (action.status === 'contact_not_found') {
+      return `⚠️ **${action.contactName || action.phoneNumber || 'Uwo ushaka kwandikira'}** ntabwo abonetse muri Contacts cyangwa nimero ye ya WhatsApp ntiyuzuye. Shyiramo nimero yemewe kugira ngo Izi AI yohereze muri **WhatsApp App**.`;
+    }
+    if (action.status === 'needs_permission') {
+      return `⚠️ Kugira ngo ubutumwa bugende muri **WhatsApp App** kuri **${action.contactName || action.phoneNumber}**, emera **Auto-Send / Accessibility** cyangwa urebe ko WhatsApp App iri muri telefone.`;
+    }
+    return `💚 Ubutumwa bwoherejwe kuri **${action.contactName || action.phoneNumber}** muri **WhatsApp App**!`;
   }
   if (action.name === 'configure_whatsapp_autoreply') {
     const pauseMinutes = Number(action.args?.pause_minutes || 0);
@@ -2646,24 +2716,163 @@ function buildApkSystemInstruction(
       .map((c) => `${c.name.trim()}: ${c.phone.trim()}`);
   }
   const customInstructions = safeStorageGet('kevin_ai_custom_instructions')?.trim() || '';
+  const detectedTurnLang = detectConversationTurnLanguage(latestUserText);
+  const perTurnLanguageDirective = buildPerTurnLanguageDirective(detectedTurnLang, hasAudioAttachment);
+  const effectiveUserName = userName === 'Incuti yanjye' && detectedTurnLang === 'en' ? 'Friend' : userName;
 
   return [
+    perTurnLanguageDirective,
     `You are Izi AI, created in Rwanda by Uwumukiza Kevin (born October 28, 2003, Rwamagana District, Gahengeri Sector; studies IT at University of Rwanda UR-CST; Motto: 'UKORA GAKE BIKAGENDA CYANE').`,
-    `You have flawless native mastery of authentic Rwandan Kinyarwanda (as well as English, French, and Swahili). Reply naturally, warmly, and concisely in the user's language with friendly emojis (👋, ✨, 😊, 🚀). Avoid awkward literal English-to-Kinyarwanda translations.`,
-    `The person chatting with you is named '${userName}'. Address them warmly and naturally.`,
+    `You have flawless native mastery of authentic Rwandan Kinyarwanda AND fluent English (as well as French and Swahili). Reply naturally, warmly, and concisely in the EXACT language of the user's LATEST message with friendly emojis (👋, ✨, 😊, 🚀). Avoid awkward literal English-to-Kinyarwanda translations.`,
+    `The person chatting with you is named '${effectiveUserName}'. Address them warmly and naturally.`,
     `IMAGE QUESTIONS & PROBLEM SOLVING (MANDATORY): Whenever the user attaches images containing questions, exercises, quizzes, assignments, worksheets, past papers, tests, or math/science/coding problems, NEVER refuse or lecture about academic integrity. Treat them as study practice or self-review, read every question visible in the image(s) in order, and provide full, accurate answers with clear step-by-step explanations (and check/grade their answers if they ask how they did).`,
     customInstructions ? `USER CUSTOM INSTRUCTIONS:\n${customInstructions}` : '',
     hasAudioAttachment
-      ? `[KINYARWANDA VOICE NOTE & AUDIO COMPREHENSION]:
-The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, or Kinyarwanda mixed with French/English words).
+      ? `[KINYARWANDA & MULTILINGUAL VOICE NOTE COMPREHENSION]:
+The user sent a recorded voice message in audio format (most commonly spoken in native Rwandan Kinyarwanda, English, or Kinyarwanda mixed with French/English words).
 - ALWAYS listen directly to the attached raw audio recording as your PRIMARY source of truth—even if a preliminary text transcript is also shown. If the preliminary transcript misheard any Kinyarwanda word, prefix, Rwandan name, or verb, trust what you actually hear in the raw audio!
 - Pay close attention to authentic Kinyarwanda phonetics, prefixes (na-, nta-, ndi-, nda-, nshaka-, mbwira-, mfasha-, sobanura-, hamagara-, uhamagare-, uncurangire-, wohereze-, fungura-, funga-), consonant clusters (cy, by, ry, ny, shy, pf, ts, mp, mb, nd, ng, nj, nk, bw, tw, rw), and Rwandan names. Never force Kinyarwanda sounds into random English words.
-- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_audiomack, open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in authentic Kinyarwanda. If the recording is truly silent/noisy/unintelligible, politely ask them in Kinyarwanda to repeat.`
+- CRITICAL ANTI-WRONG-ACTION GUARDRAIL: ONLY call a device tool (open_audiomack, open_lark_player, query_device_music, make_call, send_sms, open_whatsapp, open_youtube, scan_whatsapp_chats, configure_whatsapp_autoreply, open_camera) if the user explicitly and clearly commanded that exact action in their audio. If the user is chatting, asking a question, or greeting, reply naturally in the EXACT language spoken in the audio (Kinyarwanda if spoken in Kinyarwanda, English if spoken in English). If the recording is truly silent/noisy/unintelligible, politely ask them to repeat in the language they used (or Kinyarwanda by default).`
       : '',
     contactsList.length > 0 ? `[SAVED CONTACTS (${contactsList.length}): ${contactsList.join(' | ')}]` : '',
     `[AGENT PERMISSIONS & FULL AUTONOMOUS LARK PLAYER + AUDIOMACK + EQUALIZER + DIRECT AUTOPLAY ACCESS: autoSend=${Boolean(perms.autoSend)}, autoCall=${perms.autoCall !== false}, autoPlayYouTube=${perms.autoPlayYouTube !== false}, whatsappAutoReply=${Boolean(perms.whatsappAutoReply)}, whatsappAutoReplyPaused=${Boolean(perms.whatsappAutoReply && perms.whatsappAutoReplyPausedUntil && perms.whatsappAutoReplyPausedUntil > Date.now())}. You have 100% full autonomous access to BOTH Lark Player (local phone audio) AND Audiomack (online/offline streaming), plus YouTube and opening any installed app via open_app. DIRECT AUTOPLAY RULE: Whenever the user asks to play a song on Lark Player, Audiomack, or YouTube, ALWAYS pass action='play' (never 'search' unless they explicitly asked only to search without playing) so every audio player immediately autoplays directly! AUTONOMOUS EQUALIZER CONTROL: You can open and automatically configure the Equalizer INSIDE Lark Player (or Audiomack + system AudioFX) without manual user clicks — use action='equalizer' (or 'set_equalizer' / 'toggle_equalizer' / 'bass_boost') with eq_enabled (true/false), eq_preset (Normal, Classical, Dance, Flat, Folk, Heavy Metal, Hip Hop, Jazz, Pop, Rock, Custom, Bass Boost, Vocal, Acoustic, Electronic, R&B), bass_boost (0-100), virtualizer (0-100), reverb (None, Small Room, Medium Room, Large Room, Medium Hall, Large Hall, Plate), loudness (0-100), and eq_bands ([60Hz, 230Hz, 910Hz, 3.6kHz, 14kHz] in 0-100% or -15..+15 dB). If the user asks to adjust equalizer, bass boost, 3D surround, reverb, or EQ presets without naming an app, default to open_lark_player(..., action='equalizer'). CRITICAL TOOL CALL RULE: Whenever the user tells you to open Lark Player or Audiomack (even written as "audio mack"), play/search a song, adjust the equalizer, create/play/manage a playlist, or open any app, you MUST ALWAYS emit the matching functionCall tool immediately (open_audiomack, open_lark_player, query_device_music, open_app, open_youtube, open_camera, make_call, send_sms, open_whatsapp) — NEVER just reply in text claiming you opened or configured it without calling the tool! When asked to list local songs, call query_device_music(query) or open_lark_player(..., action='list_songs'). When sending WhatsApp messages to Rwandan numbers, always use country code +250 (e.g. +250788123456 or 250788123456) so WhatsApp delivers immediately. For WhatsApp messages, write ONLY ONE single natural human message matching the recipient's language — NEVER include dates, timestamps, sender names (like 'Kevin:'), or multiple repeated versions. When asked to check all WhatsApp chats or reply to unread/unreplied messages, ALWAYS call scan_whatsapp_chats(). When asked to pause WhatsApp auto-reply for X minutes, turn it off, or turn it back on, ALWAYS call configure_whatsapp_autoreply(). Execute device tool calls ONLY when explicitly requested by the user.]`,
     realTimeContext,
+    perTurnLanguageDirective,
   ].filter(Boolean).join('\n\n');
+}
+
+export type TurnDetectedLanguage = 'rw' | 'en' | 'fr' | 'sw' | 'auto';
+
+export function detectConversationTurnLanguage(rawText: string): TurnDetectedLanguage {
+  const cleaned = String(rawText || '')
+    .replace(/\[PRELIMINARY STT DRAFT[^\]]*\]:/gi, '')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .trim();
+  if (!cleaned) return 'auto';
+
+  const lower = cleaned.toLowerCase();
+
+  // 1. Explicit language switch requests always win immediately
+  if (/(?:\b(?:in|into|to|speak|reply\s+in|answer\s+in|write\s+in|explain\s+in|switch\s+to)\s+english\b|\b(?:mu|muri|vuga|subiza\s+mu)\s*(?:i)?cyongereza\b|\bmuri\s+english\b)/i.test(lower)) {
+    return 'en';
+  }
+  if (/(?:\b(?:in|into|to|speak|reply\s+in|answer\s+in|write\s+in|explain\s+in|switch\s+to)\s+kinyarwanda\b|\b(?:mu|muri|vuga|subiza\s+mu)\s*(?:i)?kinyarwanda\b)/i.test(lower)) {
+    return 'rw';
+  }
+  if (/(?:\b(?:in|into|to|en|speak|reply\s+in)\s+(?:french|français|francais)\b|\b(?:mu|muri)\s*(?:i)?gifaransa\b)/i.test(lower)) {
+    return 'fr';
+  }
+  if (/(?:\b(?:in|into|to|kwa|speak|reply\s+in)\s+(?:swahili|kiswahili)\b|\b(?:mu|muri)\s*(?:i)?giswahili\b)/i.test(lower)) {
+    return 'sw';
+  }
+
+  const rwExactWords = new Set([
+    'muraho', 'amakuru', 'bite', 'mwaramutse', 'mwiriwe', 'ijoro', 'urakoze', 'wakoze', 'murakoze', 'mwakoze',
+    'yego', 'oya', 'ntabwo', 'nta', 'ntacyo', 'ndabona', 'ndumva', 'nshaka', 'ndashaka', 'nkunda', 'ndakunda',
+    'mbwira', 'mfasha', 'sobanura', 'kora', 'nkorera', 'unkorere', 'subiza', 'vuga', 'soma', 'andika', 'fungura',
+    'funga', 'hamagara', 'ohereza', 'curanga', 'shushanya', 'reka', 'dore', 'ngaho', 'nyamuneka', 'bimeze',
+    'umeze', 'meze', 'muri', 'kuri', 'kuva', 'kugera', 'kubera', 'kugira', 'ngo', 'kandi', 'cyangwa', 'ariko',
+    'ubwo', 'rero', 'rwose', 'cyane', 'neza', 'gusa', 'byose', 'hose', 'bose', 'abantu', 'umuntu', 'ikintu',
+    'ibintu', 'iki', 'inde', 'nde', 'ryari', 'hehe', 'gute', 'kuki', 'uko', 'niba', 'ko', 'ari', 'hari',
+    'yanjye', 'yawe', 'yanje', 'wanjye', 'wawe', 'byanjye', 'byawe', 'icyo', 'ibyo', 'iyo', 'aho', 'ikihe',
+    'iyihe', 'ibihe', 'amafranga', 'amafaranga', 'ifoto', 'indirimbo', 'ubutumwa', 'ikibazo', 'igisubizo',
+    'porogaramu', 'ikoranabuhanga', 'cyiza', 'mwiza', 'nziza', 'meza', 'byiza', 'mfite', 'ufite', 'afite',
+    'dufite', 'mufite', 'bafite', 'ndi', 'uri', 'turi', 'bari', 'nzi', 'sinzi', 'uzi', 'ntuzi', 'azi', 'tuzi',
+    'ndimo', 'urimo', 'arimo', 'turimo', 'murimo', 'barimo', 'ngomba', 'ugomba', 'agomba', 'tugomba', 'mugomba',
+    'bagomba', 'nkeneye', 'ukeneye', 'akeneye', 'dukeneye', 'bakeneye', 'nakoze', 'yakoze', 'twakoze', 'bakoze',
+    'nzakora', 'uzakora', 'azakora', 'tuzakora', 'wowe', 'jyewe', 'njye', 'twebwe', 'mwebwe', 'nawe', 'nanjye',
+    'yanyu', 'yabo', 'ryawe', 'ryanjye', 'cyawe', 'cyanjye', 'byabo', 'nkaho', 'kuko', 'kugirango', 'kujya',
+    'biri', 'ziri', 'kiri', 'hano', 'hariya', 'ejo', 'ubu', 'none', 'cyera', 'vuba', 'gato', 'rwanda',
+  ]);
+  const rwConnectors = new Set(['ni', 'na', 'ya', 'wa', 'za', 'ba', 'rya', 'cya', 'bya', 'kwa', 'mwa', 'twa']);
+  const enExactWords = new Set([
+    'the', 'is', 'are', 'am', 'was', 'were', 'be', 'been', 'being', 'what', 'why', 'how', 'when', 'where',
+    'who', 'which', 'whose', 'whom', 'can', 'could', 'would', 'should', 'will', 'shall', 'may', 'might', 'must',
+    'do', 'does', 'did', 'have', 'has', 'had', 'this', 'that', 'these', 'those', 'with', 'from', 'into', 'onto',
+    'about', 'between', 'through', 'during', 'before', 'after', 'because', 'although', 'however', 'therefore',
+    'actually', 'really', 'very', 'please', 'thank', 'thanks', 'sorry', 'hello', 'hi', 'hey', 'good', 'morning',
+    'afternoon', 'evening', 'night', 'today', 'tomorrow', 'yesterday', 'explain', 'describe', 'tell', 'show',
+    'help', 'write', 'create', 'build', 'make', 'fix', 'give', 'need', 'want', 'like', 'know', 'think',
+    'understand', 'mean', 'means', 'meaning', 'english', 'question', 'answer', 'example', 'examples', 'step',
+    'steps', 'difference', 'compare', 'summary', 'summarize', 'translate', 'your', 'you', 'my', 'me', 'we',
+    'us', 'they', 'them', 'their', 'our', 'his', 'her', 'its', 'there', 'here', 'not', "don't", "doesn't",
+    "didn't", "won't", "can't", "couldn't", "shouldn't", "wouldn't", "isn't", "aren't", "what's", "how's",
+    "it's", "i'm", "you're", "we're", "they're", 'yes', 'no', 'okay', 'sure', 'fine', 'great', 'nice',
+    'please', 'if', 'and', 'or', 'but', 'for', 'of', 'to', 'in', 'on', 'at', 'as', 'an', 'i',
+  ]);
+  const frExactWords = new Set([
+    'bonjour', 'salut', 'bonsoir', 'merci', 'comment', 'pourquoi', 'quand', 'avec', 'dans', 'pour', 'est',
+    'sont', 'suis', 'nous', 'vous', 'ils', 'elles', 'mais', 'ou', 'donc', 'alors', 'oui', 'non', 'sil',
+    "s'il", 'plait', 'plaît', 'parlez', 'francais', 'français', 'expliquer', 'ecrire', 'écrire', 'quel', 'quelle',
+  ]);
+  const swExactWords = new Set([
+    'habari', 'mambo', 'jambo', 'shikamoo', 'asante', 'tafadhali', 'ndiyo', 'hapana', 'sawa', 'kwamba',
+    'lakini', 'naomba', 'eleza', 'msaada', 'karibu', 'vipi', 'sasa', 'leo', 'kesho', 'jana', 'nini', 'kwanini',
+  ]);
+
+  const tokens = lower.split(/[\s,.;:!?()[\]{}"“”«»<>\\/]+/).filter(Boolean);
+  let rwScore = 0;
+  let enScore = 0;
+  let frScore = 0;
+  let swScore = 0;
+
+  for (const tok of tokens) {
+    if (rwExactWords.has(tok) || /^(?:nda|ndi|ntabwo|ntacyo|ntib|nshak|urakoz|wakoz|mwaram|mwiriw|mbwir|mfash|sobanur|fungur|oherez|hamagar|curang|shushany)/.test(tok)) {
+      rwScore += 2;
+    } else if (rwConnectors.has(tok)) {
+      rwScore += 1;
+    }
+    if (enExactWords.has(tok)) {
+      enScore += tok.length <= 2 ? 1 : 2;
+    }
+    if (frExactWords.has(tok)) {
+      frScore += 2;
+    }
+    if (swExactWords.has(tok)) {
+      swScore += 2;
+    }
+  }
+
+  if (rwScore === 0 && enScore === 0 && frScore === 0 && swScore === 0) {
+    return 'auto';
+  }
+  if (rwScore > 0 && rwScore >= enScore && rwScore >= frScore && rwScore >= swScore) {
+    return 'rw';
+  }
+  if (enScore > rwScore && enScore >= frScore && enScore >= swScore) {
+    return 'en';
+  }
+  if (frScore > rwScore && frScore > enScore && frScore >= swScore) {
+    return 'fr';
+  }
+  if (swScore > rwScore && swScore > enScore && swScore > frScore) {
+    return 'sw';
+  }
+  return 'auto';
+}
+
+export function buildPerTurnLanguageDirective(lang: TurnDetectedLanguage, hasAudioAttachment = false): string {
+  if (lang === 'en') {
+    return `[STRICT PER-TURN LANGUAGE LOCK: ENGLISH — MANDATORY OVERRIDE]
+The user's LATEST message is in ENGLISH. Even if earlier turns in this conversation were in Kinyarwanda or another language, you MUST switch immediately and write 100% of your reply ONLY in clear, natural ENGLISH. Never reply in Kinyarwanda unless the user specifically asks for a Kinyarwanda translation/example.`;
+  }
+  if (lang === 'rw') {
+    return `[STRICT PER-TURN LANGUAGE LOCK: KINYARWANDA — MANDATORY OVERRIDE]
+Ubutumwa bwa NYUMA bw'ukoresha buri mu KINYARWANDA. Niyo ibiganiro byabanje byaba byari mu Cyongereza cyangwa urundi rurimi, UGOMBA guhita uhindura ugasubiza 100% mu KINYARWANDA cy'umwimerere gusa.`;
+  }
+  if (lang === 'fr') {
+    return `[STRICT PER-TURN LANGUAGE LOCK: FRENCH — MANDATORY OVERRIDE]
+The user's LATEST message is in FRENCH. Regardless of earlier conversation history, write 100% of your reply in natural FRENCH only.`;
+  }
+  if (lang === 'sw') {
+    return `[STRICT PER-TURN LANGUAGE LOCK: SWAHILI — MANDATORY OVERRIDE]
+The user's LATEST message is in SWAHILI. Regardless of earlier conversation history, write 100% of your reply in natural SWAHILI only.`;
+  }
+  return `[STRICT PER-TURN LANGUAGE MATCHING — MANDATORY]
+Detect the EXACT language of the user's LATEST ${hasAudioAttachment ? 'voice audio or text message' : 'message'} ONLY and NEVER carry over a different language from previous turns:
+- If the LATEST message is in Kinyarwanda (or Kinyarwanda mixed with tech words), reply 100% in authentic Rwandan Kinyarwanda.
+- If the LATEST message is in English, switch immediately and reply 100% in natural English.
+- If the LATEST message is in French or Swahili, reply 100% in that exact language.`;
 }
 
 export async function transcribeAudioWithSTT(
@@ -3270,9 +3479,9 @@ export async function sendMessageToGemini(
     || trimmedLatest.startsWith('🎤 ')
     || trimmedLatest.startsWith('Listen to the attached voice message');
   const prompt = isGenericAudioPlaceholder && hasAudioAttachment
-    ? "Uyu mukoresha yoherereje ubutumwa bw'amajwi (Voice Note). Umva witonze ibyo yavuze mu Kinyarwanda cyangwa urundi rurimi muri iyi audio, umusubize neza mu rurimi yavuze. NTUGAKORE igikorwa na kimwe (hamagara, SMS, WhatsApp, YouTube) utumvise neza ko yabigusabye mu buryo budashidikanywaho — niba amajwi atumvikana neza, musabe ko asubiramo mu Kinyarwanda."
+    ? "The user sent a recorded voice message (Voice Note). Listen carefully to the spoken audio and reply 100% in the EXACT language the speaker used in this audio (authentic Kinyarwanda if spoken in Kinyarwanda; English if spoken in English; French/Swahili if spoken in those languages). NEVER execute any device action (call, SMS, WhatsApp, YouTube) unless unmistakably commanded in the audio — if unclear or silent, politely ask them to repeat in their language."
     : hasAudioAttachment && trimmedLatest
-      ? `[PRELIMINARY STT DRAFT (always listen directly to the attached raw audio as your primary source — if any Kinyarwanda word, name, or command differs from what you hear, ALWAYS trust the raw audio)]: "${trimmedLatest}"`
+      ? `[PRELIMINARY STT DRAFT (always listen directly to the attached raw audio as your primary source and reply in the exact language spoken by the user)]: "${trimmedLatest}"`
       : trimmedLatest || (
           hasImageAttachment
             ? 'Please read all questions, problems, or text shown in these images carefully and provide complete, accurate answers with clear explanations for each.'

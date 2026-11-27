@@ -27,44 +27,23 @@ export interface WhatsAppChatItem {
 
 const WHATSAPP_INBOX_STORAGE_KEY = 'kevin_ai_whatsapp_inbox';
 
-const INITIAL_SAMPLE_CHATS: WhatsAppChatItem[] = [
-  {
-    id: 'wa_sample_1',
-    sender: 'Aline Mugabo',
-    phoneNumber: '+250788123456',
-    message: 'Muraho Kevin! Waramutse ute? Ese warangije gusuzuma ya dosiye ya projet twavuganaga ejo?',
-    timestamp: Date.now() - 18 * 60 * 1000,
-    unread: true,
-  },
-  {
-    id: 'wa_sample_2',
-    sender: 'Eric Nkurunziza',
-    phoneNumber: '+250789654321',
-    message: 'Bite bro! Uyu munsi uraboneka saa cyenda (3:00 PM) tuganire ku kibazo cya system?',
-    timestamp: Date.now() - 75 * 60 * 1000,
-    unread: true,
-  },
-  {
-    id: 'wa_sample_3',
-    sender: 'Clarisse Umutoni',
-    phoneNumber: '+250783112233',
-    message: 'Urakoze cyane ku bufasha waduhaye. Waba uzi igihe gahunda nshya izatangirira?',
-    timestamp: Date.now() - 210 * 60 * 1000,
-    unread: false,
-    repliedText: 'Muraho Clarisse! Gahunda izatangira ku wa Mbere mugitondo.',
-  },
-];
+const INITIAL_SAMPLE_CHATS: WhatsAppChatItem[] = [];
+const LEGACY_SAMPLE_IDS = new Set(['wa_sample_1', 'wa_sample_2', 'wa_sample_3']);
 
 export function getStoredWhatsAppChats(): WhatsAppChatItem[] {
   if (typeof window === 'undefined') return INITIAL_SAMPLE_CHATS;
   try {
     const raw = localStorage.getItem(WHATSAPP_INBOX_STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(WHATSAPP_INBOX_STORAGE_KEY, JSON.stringify(INITIAL_SAMPLE_CHATS));
-      return INITIAL_SAMPLE_CHATS;
-    }
+    if (!raw) return INITIAL_SAMPLE_CHATS;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_SAMPLE_CHATS;
+    if (!Array.isArray(parsed)) return INITIAL_SAMPLE_CHATS;
+    const cleaned = parsed.filter(
+      (c: any) => c && typeof c === 'object' && !LEGACY_SAMPLE_IDS.has(String(c.id || ''))
+    );
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(WHATSAPP_INBOX_STORAGE_KEY, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch {
     return INITIAL_SAMPLE_CHATS;
   }
@@ -170,72 +149,270 @@ export async function draftWhatsAppReplyWithAI(
   return reply;
 }
 
+export interface WhatsAppRecipientVerification {
+  verified: boolean;
+  resolvedPhone: string;
+  resolvedName: string;
+  existsInContacts: boolean;
+  existsOnWhatsApp: boolean;
+  viaNotification: boolean;
+  whatsappInstalled: boolean;
+  reason?: string;
+}
+
+export function isValidWhatsAppPhoneDigits(raw: string): boolean {
+  const digits = formatWhatsAppPhoneNumber(raw).replace(/[^\d]/g, '');
+  if (digits.length < 9 || digits.length > 15) return false;
+  if (/^(\d)\1{6,}$/.test(digits)) return false;
+  if (digits.startsWith('250')) {
+    return /^2507[2389]\d{7}$/.test(digits);
+  }
+  return true;
+}
+
+export function verifyWhatsAppRecipient(
+  chat: WhatsAppChatItem,
+  overridePhone?: string
+): WhatsAppRecipientVerification {
+  const bridge = typeof window !== 'undefined' ? (window as any).KevinAgentBridge : null;
+  const trimmedOverride = overridePhone?.trim() || '';
+  const hasExplicitOverride = trimmedOverride.length > 0;
+
+  let candidatePhone =
+    trimmedOverride ||
+    chat.phoneNumber?.trim() ||
+    (isLikelyPhoneNumber(chat.sender) ? chat.sender : '');
+
+  let matchedSavedName = '';
+  const contacts = getSavedContacts();
+  const exactSaved = contacts.find(
+    (c) => c.name.toLowerCase() === (chat.sender || '').trim().toLowerCase()
+  );
+  if (!candidatePhone && exactSaved?.phone) {
+    candidatePhone = exactSaved.phone;
+    matchedSavedName = exactSaved.name;
+  } else if (exactSaved) {
+    matchedSavedName = exactSaved.name;
+  }
+
+  const candidateDigits = candidatePhone ? formatWhatsAppPhoneNumber(candidatePhone) : '';
+  const viaNotification = Boolean(
+    !hasExplicitOverride &&
+      chat.notificationKey &&
+      chat.canReplyDirectly &&
+      bridge?.replyToWhatsAppNotification
+  );
+
+  let nativeInfo: {
+    whatsappInstalled?: boolean;
+    hasContactsPermission?: boolean;
+    existsInContacts?: boolean;
+    existsOnWhatsApp?: boolean;
+    resolvedName?: string;
+    resolvedPhone?: string;
+  } | null = null;
+
+  if (bridge?.verifyWhatsAppRecipientJson) {
+    try {
+      const queryTarget = candidateDigits || chat.sender || '';
+      const raw = bridge.verifyWhatsAppRecipientJson(queryTarget);
+      nativeInfo = JSON.parse(raw || '{}');
+    } catch {
+      nativeInfo = null;
+    }
+  }
+
+  const whatsappInstalled = nativeInfo ? Boolean(nativeInfo.whatsappInstalled) : true;
+  const nativePhone = nativeInfo?.resolvedPhone ? formatWhatsAppPhoneNumber(nativeInfo.resolvedPhone) : '';
+  const finalDigits = isValidWhatsAppPhoneDigits(candidateDigits)
+    ? candidateDigits
+    : isValidWhatsAppPhoneDigits(nativePhone)
+      ? nativePhone
+      : '';
+  const resolvedName =
+    nativeInfo?.resolvedName?.trim() || matchedSavedName || chat.sender || (finalDigits ? `+${finalDigits}` : '');
+  const existsInContacts = Boolean(exactSaved || nativeInfo?.existsInContacts);
+  const existsOnWhatsApp = Boolean(viaNotification || nativeInfo?.existsOnWhatsApp);
+
+  if (nativeInfo && !whatsappInstalled) {
+    return {
+      verified: false,
+      resolvedPhone: finalDigits,
+      resolvedName,
+      existsInContacts,
+      existsOnWhatsApp: false,
+      viaNotification: false,
+      whatsappInstalled: false,
+      reason: 'WhatsApp App ntabwo irimo muri iyi telefone. Banza ushyiremo WhatsApp App mbere yo kohereza.',
+    };
+  }
+
+  if (viaNotification) {
+    return {
+      verified: true,
+      resolvedPhone: finalDigits,
+      resolvedName,
+      existsInContacts,
+      existsOnWhatsApp: true,
+      viaNotification: true,
+      whatsappInstalled,
+    };
+  }
+
+  if (!finalDigits) {
+    if (hasExplicitOverride) {
+      return {
+        verified: false,
+        resolvedPhone: '',
+        resolvedName,
+        existsInContacts,
+        existsOnWhatsApp: false,
+        viaNotification: false,
+        whatsappInstalled,
+        reason: 'Nimero washyizemo ntabwo yuzuye cyangwa ntabwo ari iyo kuri WhatsApp. Reba ko itangizwa na +2507... cyangwa code y’igihugu.',
+      };
+    }
+    return {
+      verified: false,
+      resolvedPhone: '',
+      resolvedName,
+      existsInContacts,
+      existsOnWhatsApp: false,
+      viaNotification: false,
+      whatsappInstalled,
+      reason: `"${chat.sender}" nta nimero yemewe afite muri Contacts cyangwa kuri WhatsApp. Shyiramo nimero nyayo kugira ngo ubutumwa bugende muri WhatsApp App.`,
+    };
+  }
+
+  if (!isValidWhatsAppPhoneDigits(finalDigits)) {
+    return {
+      verified: false,
+      resolvedPhone: '',
+      resolvedName,
+      existsInContacts,
+      existsOnWhatsApp: false,
+      viaNotification: false,
+      whatsappInstalled,
+      reason: 'Iyi nimero ntabwo yemewe kuri WhatsApp. Nyamuneka shyiramo nimero y’ukuri.',
+    };
+  }
+
+  return {
+    verified: true,
+    resolvedPhone: finalDigits,
+    resolvedName,
+    existsInContacts,
+    existsOnWhatsApp,
+    viaNotification: false,
+    whatsappInstalled,
+  };
+}
+
 export async function sendWhatsAppReplyAction(
   chat: WhatsAppChatItem,
   replyText: string,
   overridePhone?: string
-): Promise<{ success: boolean; method: 'native_app' | 'web_link' }> {
+): Promise<{
+  success: boolean;
+  method: 'native_direct' | 'native_app' | 'whatsapp_app';
+  recipientName: string;
+  recipientPhone: string;
+}> {
   const text = replyText.trim();
   if (!text) throw new Error('Igisubizo ntigishobora kuba cyera.');
 
-  const effectivePhone =
-    overridePhone?.trim() ||
-    chat.phoneNumber?.trim() ||
-    (isLikelyPhoneNumber(chat.sender) ? chat.sender : '');
-
-  // Look up phone in contacts if not available
-  let matchedPhone = effectivePhone;
-  if (!matchedPhone) {
-    const contacts = getSavedContacts();
-    const match = contacts.find(
-      (c) => c.name.toLowerCase() === chat.sender.toLowerCase()
+  const verification = verifyWhatsAppRecipient(chat, overridePhone);
+  if (!verification.verified) {
+    throw new Error(
+      verification.reason || 'Uwahoze ategerejwe ntabwo abonetse kuri WhatsApp.'
     );
-    if (match?.phone) {
-      matchedPhone = match.phone;
-    }
   }
 
-  const bridge = (window as any).KevinAgentBridge;
+  const bridge = typeof window !== 'undefined' ? (window as any).KevinAgentBridge : null;
+  const recipientLabel = verification.resolvedName || chat.sender || verification.resolvedPhone;
 
-  // 1. Native Android send via KevinAgentBridge
-  if (bridge?.sendWhatsApp && matchedPhone) {
+  // 1. Direct silent reply via active WhatsApp notification RemoteInput
+  if (verification.viaNotification && chat.notificationKey && bridge?.replyToWhatsAppNotification) {
     try {
-      bridge.sendWhatsApp(matchedPhone, text);
-      appendAgentOutbox({
-        channel: 'whatsapp',
-        recipient: chat.sender || matchedPhone,
-        incoming: chat.message,
-        message: text,
-        status: 'sent',
-      });
-      playWhatsAppSound('send');
-      markWhatsAppChatAsReplied(chat.id, text);
-      return { success: true, method: 'native_app' };
+      const directSent = Boolean(bridge.replyToWhatsAppNotification(chat.notificationKey, text));
+      if (directSent) {
+        appendAgentOutbox({
+          channel: 'whatsapp',
+          recipient: recipientLabel,
+          incoming: chat.message,
+          message: text,
+          status: 'sent',
+        });
+        playWhatsAppSound('send');
+        markWhatsAppChatAsReplied(chat.id, text);
+        return {
+          success: true,
+          method: 'native_direct',
+          recipientName: recipientLabel,
+          recipientPhone: verification.resolvedPhone,
+        };
+      }
     } catch {
-      // fallback
+      // Fall through to WhatsApp App intent if notification expired
     }
   }
 
-  // 2. Web or fallback: open WhatsApp link
-  const formattedDigits = matchedPhone ? formatWhatsAppPhoneNumber(matchedPhone) : '';
-  const waUrl = formattedDigits
-    ? `https://wa.me/${formattedDigits}?text=${encodeURIComponent(text)}`
-    : `https://web.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  if (!verification.resolvedPhone) {
+    throw new Error('Notification ya WhatsApp yarangiye kandi nta nimero yemewe yabonetse. Shyiramo nimero ye ya WhatsApp.');
+  }
 
-  if (typeof window !== 'undefined') {
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
+  // 2. Native Android send via WhatsApp App (com.whatsapp / com.whatsapp.w4b + Accessibility auto-send)
+  if (bridge?.sendWhatsApp) {
+    const sent = Boolean(bridge.sendWhatsApp(verification.resolvedPhone, text));
+    if (!sent) {
+      throw new Error('WhatsApp App ntiyabashije gufunguka cyangwa nimero ntibaho muri WhatsApp.');
+    }
+    appendAgentOutbox({
+      channel: 'whatsapp',
+      recipient: verification.resolvedName
+        ? `${verification.resolvedName} (+${verification.resolvedPhone})`
+        : `+${verification.resolvedPhone}`,
+      incoming: chat.message,
+      message: text,
+      status: 'sent',
+    });
+    playWhatsAppSound('send');
+    markWhatsAppChatAsReplied(chat.id, text);
+    return {
+      success: true,
+      method: 'native_app',
+      recipientName: recipientLabel,
+      recipientPhone: verification.resolvedPhone,
+    };
+  }
+
+  // 3. Direct WhatsApp App URI scheme (never opens WhatsApp Web / wa.me)
+  const waAppUrl = `whatsapp://send?phone=${verification.resolvedPhone}&text=${encodeURIComponent(text)}`;
+  if (typeof document !== 'undefined') {
+    const link = document.createElement('a');
+    link.href = waAppUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   appendAgentOutbox({
     channel: 'whatsapp',
-    recipient: chat.sender || matchedPhone || 'WhatsApp Chat',
+    recipient: verification.resolvedName
+      ? `${verification.resolvedName} (+${verification.resolvedPhone})`
+      : `+${verification.resolvedPhone}`,
     incoming: chat.message,
     message: text,
     status: 'sent',
   });
   playWhatsAppSound('send');
   markWhatsAppChatAsReplied(chat.id, text);
-  return { success: true, method: 'web_link' };
+  return {
+    success: true,
+    method: 'whatsapp_app',
+    recipientName: recipientLabel,
+    recipientPhone: verification.resolvedPhone,
+  };
 }
 
 function markWhatsAppChatAsReplied(id: string, replyText: string): void {

@@ -1126,10 +1126,11 @@ export default function App() {
 
   const executeResolvedContactAction = (messageId: string, action: DeviceAction, name: string, phone: string) => {
     const cleanPhone = action.name === 'open_whatsapp' ? formatWhatsAppPhoneNumber(phone) : sanitizePhoneNumber(phone);
-    if (!isLikelyPhoneNumber(cleanPhone)) {
+    if (!isLikelyPhoneNumber(cleanPhone) || (action.name === 'open_whatsapp' && (cleanPhone.length < 9 || cleanPhone.length > 15))) {
       showToastMessage('Shyiramo nimero ya telefoni yemewe.');
       return;
     }
+    const waAppUri = `whatsapp://send?phone=${cleanPhone}&text=${encodeURIComponent(action.messageText || '')}`;
     const updatedAction: DeviceAction = {
       ...action,
       phoneNumber: cleanPhone,
@@ -1144,12 +1145,19 @@ export default function App() {
         ? `tel:${cleanPhone}`
         : action.name === 'send_sms'
           ? `sms:${cleanPhone}?body=${encodeURIComponent(action.messageText || '')}`
-          : `https://wa.me/${formatWhatsAppPhoneNumber(cleanPhone)}?text=${encodeURIComponent(action.messageText || '')}`,
-      fallbackUrl: action.name === 'make_call' ? `tel:${cleanPhone}` : action.fallbackUrl,
+          : waAppUri,
+      fallbackUrl: action.name === 'make_call'
+        ? `tel:${cleanPhone}`
+        : action.name === 'open_whatsapp'
+          ? waAppUri
+          : action.fallbackUrl,
       contactMatches: undefined,
       status: 'executed',
     };
-    runDeviceAction(updatedAction, true);
+    const ok = runDeviceAction(updatedAction, true);
+    if (!ok && action.name === 'open_whatsapp') {
+      showToastMessage('⚠️ WhatsApp App ntabwo yabashije kohereza kuri iyo nimero. Reba ko WhatsApp irimo kandi nimero yemewe.');
+    }
     setMessages(prev => prev.map(m => m.id === messageId ? { ...m, action: updatedAction } : m));
   };
 
@@ -2427,7 +2435,7 @@ export default function App() {
           <div className="flex items-center gap-3">
             <Menu className="w-6 h-6 cursor-pointer" onClick={() => setDrawerOpen(true)} />
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#075E54] to-[#128C7E] flex items-center justify-center font-bold text-lg text-white shadow-md">
-              K
+              I
             </div>
             <div>
               <h1 className="font-semibold text-base sm:text-lg flex items-center">
@@ -2718,7 +2726,7 @@ export default function App() {
               <div className="flex items-center justify-between pb-3 mb-2 border-b border-gray-200 dark:border-[#282828]">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#075E54] to-[#128C7E] flex items-center justify-center font-bold text-sm text-white shadow-sm">
-                    K
+                    I
                   </div>
                   <div>
                     <span className="font-bold text-sm text-gray-800 dark:text-[#e9edef] block leading-tight">Izi AI</span>
@@ -3484,6 +3492,7 @@ export default function App() {
                               type="button"
                               onClick={() => {
                                 if (message.action!.name === 'make_call'
+                                  || message.action!.name === 'open_whatsapp'
                                   || (message.action!.name === 'open_youtube' && (window as any).KevinAgentBridge?.playYouTube)) {
                                   const updated = { ...message.action! };
                                   runDeviceAction(updated, true);
@@ -3504,7 +3513,9 @@ export default function App() {
                                 ? 'YouTube App'
                                 : message.action.name === 'make_call'
                                   ? 'Hamagara Nanone'
-                                  : 'Fungura'}
+                                  : message.action.name === 'open_whatsapp'
+                                    ? 'WhatsApp App'
+                                    : 'Fungura'}
                             </button>
                           ) : null}
                         </div>
@@ -4108,9 +4119,17 @@ export default function App() {
               <div className="space-y-2.5">
                 {/* WhatsApp */}
                 <a
-                  href="https://wa.me/250791266464?text=Muraho%20Kevin%2C%20ndashaka%20ubufasha%20kuri%20Izi%20AI"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href="whatsapp://send?phone=250791266464&text=Muraho%20Kevin%2C%20ndashaka%20ubufasha%20kuri%20Izi%20AI"
+                  onClick={(e) => {
+                    const bridge = (window as any).KevinAgentBridge;
+                    if (bridge?.sendWhatsApp) {
+                      e.preventDefault();
+                      const sent = bridge.sendWhatsApp('250791266464', 'Muraho Kevin, ndashaka ubufasha kuri Izi AI');
+                      if (!sent) {
+                        showToastMessage('⚠️ Shyiramo WhatsApp App muri telefone yawe.');
+                      }
+                    }
+                  }}
                   className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#111b21] border border-gray-200 dark:border-[#2f3b43] hover:border-[#25D366] transition-all group cursor-pointer"
                 >
                   <div className="flex items-center gap-3">

@@ -653,6 +653,42 @@ public class KevinNotificationListenerService extends NotificationListenerServic
         }
     }
 
+    public static boolean replyToNotificationByKey(Context context, String notificationKey, String replyText) {
+        KevinNotificationListenerService svc = instance;
+        if (svc == null || TextUtils.isEmpty(notificationKey) || TextUtils.isEmpty(replyText)) {
+            return false;
+        }
+        try {
+            StatusBarNotification[] active = svc.getActiveNotifications();
+            if (active == null || active.length == 0) {
+                return false;
+            }
+            for (StatusBarNotification sbn : active) {
+                if (sbn == null || !notificationKey.equals(sbn.getKey())) continue;
+                String pkg = sbn.getPackageName();
+                if (!"com.whatsapp".equals(pkg) && !"com.whatsapp.w4b".equals(pkg)) continue;
+                Notification n = sbn.getNotification();
+                if (n == null) continue;
+                Notification.Action replyAction = svc.findReplyAction(n);
+                if (replyAction == null) return false;
+                String cleanReply = replyText.trim();
+                boolean sent = svc.sendNotificationReply(replyAction, cleanReply);
+                if (sent) {
+                    Bundle extras = n.extras;
+                    CharSequence titleSeq = extras != null ? extras.getCharSequence(Notification.EXTRA_TITLE) : null;
+                    String sender = titleSeq != null ? titleSeq.toString().trim() : "WhatsApp";
+                    KevinAgentPrefs.recordWhatsAppChatReplied(
+                            context != null ? context : svc,
+                            sender,
+                            cleanReply
+                    );
+                }
+                return sent;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
     public static MediaController getLarkMediaController(Context context) {
         if (context == null) return null;
         try {
