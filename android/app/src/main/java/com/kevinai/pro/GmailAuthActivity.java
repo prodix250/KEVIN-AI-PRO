@@ -65,6 +65,8 @@ public class GmailAuthActivity extends AppCompatActivity {
 
     private WebView webView;
     private ProgressBar progressBar;
+    private TextView helperBanner;
+    private String initialAuthUrl;
     private String redirectPrefix;
     private String expectedState;
     private boolean finishedWithResult = false;
@@ -75,6 +77,7 @@ public class GmailAuthActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         String authUrl = getIntent().getStringExtra(EXTRA_AUTH_URL);
+        initialAuthUrl = authUrl;
         redirectPrefix = getIntent().getStringExtra(EXTRA_REDIRECT_PREFIX);
         if (TextUtils.isEmpty(redirectPrefix)) {
             redirectPrefix = DEFAULT_REDIRECT_PREFIX;
@@ -119,6 +122,18 @@ public class GmailAuthActivity extends AppCompatActivity {
         );
         header.addView(titleView, titleLp);
 
+        Button switchBtn = new Button(this);
+        switchBtn.setText("Hindura konti");
+        switchBtn.setAllCaps(false);
+        switchBtn.setTextColor(Color.parseColor("#D1FAE5"));
+        switchBtn.setBackgroundColor(Color.TRANSPARENT);
+        switchBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        switchBtn.setMinWidth(0);
+        switchBtn.setMinimumWidth(0);
+        switchBtn.setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(6));
+        switchBtn.setOnClickListener(v -> resetCookiesAndReload());
+        header.addView(switchBtn);
+
         Button closeBtn = new Button(this);
         closeBtn.setText("Funga");
         closeBtn.setAllCaps(false);
@@ -132,6 +147,21 @@ public class GmailAuthActivity extends AppCompatActivity {
         header.addView(closeBtn);
 
         root.addView(header, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        helperBanner = new TextView(this);
+        helperBanner.setVisibility(View.GONE);
+        helperBanner.setBackgroundColor(Color.parseColor("#FEF3C7"));
+        helperBanner.setTextColor(Color.parseColor("#92400E"));
+        helperBanner.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        helperBanner.setPadding(dpToPx(14), dpToPx(10), dpToPx(14), dpToPx(10));
+        helperBanner.setText(
+                "Iyi konti ntiremererwa kuko porogaramu iri muri Testing muri Google Cloud Console. "
+                + "Ongeramo iyi Gmail muri 'Test users' (cyangwa wemeze App Verification), cyangwa ukande 'Hindura konti' winjire na konti yemewe."
+        );
+        root.addView(helperBanner, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         ));
@@ -154,6 +184,25 @@ public class GmailAuthActivity extends AppCompatActivity {
 
         setContentView(root);
         webView.loadUrl(authUrl);
+    }
+
+    private void resetCookiesAndReload() {
+        if (helperBanner != null) {
+            helperBanner.setVisibility(View.GONE);
+        }
+        try {
+            CookieManager cm = CookieManager.getInstance();
+            cm.removeAllCookies(value -> {
+                if (webView != null && !TextUtils.isEmpty(initialAuthUrl)) {
+                    webView.loadUrl(initialAuthUrl);
+                }
+            });
+            cm.flush();
+        } catch (Exception e) {
+            if (webView != null && !TextUtils.isEmpty(initialAuthUrl)) {
+                webView.loadUrl(initialAuthUrl);
+            }
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -249,6 +298,12 @@ public class GmailAuthActivity extends AppCompatActivity {
                 if (progressBar != null) {
                     progressBar.setVisibility(View.GONE);
                 }
+                if (helperBanner != null) {
+                    boolean isOauthErrorPage = !TextUtils.isEmpty(url)
+                            && (url.contains("accounts.google.com/signin/oauth/error")
+                            || url.contains("access_denied"));
+                    helperBanner.setVisibility(isOauthErrorPage ? View.VISIBLE : View.GONE);
+                }
                 handlePotentialCallbackUrl(url);
                 super.onPageFinished(view, url);
             }
@@ -329,7 +384,10 @@ public class GmailAuthActivity extends AppCompatActivity {
         if (finishedWithResult || TextUtils.isEmpty(url)) {
             return false;
         }
-        if (!url.startsWith(redirectPrefix)) {
+        boolean isMatch = url.startsWith(redirectPrefix)
+                || url.contains("/__/auth/handler")
+                || url.contains("/__/auth/callback");
+        if (!isMatch) {
             return false;
         }
 
