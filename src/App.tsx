@@ -13,6 +13,7 @@ import { generatePdfBlobUrl, generateDocxBlobUrl, extractTextFromFile, generateD
 import MarkdownRenderer from './components/MarkdownRenderer';
 import AssistantOverlay from './components/AssistantOverlay';
 import EmailReplyModal from './components/EmailReplyModal';
+import { signInWithGoogleForGmail } from './services/gmailService';
 import { downloadAIImage, downloadDocumentFile } from './utils/download';
 import { getNewsCustomInstructions, initDailyNewsDelivery, NEWS_PENDING_TOAST_EVENT, saveNewsCustomInstructions } from './services/dailyNewsService';
 import type { DailyNewsBriefing } from './services/dailyNewsConfig';
@@ -513,7 +514,8 @@ export default function App() {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [userName, setUserName] = useState<string>(() => localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || '');
   const [tempUserName, setTempUserName] = useState<string>(() => localStorage.getItem('kevin_user_name') || localStorage.getItem('kevin_ai_user_name') || '');
-  const [showProfileModal, setShowProfileModal] = useState<boolean>(() => !localStorage.getItem('kevin_user_name') && !localStorage.getItem('kevin_ai_user_name'));
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(true);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('register');
 
   const handleSaveUserName = () => {
     const trimmed = tempUserName.trim();
@@ -526,6 +528,22 @@ export default function App() {
     setUserName(trimmed);
     showToastMessage(`✨ Muraho neza ${trimmed}! Izina ryawe ryabitswe.`);
     setShowProfileModal(false);
+  };
+
+  const handleGoogleAuthLogin = async () => {
+    try {
+      const result = await signInWithGoogleForGmail();
+      const nameToUse = result.user.displayName || result.user.email || 'Umukoresha';
+      localStorage.setItem('kevin_user_name', nameToUse);
+      localStorage.setItem('kevin_ai_user_name', nameToUse);
+      setUserName(nameToUse);
+      setShowProfileModal(false);
+      showToastMessage(`✨ Ikaze kuri Izi AI, ${nameToUse}!`);
+    } catch (err: any) {
+      if (err?.code !== 'auth/popup-closed-by-user') {
+        showToastMessage(`⚠️ Kwinjira na Google byanze: ${err?.message || 'Unknown error'}`);
+      }
+    }
   };
 
   const [customInstructions, setCustomInstructions] = useState<string>(() => localStorage.getItem('kevin_custom_instructions') || localStorage.getItem('kevin_ai_custom_instructions') || '');
@@ -2687,6 +2705,25 @@ export default function App() {
                 </div>
 
                 <div 
+                  onClick={() => {
+                    localStorage.removeItem('kevin_user_name');
+                    localStorage.removeItem('kevin_ai_user_name');
+                    setUserName('');
+                    setTempUserName('');
+                    setDrawerOpen(false);
+                    setShowProfileModal(true);
+                    showToastMessage("✨ Wasohotse muri konti (Logged out successfully).");
+                  }}
+                  className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <User size={15} />
+                    <span>Logout ({userName || 'Account'})</span>
+                  </div>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400">Exit</span>
+                </div>
+
+                <div 
                   onClick={() => { setShowAbout(true); setDrawerOpen(false); }}
                   className="flex items-center justify-between p-2 rounded-xl text-xs font-medium text-gray-700 dark:text-[#8696a0] hover:text-[#075E54] dark:hover:text-[#00FF88] hover:bg-gray-100 dark:hover:bg-[#222222] cursor-pointer transition-colors"
                 >
@@ -3655,58 +3692,119 @@ export default function App() {
         </div>
       )}
 
-      {/* User Profile Modal */}
+      {/* Login or Create Account / User Profile Modal */}
       <AnimatePresence>
         {showProfileModal && (
           <div 
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4" 
+            className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 select-none" 
             onClick={() => {
               if (userName.trim()) {
                 setShowProfileModal(false);
               } else {
-                showToastMessage("⚠️ Nyamuneka shyiramo izina ryawe kugira ngo ukomeze!");
+                showToastMessage("⚠️ Nyamuneka kora Login cyangwa shyiramo izina ryawe kugira ngo ukomeze!");
               }
             }}
           >
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }} 
+              initial={{ scale: 0.92, opacity: 0 }} 
               animate={{ scale: 1, opacity: 1 }} 
-              exit={{ scale: 0.9, opacity: 0 }} 
-              className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-2xl p-6 w-full max-w-md" 
+              exit={{ scale: 0.92, opacity: 0 }} 
+              className="bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-3xl p-6 sm:p-8 w-full max-w-md relative overflow-hidden" 
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold">
-                    <User size={20} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base text-gray-900 dark:text-white">Witwa nde? (Your Name)</h3>
-                    <p className="text-xs text-gray-500 dark:text-[#8696a0]">Bwira Izi AI izina ryawe kugira ngo akwiture neza</p>
-                  </div>
-                </div>
-                {userName.trim() ? (
-                  <button 
-                    onClick={() => setShowProfileModal(false)}
-                    className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                  >
-                    <X size={18} />
-                  </button>
-                ) : null}
+              {/* Header Branding */}
+              <div className="text-center mb-6">
+                <motion.div
+                  animate={{ scale: [1, 1.08, 1], rotate: [0, 5, -5, 0] }}
+                  transition={{ repeat: Infinity, duration: 3.5, ease: 'easeInOut' }}
+                  className="w-20 h-20 mx-auto mb-3 rounded-2xl bg-gradient-to-tr from-[#075E54] to-[#00a884] text-white flex items-center justify-center shadow-xl overflow-hidden relative border-2 border-emerald-400/50"
+                >
+                  <img 
+                    src="/assets/aistudio/splash_8c62f0e9.png" 
+                    alt="Izi AI Logo" 
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute top-1 right-1 w-3 h-3 rounded-full bg-[#00FF88] animate-ping"></div>
+                </motion.div>
+                <h3 className="font-extrabold text-xl sm:text-2xl text-gray-900 dark:text-white">
+                  {authMode === 'register' ? 'Create Your Account' : 'Sign in to Izi AI'}
+                </h3>
+                <p className="text-xs sm:text-sm text-gray-500 dark:text-[#8696a0] mt-1">
+                  Your intelligent Rwandan AI assistant • Fast & powerful
+                </p>
               </div>
 
+              {/* Tabs */}
+              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-gray-100 dark:bg-[#111b21] mb-6">
+                <button
+                  type="button"
+                  onClick={() => setAuthMode('register')}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    authMode === 'register'
+                      ? 'bg-white dark:bg-[#202c33] text-[#075E54] dark:text-[#00FF88] shadow-sm'
+                      : 'text-gray-500 dark:text-[#8696a0] hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  Create Account
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuthMode('login')}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    authMode === 'login'
+                      ? 'bg-white dark:bg-[#202c33] text-[#075E54] dark:text-[#00FF88] shadow-sm'
+                      : 'text-gray-500 dark:text-[#8696a0] hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  Sign In
+                </button>
+              </div>
+
+              {/* Google Sign-In Button */}
+              <div className="mb-5">
+                <button
+                  type="button"
+                  onClick={handleGoogleAuthLogin}
+                  className="gsi-material-button w-full shadow-sm justify-center"
+                >
+                  <div className="gsi-material-button-state"></div>
+                  <div className="gsi-material-button-content-wrapper">
+                    <div className="gsi-material-button-icon">
+                      <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style={{ display: 'block' }}>
+                        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                        <path fill="none" d="M0 0h48v48H0z" />
+                      </svg>
+                    </div>
+                    <span className="gsi-material-button-contents">
+                      Sign in with Google
+                    </span>
+                    <span style={{ display: 'none' }}>Sign in with Google</span>
+                  </div>
+                </button>
+              </div>
+
+              <div className="flex items-center my-4 text-gray-400 dark:text-[#8696a0]">
+                <div className="flex-1 border-t border-gray-200 dark:border-[#313d45]"></div>
+                <span className="px-3 text-xs uppercase tracking-wider font-semibold">Or with name</span>
+                <div className="flex-1 border-t border-gray-200 dark:border-[#313d45]"></div>
+              </div>
+
+              {/* Form Input */}
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                    Izina ryawe (Name / Nickname):
+                    Your Name or Nickname:
                   </label>
                   <input 
                     type="text"
                     value={tempUserName}
                     onChange={(e) => setTempUserName(e.target.value)}
-                    placeholder="Urugero: Kevin, Alice, Jean..."
+                    placeholder="e.g. Kevin, Alice, Jean..."
                     required
-                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2.5 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-sm transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                    className="w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-3 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-sm transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500 shadow-inner"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         handleSaveUserName();
@@ -3716,21 +3814,34 @@ export default function App() {
                   />
                 </div>
 
-                <div className="pt-2 border-t border-gray-100 dark:border-[#282828]">
+                <div className="pt-2">
                   <button 
+                    type="button"
                     onClick={handleSaveUserName}
                     disabled={!tempUserName.trim()}
-                    className={`w-full py-2.5 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 ${
+                    className={`w-full py-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer ${
                       tempUserName.trim()
-                        ? 'bg-[#00a884] hover:bg-[#075E54] text-white cursor-pointer hover:scale-[1.01]'
+                        ? 'bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] dark:hover:bg-[#008f6f] text-white hover:scale-[1.01]'
                         : 'bg-gray-200 dark:bg-[#2a3942] text-gray-400 dark:text-gray-500 cursor-not-allowed'
                     }`}
                   >
-                    <Check size={14} />
-                    <span>Bika Izina</span>
+                    <Check size={16} />
+                    <span>{authMode === 'register' ? 'Create Account & Start' : 'Sign In'}</span>
                   </button>
                 </div>
               </div>
+
+              {userName.trim() && (
+                <div className="mt-4 text-center">
+                  <button 
+                    type="button"
+                    onClick={() => setShowProfileModal(false)}
+                    className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 underline cursor-pointer"
+                  >
+                    Reka (Cancel)
+                  </button>
+                </div>
+              )}
             </motion.div>
           </div>
         )}

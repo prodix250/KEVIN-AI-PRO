@@ -23903,7 +23903,7 @@ registerPlugin("SystemBars", {
   web: () => new SystemBarsPluginWeb()
 });
 const App$1 = registerPlugin("App", {
-  web: () => __vitePreload(() => import("./web-3ZwbWDlX.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
+  web: () => __vitePreload(() => import("./web-SQZiWFY_.js"), true ? [] : void 0).then((m2) => new m2.AppWeb())
 });
 var CameraSource;
 (function(CameraSource2) {
@@ -38687,7 +38687,7 @@ function le() {
   var h2 = l2.getContext("2d");
   h2.fillStyle = "#fff", h2.fillRect(0, 0, l2.width, l2.height);
   var f2 = { ignoreMouse: true, ignoreAnimation: true, ignoreDimensions: true }, d2 = this;
-  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-C8KsO8hD.js"), true ? [] : void 0)).catch(function(t3) {
+  return (i$1.canvg ? Promise.resolve(i$1.canvg) : __vitePreload(() => import("./index.es-BpJa9YD4.js"), true ? [] : void 0)).catch(function(t3) {
     return Promise.reject(new Error("Could not load canvg: " + t3));
   }).then(function(t3) {
     return t3.default ? t3.default : t3;
@@ -114241,7 +114241,7 @@ var Encoding;
   Encoding2["UTF16"] = "utf16";
 })(Encoding || (Encoding = {}));
 const Filesystem = registerPlugin("Filesystem", {
-  web: () => __vitePreload(() => import("./web-CHOteLkb.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
+  web: () => __vitePreload(() => import("./web-ZoEWjdob.js"), true ? [] : void 0).then((m2) => new m2.FilesystemWeb())
 });
 f();
 async function loadImageElement(src) {
@@ -115989,7 +115989,8 @@ function App() {
   const [emojiPickerOpen, setEmojiPickerOpen] = reactExports.useState(false);
   const [userName, setUserName] = reactExports.useState(() => localStorage.getItem("kevin_user_name") || localStorage.getItem("kevin_ai_user_name") || "");
   const [tempUserName, setTempUserName] = reactExports.useState(() => localStorage.getItem("kevin_user_name") || localStorage.getItem("kevin_ai_user_name") || "");
-  const [showProfileModal, setShowProfileModal] = reactExports.useState(() => !localStorage.getItem("kevin_user_name") && !localStorage.getItem("kevin_ai_user_name"));
+  const [showProfileModal, setShowProfileModal] = reactExports.useState(true);
+  const [authMode, setAuthMode] = reactExports.useState("register");
   const handleSaveUserName = () => {
     const trimmed = tempUserName.trim();
     if (!trimmed) {
@@ -116001,6 +116002,21 @@ function App() {
     setUserName(trimmed);
     showToastMessage(`✨ Muraho neza ${trimmed}! Izina ryawe ryabitswe.`);
     setShowProfileModal(false);
+  };
+  const handleGoogleAuthLogin = async () => {
+    try {
+      const result2 = await signInWithGoogleForGmail();
+      const nameToUse = result2.user.displayName || result2.user.email || "Umukoresha";
+      localStorage.setItem("kevin_user_name", nameToUse);
+      localStorage.setItem("kevin_ai_user_name", nameToUse);
+      setUserName(nameToUse);
+      setShowProfileModal(false);
+      showToastMessage(`✨ Ikaze kuri Izi AI, ${nameToUse}!`);
+    } catch (err) {
+      if ((err == null ? void 0 : err.code) !== "auth/popup-closed-by-user") {
+        showToastMessage(`⚠️ Kwinjira na Google byanze: ${(err == null ? void 0 : err.message) || "Unknown error"}`);
+      }
+    }
   };
   const [customInstructions, setCustomInstructions] = reactExports.useState(() => localStorage.getItem("kevin_custom_instructions") || localStorage.getItem("kevin_ai_custom_instructions") || "");
   const [tempCustomInstructions, setTempCustomInstructions] = reactExports.useState(() => localStorage.getItem("kevin_custom_instructions") || localStorage.getItem("kevin_ai_custom_instructions") || "");
@@ -117943,6 +117959,32 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
                   "div",
                   {
                     onClick: () => {
+                      localStorage.removeItem("kevin_user_name");
+                      localStorage.removeItem("kevin_ai_user_name");
+                      setUserName("");
+                      setTempUserName("");
+                      setDrawerOpen(false);
+                      setShowProfileModal(true);
+                      showToastMessage("✨ Wasohotse muri konti (Logged out successfully).");
+                    },
+                    className: "flex items-center justify-between p-2 rounded-xl text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer transition-colors",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(User, { size: 15 }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+                          "Logout (",
+                          userName || "Account",
+                          ")"
+                        ] })
+                      ] }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400", children: "Exit" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "div",
+                  {
+                    onClick: () => {
                       setShowAbout(true);
                       setDrawerOpen(false);
                     },
@@ -118878,52 +118920,105 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
     /* @__PURE__ */ jsxRuntimeExports.jsx(AnimatePresence, { children: showProfileModal && /* @__PURE__ */ jsxRuntimeExports.jsx(
       "div",
       {
-        className: "fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4",
+        className: "fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 select-none",
         onClick: () => {
           if (userName.trim()) {
             setShowProfileModal(false);
           } else {
-            showToastMessage("⚠️ Nyamuneka shyiramo izina ryawe kugira ngo ukomeze!");
+            showToastMessage("⚠️ Nyamuneka kora Login cyangwa shyiramo izina ryawe kugira ngo ukomeze!");
           }
         },
         children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
           motion.div,
           {
-            initial: { scale: 0.9, opacity: 0 },
+            initial: { scale: 0.92, opacity: 0 },
             animate: { scale: 1, opacity: 1 },
-            exit: { scale: 0.9, opacity: 0 },
-            className: "bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-2xl p-6 w-full max-w-md",
+            exit: { scale: 0.92, opacity: 0 },
+            className: "bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#313d45] shadow-2xl rounded-3xl p-6 sm:p-8 w-full max-w-md relative overflow-hidden",
             onClick: (e) => e.stopPropagation(),
             children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between mb-4", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold", children: /* @__PURE__ */ jsxRuntimeExports.jsx(User, { size: 20 }) }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-bold text-base text-gray-900 dark:text-white", children: "Witwa nde? (Your Name)" }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 dark:text-[#8696a0]", children: "Bwira Izi AI izina ryawe kugira ngo akwiture neza" })
-                  ] })
-                ] }),
-                userName.trim() ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-center mb-6", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  motion.div,
+                  {
+                    animate: { scale: [1, 1.08, 1], rotate: [0, 5, -5, 0] },
+                    transition: { repeat: Infinity, duration: 3.5, ease: "easeInOut" },
+                    className: "w-20 h-20 mx-auto mb-3 rounded-2xl bg-gradient-to-tr from-[#075E54] to-[#00a884] text-white flex items-center justify-center shadow-xl overflow-hidden relative border-2 border-emerald-400/50",
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "img",
+                        {
+                          src: "/assets/aistudio/splash_8c62f0e9.png",
+                          alt: "Izi AI Logo",
+                          className: "w-full h-full object-cover"
+                        }
+                      ),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute top-1 right-1 w-3 h-3 rounded-full bg-[#00FF88] animate-ping" })
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-extrabold text-xl sm:text-2xl text-gray-900 dark:text-white", children: authMode === "register" ? "Create Your Account" : "Sign in to Izi AI" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs sm:text-sm text-gray-500 dark:text-[#8696a0] mt-1", children: "Your intelligent Rwandan AI assistant • Fast & powerful" })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-gray-100 dark:bg-[#111b21] mb-6", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "button",
                   {
-                    onClick: () => setShowProfileModal(false),
-                    className: "p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors",
-                    children: /* @__PURE__ */ jsxRuntimeExports.jsx(X$1, { size: 18 })
+                    type: "button",
+                    onClick: () => setAuthMode("register"),
+                    className: `py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${authMode === "register" ? "bg-white dark:bg-[#202c33] text-[#075E54] dark:text-[#00FF88] shadow-sm" : "text-gray-500 dark:text-[#8696a0] hover:text-gray-900 dark:hover:text-white"}`,
+                    children: "Create Account"
                   }
-                ) : null
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setAuthMode("login"),
+                    className: `py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${authMode === "login" ? "bg-white dark:bg-[#202c33] text-[#075E54] dark:text-[#00FF88] shadow-sm" : "text-gray-500 dark:text-[#8696a0] hover:text-gray-900 dark:hover:text-white"}`,
+                    children: "Sign In"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mb-5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "button",
+                {
+                  type: "button",
+                  onClick: handleGoogleAuthLogin,
+                  className: "gsi-material-button w-full shadow-sm justify-center",
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "gsi-material-button-state" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "gsi-material-button-content-wrapper", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "gsi-material-button-icon", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { version: "1.1", xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 48 48", style: { display: "block" }, children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#EA4335", d: "M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#4285F4", d: "M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#FBBC05", d: "M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "#34A853", d: "M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fill: "none", d: "M0 0h48v48H0z" })
+                      ] }) }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "gsi-material-button-contents", children: "Sign in with Google" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { display: "none" }, children: "Sign in with Google" })
+                    ] })
+                  ]
+                }
+              ) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center my-4 text-gray-400 dark:text-[#8696a0]", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 border-t border-gray-200 dark:border-[#313d45]" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 text-xs uppercase tracking-wider font-semibold", children: "Or with name" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 border-t border-gray-200 dark:border-[#313d45]" })
               ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5", children: "Izina ryawe (Name / Nickname):" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("label", { className: "block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5", children: "Your Name or Nickname:" }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx(
                     "input",
                     {
                       type: "text",
                       value: tempUserName,
                       onChange: (e) => setTempUserName(e.target.value),
-                      placeholder: "Urugero: Kevin, Alice, Jean...",
+                      placeholder: "e.g. Kevin, Alice, Jean...",
                       required: true,
-                      className: "w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-2.5 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-sm transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500",
+                      className: "w-full bg-gray-50 dark:bg-[#111b21] text-gray-900 dark:text-[#e9edef] px-3.5 py-3 rounded-xl border border-gray-300 dark:border-[#2f3b43] focus:border-[#00a884] focus:outline-none text-sm transition-all placeholder:text-gray-400 dark:placeholder:text-gray-500 shadow-inner",
                       onKeyDown: (e) => {
                         if (e.key === "Enter") {
                           handleSaveUserName();
@@ -118933,19 +119028,29 @@ ${messages2[targetIdx].text.slice(0, 600)}`;
                     }
                   )
                 ] }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pt-2 border-t border-gray-100 dark:border-[#282828]", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pt-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   "button",
                   {
+                    type: "button",
                     onClick: handleSaveUserName,
                     disabled: !tempUserName.trim(),
-                    className: `w-full py-2.5 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 ${tempUserName.trim() ? "bg-[#00a884] hover:bg-[#075E54] text-white cursor-pointer hover:scale-[1.01]" : "bg-gray-200 dark:bg-[#2a3942] text-gray-400 dark:text-gray-500 cursor-not-allowed"}`,
+                    className: `w-full py-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer ${tempUserName.trim() ? "bg-[#075E54] hover:bg-[#128C7E] dark:bg-[#00a884] dark:hover:bg-[#008f6f] text-white hover:scale-[1.01]" : "bg-gray-200 dark:bg-[#2a3942] text-gray-400 dark:text-gray-500 cursor-not-allowed"}`,
                     children: [
-                      /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { size: 14 }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Bika Izina" })
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { size: 16 }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: authMode === "register" ? "Create Account & Start" : "Sign In" })
                     ]
                   }
                 ) })
-              ] })
+              ] }),
+              userName.trim() && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-4 text-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => setShowProfileModal(false),
+                  className: "text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 underline cursor-pointer",
+                  children: "Reka (Cancel)"
+                }
+              ) })
             ]
           }
         )
