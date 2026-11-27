@@ -17,7 +17,7 @@ export interface FavoritesState {
 
 export interface FootballNotification {
   id: string;
-  type: 'goal' | 'penalty' | 'red_card' | 'kickoff' | 'fulltime';
+  type: 'goal' | 'penalty' | 'red_card' | 'kickoff' | 'fulltime' | 'halftime';
   title: string;
   message: string;
   timestamp: number;
@@ -229,6 +229,18 @@ export function checkFootballFavoriteNotifications(
             );
           }
         }
+      }
+
+      // Half Time check
+      const isHtNow = /half[ -]?time|\bht\b/i.test(match.statusDetail || '');
+      const wasHtPrev = /half[ -]?time|\bht\b/i.test(prev.clock || prev.statusState || '');
+      if (isHtNow && !wasHtPrev) {
+        fire(
+          'halftime',
+          `⏱️ Half Time (Igihe cy'ikiruhuko): ${match.homeTeam.name} ${homeScoreCurr} - ${awayScoreCurr} ${match.awayTeam.name}`,
+          `Igice cya mbere cy'umukino wa ${match.leagueName} cyarangiye.`,
+          `halftime:${match.id}`
+        );
       }
     }
 
